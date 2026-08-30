@@ -1,0 +1,37 @@
+# Custom
+!debug-screenshots/.gitkeep
+debug-screenshots/*.png
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+Icon
+
+# Xcode — user-specific
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Xcode — build output
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# XcodeGen: the Xcode project is generated from project.yml.
+# Run `xcodegen generate` after cloning. Do not commit the generated project.
+*.xcodeproj
+
+# Dependency managers (not currently used)
+Pods/
+Carthage/Build/

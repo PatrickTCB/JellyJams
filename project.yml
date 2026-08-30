@@ -1,0 +1,84 @@
+name: JellyJams
+options:
+  bundleIdPrefix: net.aseriesoftubes
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "15.0"
+    iOS: "18.0"
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+    INFOPLIST_KEY_CFBundleDisplayName: "Jelly Jams"
+    INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.music"
+    SWIFT_EMIT_LOC_STRINGS: YES
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  JellyfinAPI:
+    url: https://github.com/jellyfin/jellyfin-sdk-swift.git
+    exactVersion: 3.1.0
+
+targets:
+  JellyJams:
+    type: application
+    supportedDestinations: [macOS, iOS]
+    deploymentTarget:
+      macOS: "15.0"
+      iOS: "18.0"
+    sources:
+      - path: JellyJams
+    dependencies:
+      - package: JellyfinAPI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.aseriesoftubes.JellyJams
+        PRODUCT_NAME: JellyJams
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: JellyJams/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: iOS
+        "ASSETCATALOG_COMPILER_APPICON_NAME[sdk=macosx*]": macOS
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_APP_SANDBOX: YES
+        # Required by Apple's notary service for Developer ID distribution.
+        # No runtime exceptions are needed: no JIT, no dlopen of third-party
+        # code, no Apple Events, and audio is output-only.
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_PREVIEWS: YES
+        COMBINE_HIDPI_IMAGES: YES
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": JellyJams/JellyJams.macOS.entitlements
+
+  JellyJamsTests:
+    type: bundle.unit-test
+    supportedDestinations: [macOS]
+    deploymentTarget:
+      macOS: "15.0"
+    sources:
+      - path: JellyJamsTests
+    dependencies:
+      - target: JellyJams
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.aseriesoftubes.JellyJamsTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/JellyJams.app/Contents/MacOS/JellyJams"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  JellyJams:
+    build:
+      targets:
+        JellyJams: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - JellyJamsTests
