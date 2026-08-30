@@ -83,7 +83,9 @@ struct TrackListDetail: View {
         .toolbar { ToolbarItem { FavouriteButton(item: headerItem) } }
         .task(id: headerItem.id) { await reload() }
         .refreshable { await reload() }
+        #if os(iOS)
         .nowPlayingTabContentDock()
+        #endif
     }
 
     // MARK: - Header
