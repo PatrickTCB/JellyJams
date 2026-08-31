@@ -19,19 +19,8 @@
     {
       "layers" : [
         {
-          "hidden" : true,
-          "image-name" : "tape.png",
-          "name" : "tape",
-          "position" : {
-            "scale" : 0.7,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
-        },
-        {
-          "blend-mode" : "plus-darker",
+          "blend-mode" : "normal",
+          "fill" : "none",
           "glass-specializations" : [
             {
               "value" : true
@@ -44,6 +33,12 @@
           "hidden" : false,
           "image-name" : "tape-cartoon.png",
           "name" : "tape-cartoon",
+          "opacity-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : 0.9
+            }
+          ],
           "position" : {
             "scale" : 0.4,
             "translation-in-points" : [
