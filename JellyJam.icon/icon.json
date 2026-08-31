@@ -19,9 +19,34 @@
     {
       "layers" : [
         {
-          "hidden" : false,
-          "image-name" : "logo 2.png",
-          "name" : "logo 2",
+          "fill" : "automatic",
+          "glass" : false,
+          "image-name" : "jams.png",
+          "name" : "jams",
+          "position" : {
+            "scale" : 0.4,
+            "translation-in-points" : [
+              -7,
+              4.80078125
+            ]
+          }
+        },
+        {
+          "blend-mode" : "plus-darker",
+          "glass" : false,
+          "image-name" : "jelly.png",
+          "name" : "jelly",
+          "position" : {
+            "scale" : 0.7,
+            "translation-in-points" : [
+              24.5,
+              -34.63906250000002
+            ]
+          }
+        },
+        {
+          "image-name" : "tape.png",
+          "name" : "tape",
           "position" : {
             "scale" : 0.7,
             "translation-in-points" : [
