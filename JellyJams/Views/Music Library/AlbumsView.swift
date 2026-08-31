@@ -15,6 +15,6 @@ struct AlbumsView: View {
             .refreshToolbarItem { await model.reload() }
             .clearsInitialKeyboardFocus()
             .task(id: model.query) { await model.load(from: session.library) }
-            .refreshable { await model.reload() }
+            .refreshable { Task {await model.reload() }}
     }
 }

@@ -18,6 +18,6 @@ struct ArtistsView: View {
             }
             .refreshToolbarItem { await model.reload() }
             .task(id: model.query) { await model.load(from: session.library) }
-            .refreshable { await model.reload() }
+            .refreshable { Task {await model.reload() }}
     }
 }
