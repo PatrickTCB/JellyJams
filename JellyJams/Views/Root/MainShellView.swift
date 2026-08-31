@@ -111,10 +111,6 @@ struct MainShellView: View {
             SectionRootView(section: section)
                 .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
         }
-        #if os(iOS)
         content
-        #else
-        content
-        #endif
     }
 }
