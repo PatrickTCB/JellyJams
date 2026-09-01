@@ -36,8 +36,13 @@ struct NowPlayingBar: View {
                         playerPresentation.isShowingPlayer = true
                     } label: {
                         HStack(spacing: isInline ? 8 : 12) {
+                            #if os(macOS)
+                            ArtworkImage(url: session.library.artworkURL(for: item, size: 192))
+                                .frame(width: 64, height: 64)
+                            #else
                             ArtworkImage(url: session.library.artworkURL(for: item, size: 96))
-                                .frame(width: isInline ? 28 : 44, height: isInline ? 44 : 64)
+                                .frame(width: isInline ? 28 : 40, height: isInline ? 44 : 44)
+                            #endif
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
                                 if let artist = item.subtitleArtist, !isInline {
