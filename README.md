@@ -12,16 +12,18 @@ these places.
 If you want to use the app before then, you've gotta build it yourself and use xcode
 to get it on to your phone.
 
-All communication with Jellyfin is done using their official SDK [`jellyfin-sdk-swift`](https://github.com/jellyfin/jellyfin-sdk-swift)
+All communication with Jellyfin is done using their official SDK [`jellyfin-sdk-swift`](https://github.com/jellyfin/jellyfin-sdk-swift). 
 I pinned the version to 3.1.0, but might change that as I work with the SDK and
 better understand what the change process is like.
 
-**Status:** early but usable. The basic playback and navigation all work, however,
-playlist management, AirPlay controls, and other stuff still need to be added.
+**Status:** early but usable. The basic playback and navigation all work, however, 
+there is still lots to do. Below is a list of stuff that's not done, that I think 
+I will do but this is in no way a promise. I've got plans for features, but the 
+order in which I do them will depend on what's most fun for me to work on.
 
 **Not implemented yet:** offline downloads, transcoding (direct play only), lyrics,
-ReplayGain, gapless/crossfade, sleep timer, CarPlay, widgets, Quick Connect, and
-multiple simultaneous servers.
+ReplayGain, gapless/crossfade, sleep timer, CarPlay, widgets, Quick Connect, AirPlay 
+controls, and full playlist management.
 
 I expect to be on the App Store in a few weeks, there's no planned Test Flight beta or
 anything like that. 
