@@ -1,4 +1,4 @@
-# JellyJams
+# Jelly Jams
 
 ![Logo for Jelly Jams App. A casette tape that says Jelly Jams in a hand written stye](JellyJams/Resources/Assets.xcassets/macOS.appiconset/JellyJam-iOS-Default-128x128@2x.png)
 
