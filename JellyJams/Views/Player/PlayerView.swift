@@ -1,4 +1,6 @@
 import SwiftUI
+import MediaPlayer
+import AVKit
 
 /// The full-screen "Now Playing" view: large artwork, scrubber, transport, and
 /// shuffle/repeat controls, plus access to the queue.
@@ -131,6 +133,9 @@ struct PlayerView: View {
                 Image(systemName: "list.bullet")
             }
             .buttonStyle(.plain)
+            #if os(iOS)
+            AirPlayPicker()
+            #endif
         }
         .font(.title3)
     }
