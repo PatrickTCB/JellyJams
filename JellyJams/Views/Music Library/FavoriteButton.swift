@@ -19,7 +19,7 @@ struct FavouriteButton: View {
                 .foregroundStyle(isFavourite ? Color.red : Color.secondary)
                 .contentTransition(.symbolEffect(.replace))
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.borderless)
         .disabled(favourites.isBusy(item))
         .help(isFavourite ? "Remove from Favourites" : "Add to Favourites")
         .accessibilityLabel(isFavourite ? "Remove from Favourites" : "Add to Favourites")

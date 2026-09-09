@@ -87,7 +87,10 @@ struct TrackListDetail: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar { ToolbarItem { FavouriteButton(item: headerItem) } }
+        .toolbar {
+            ToolbarItem { FavouriteButton(item: headerItem) }
+            ToolbarItem { DownloadButton(item: headerItem) }
+        }
         .task(id: headerItem.id) { await reload() }
         .refreshable { await reload() }
         #if os(iOS)
