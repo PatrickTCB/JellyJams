@@ -11,31 +11,45 @@ struct DownloadedCollectionDetail: View {
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var player: PlayerController
     let collection: BaseItemDto
-
-    private var tracks: [BaseItemDto] {
-        downloads.tracks(forItemId: collection.id ?? "")
-    }
-
+    
     var body: some View {
-        List {
-            Section {
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                    TrackRow(track: track) {
-                        player.play(tracks, startAt: index)
+        if collection.type == .musicAlbum {
+            TrackListDetail(
+                headerItem: collection,
+                subtitle: collection.subtitleArtist,
+                showsGenres: false,
+                showsSimilarAlbums: false
+            )
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+        } else if collection.type == .playlist {
+            TrackListDetail(headerItem: collection, showArtworkInRows: true)
+        } else {
+            var tracks: [BaseItemDto] {
+                downloads.tracks(forItemId: collection.id ?? "")
+            }
+            
+            List {
+                Section {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        TrackRow(track: track) {
+                            player.play(tracks, startAt: index)
+                        }
                     }
                 }
             }
-        }
-        .listStyle(.plain)
-        .overlay {
-            if tracks.isEmpty {
-                ContentUnavailableView("No songs", systemImage: "music.note")
+            .listStyle(.plain)
+            .overlay {
+                if tracks.isEmpty {
+                    ContentUnavailableView("No songs", systemImage: "music.note")
+                }
             }
+            .navigationTitle(collection.displayName)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
         }
-        .navigationTitle(collection.displayName)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
     }
 }
 
