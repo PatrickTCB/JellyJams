@@ -39,6 +39,7 @@ final class PlayerController: ObservableObject {
 
     private let player = AVPlayer()
     private var client: JellyfinService?
+    private weak var downloads: DownloadStore?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var originalQueue: [QueueEntry]?
@@ -102,6 +103,10 @@ final class PlayerController: ObservableObject {
 
     func configure(client: JellyfinService?) {
         self.client = client
+    }
+
+    func configure(downloads: DownloadStore?) {
+        self.downloads = downloads
     }
 
     /// Tears down the observers that keep the `AVPlayer` (and this controller)
@@ -366,11 +371,13 @@ final class PlayerController: ObservableObject {
         let nextPlaySessionId = UUID().uuidString
         let streamURL: URL
         do {
-            streamURL = try client.streamURL(
-                itemId: item.id,
-                mediaSourceId: item.mediaSourceID,
-                playSessionId: nextPlaySessionId
-            )
+            // A downloaded copy wins: same bytes as streaming, no network.
+            streamURL = try downloads?.localURL(forItemId: item.id ?? "")
+                ?? client.streamURL(
+                    itemId: item.id,
+                    mediaSourceId: item.mediaSourceID,
+                    playSessionId: nextPlaySessionId
+                )
         } catch {
             playbackLogger.error("Could not create audio stream URL: \(error.localizedDescription, privacy: .public)")
             if reportingPreviousItem {

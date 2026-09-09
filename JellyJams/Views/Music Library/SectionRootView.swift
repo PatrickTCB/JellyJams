@@ -16,6 +16,8 @@ struct SectionRootView: View {
             SongsView(model: libraryCache.items(for: .songs))
         case .playlists:
             PlaylistsView(model: libraryCache.items(for: .playlists))
+        case .downloads:
+            DownloadsView()
         case .favorites:
             FavouritesView(
                 songs: libraryCache.items(for: .favouriteSongs),

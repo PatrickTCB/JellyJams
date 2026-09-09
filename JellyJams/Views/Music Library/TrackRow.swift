@@ -11,9 +11,11 @@ struct TrackRow: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var favourites: FavouriteStore
+    @EnvironmentObject private var downloads: DownloadStore
 
     private var isCurrent: Bool { player.currentItem?.id == track.id }
     private var isFavourite: Bool { favourites.isFavourite(track) }
+    private var isDownloaded: Bool { downloads.isDownloaded(track) }
 
     var body: some View {
         Button(action: onPlay) {
@@ -35,6 +37,14 @@ struct TrackRow: View {
                     Image(systemName: "heart.fill")
                         .font(.caption)
                         .foregroundStyle(.red)
+                }
+                if downloads.isBusy(track) {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if isDownloaded {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Text(Format.duration(track.runtimeSeconds))
                     .font(.callout.monospacedDigit())
@@ -88,5 +98,19 @@ struct TrackRow: View {
                   systemImage: isFavourite ? "heart.slash" : "heart")
         }
         .disabled(favourites.isBusy(track))
+        Divider()
+        Button {
+            if isDownloaded {
+                downloads.remove(track)
+            } else {
+                downloads.download(track)
+            }
+        } label: {
+            Label(
+                isDownloaded ? "Remove Download" : "Download",
+                systemImage: isDownloaded ? "arrow.down.circle.fill" : "arrow.down.circle"
+            )
+        }
+        .disabled(downloads.isBusy(track))
     }
 }

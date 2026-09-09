@@ -77,6 +77,12 @@ struct MainShellView: View {
                     SectionRootView(section: .favorites)
                 }
             }
+
+            Tab("Downloads", systemImage: "arrow.down.circle") {
+                LibraryNavigationStack {
+                    DownloadsView()
+                }
+            }
         }
         .nowPlayingTabAccessory()
     }
@@ -95,6 +101,11 @@ struct MainShellView: View {
             }
             Tab(LibrarySection.favorites.title, systemImage: LibrarySection.favorites.systemImage, value: LibrarySection.favorites) {
                 sectionTab(.favorites)
+            }
+            Tab(LibrarySection.downloads.title, systemImage: LibrarySection.downloads.systemImage, value: LibrarySection.downloads) {
+                LibraryNavigationStack {
+                    DownloadsView()
+                }
             }
             Tab(LibrarySection.search.title, systemImage: LibrarySection.search.systemImage, value: LibrarySection.search) {
                 sectionTab(.search)

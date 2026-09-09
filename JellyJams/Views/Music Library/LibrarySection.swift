@@ -7,6 +7,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
     case artists
     case songs
     case playlists
+    case downloads
     case favorites
     case search
 
@@ -18,6 +19,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
         case .artists: return "Artists"
         case .songs: return "Songs"
         case .playlists: return "Playlists"
+        case .downloads: return "Downloads"
         case .favorites: return "Favourites"
         case .search: return "Search"
         }
@@ -29,11 +31,13 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
         case .artists: return "music.mic"
         case .songs: return "music.note"
         case .playlists: return "music.note.list"
+        case .downloads: return "arrow.down.circle"
         case .favorites: return "heart"
         case .search: return "magnifyingglass"
         }
     }
 
-    /// Sections shown in the sidebar's main library group.
+    /// Sections shown in the sidebar's main library group. Downloads and favourites gets
+    /// their own top-level tabs rather than living here.
     static let libraryGroup: [LibrarySection] = [.albums, .artists, .songs, .playlists]
 }

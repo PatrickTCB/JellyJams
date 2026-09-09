@@ -8,6 +8,7 @@ struct RootContainerView: View {
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var libraryCache: LibraryCache
     @EnvironmentObject private var favourites: FavouriteStore
+    @EnvironmentObject private var downloads: DownloadStore
 
     var body: some View {
         Group {
@@ -20,13 +21,16 @@ struct RootContainerView: View {
             }
         }
         .task(id: session.isSignedIn) {
+            player.configure(downloads: downloads)
             if session.isSignedIn {
                 player.configure(client: session.client)
+                downloads.configure(client: session.client)
                 playlistStore.configure(client: session.client)
                 favourites.configure(client: session.client)
             } else {
                 player.clearQueue()
                 player.configure(client: nil)
+                downloads.configure(client: nil)
                 playlistStore.configure(client: nil)
                 favourites.configure(client: nil)
                 libraryCache.clear()
@@ -71,6 +75,17 @@ struct RootContainerView: View {
             Button("OK", role: .cancel) { favourites.dismissError() }
         } message: {
             Text(favourites.errorMessage ?? "")
+        }
+        .alert(
+            "Download Problem",
+            isPresented: Binding(
+                get: { downloads.errorMessage != nil },
+                set: { if !$0 { downloads.dismissError() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { downloads.dismissError() }
+        } message: {
+            Text(downloads.errorMessage ?? "")
         }
     }
 }

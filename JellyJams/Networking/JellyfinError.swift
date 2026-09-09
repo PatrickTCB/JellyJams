@@ -8,6 +8,7 @@ enum JellyfinError: LocalizedError, Sendable, Equatable {
     case invalidMediaURL
     case emptyPlaylistName
     case emptyCollection(String)
+    case downloadFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum JellyfinError: LocalizedError, Sendable, Equatable {
             return "A playlist needs a name."
         case .emptyCollection(let name):
             return "“\(name)” doesn’t contain any songs."
+        case .downloadFailed(let reason):
+            return "The server couldn’t send the file (\(reason))."
         }
     }
 }

@@ -71,5 +71,23 @@ extension View {
         .navigationDestination(for: LibrarySection.self) {
             SectionRootView(section: $0).environmentObject(navigator)
         }
+        .navigationDestination(for: DownloadedCollectionRef.self) { ref in
+            DownloadedCollectionDestination(ref: ref)
+        }
+    }
+}
+
+/// Resolves a downloaded-collection push through the store, which is the
+/// source of truth for what was downloaded; the ref only identifies it.
+private struct DownloadedCollectionDestination: View {
+    let ref: DownloadedCollectionRef
+
+    @EnvironmentObject private var downloads: DownloadStore
+
+    var body: some View {
+        DownloadedCollectionDetail(
+            collection: downloads.collection(id: ref.id)
+                ?? BaseItemDto(id: ref.id, name: ref.name)
+        )
     }
 }

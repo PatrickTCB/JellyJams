@@ -12,6 +12,7 @@ struct ItemContextMenu: ViewModifier {
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
+    @EnvironmentObject private var downloads: DownloadStore
 
     @State private var isPresentingNewPlaylist = false
     @State private var newPlaylistName = ""
@@ -98,6 +99,20 @@ struct ItemContextMenu: ViewModifier {
             )
         }
         .disabled(favourites.isBusy(item))
+        Divider()
+        Button {
+            if downloads.isDownloaded(item) {
+                downloads.remove(item)
+            } else {
+                downloads.download(item)
+            }
+        } label: {
+            Label(
+                downloads.isDownloaded(item) ? "Remove Download" : "Download",
+                systemImage: downloads.isDownloaded(item) ? "arrow.down.circle.fill" : "arrow.down.circle"
+            )
+        }
+        .disabled(downloads.isBusy(item))
     }
 
     // MARK: - Actions

@@ -10,6 +10,7 @@ struct JellyJamsApp: App {
     @StateObject private var favourites = FavouriteStore()
     @StateObject private var settingsPresentation = SettingsPresentation()
     @StateObject private var preferences = PreferencesStore()
+    @StateObject private var downloads = DownloadStore()
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +23,7 @@ struct JellyJamsApp: App {
                 .environmentObject(favourites)
                 .environmentObject(settingsPresentation)
                 .environmentObject(preferences)
+                .environmentObject(downloads)
                 .onAppear { session.restore() }
                 .frame(minWidth: 400, minHeight: 300)
         }

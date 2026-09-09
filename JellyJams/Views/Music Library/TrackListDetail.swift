@@ -31,22 +31,14 @@ struct TrackListDetail: View {
                     .listRowSeparator(.hidden)
             }
 
-            if let errorMessage = loader.errorMessage, tracks.isEmpty {
-                LoadFailureView(message: errorMessage) { await reload() }
-                    .listRowSeparator(.hidden)
-            } else if loader.isPending, tracks.isEmpty {
-                HStack { Spacer(); ProgressView(); Spacer() }
-                    .listRowSeparator(.hidden)
-            } else {
-                Section {
-                    // Keyed by the track's own id rather than its position: a
-                    // reload that reorders or replaces the list must carry each
-                    // row's state (the current-track highlight, a swipe in
-                    // progress) with the track, not leave it on row 3.
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        TrackRow(track: track, showArtwork: showArtworkInRows) {
-                            player.play(tracks, startAt: index)
-                        }
+            Section {
+                // Keyed by the track's own id rather than its position: a
+                // reload that reorders or replaces the list must carry each
+                // row's state (the current-track highlight, a swipe in
+                // progress) with the track, not leave it on row 3.
+                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                    TrackRow(track: track, showArtwork: showArtworkInRows) {
+                        player.play(tracks, startAt: index)
                     }
                 }
             }
@@ -75,6 +67,21 @@ struct TrackListDetail: View {
             }
         }
         .listStyle(.plain)
+        .overlay {
+            // Empty, failed and loading states sit centred over the list
+            // rather than in a top row: a `ContentUnavailableView` in a List
+            // cell hugs the row's top-left instead of the window's centre.
+            if let errorMessage = loader.errorMessage, tracks.isEmpty {
+                LoadFailureView(message: errorMessage) { await reload() }
+            } else if loader.isPending, tracks.isEmpty {
+                ProgressView()
+            } else if loader.hasLoadedOnce, tracks.isEmpty {
+                ContentUnavailableView(
+                    "No songs",
+                    systemImage: headerItem.itemType == .playlist ? "music.note.list" : "square.stack"
+                )
+            }
+        }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
         .navigationTitle(headerItem.displayName)
         #if os(iOS)
