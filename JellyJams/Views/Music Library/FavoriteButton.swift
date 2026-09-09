@@ -16,7 +16,7 @@ struct FavouriteButton: View {
         Button { favourites.toggle(item) } label: {
             Image(systemName: isFavourite ? "heart.fill" : "heart")
                 .font(size)
-                .foregroundStyle(isFavourite ? Color.red : Color.secondary)
+                .foregroundStyle(isFavourite ? .accentColor : Color.secondary)
                 .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.borderless)
