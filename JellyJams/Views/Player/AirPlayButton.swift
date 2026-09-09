@@ -25,6 +25,7 @@ struct AirPlayPicker: View {
          func makeUIView(context: Context) -> AVRoutePickerView {
              let view = AVRoutePickerView(frame: .zero)
              view.prioritizesVideoDevices = false
+             view.tintColor = UIColor.gray
              return view
            }
 
