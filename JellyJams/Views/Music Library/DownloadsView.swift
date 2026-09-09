@@ -101,7 +101,7 @@ private struct DownloadedItemRow: View {
                 rowContent
             }
         }
-        .contextMenu {
+        .swipeActions(edge: .trailing) {
             Button(role: .destructive, action: { downloads.remove(item) }) {
                 Label("Remove Download", systemImage: "trash")
             }
@@ -123,9 +123,6 @@ private struct DownloadedItemRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(role: .destructive) { downloads.remove(item) } label: {
-                Image(systemName: "trash")
-            }
             .buttonStyle(.borderless)
         }
     }
