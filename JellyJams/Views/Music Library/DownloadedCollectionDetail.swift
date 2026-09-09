@@ -18,7 +18,8 @@ struct DownloadedCollectionDetail: View {
                 headerItem: collection,
                 subtitle: collection.subtitleArtist,
                 showsGenres: false,
-                showsSimilarAlbums: false
+                showsSimilarAlbums: false,
+                downloaded: true
             )
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

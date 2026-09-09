@@ -13,15 +13,30 @@ struct TrackListDetail: View {
     /// Opt-in for the same reason: Jellyfin has no "similar playlists" notion,
     /// only `/Albums/{id}/Similar`.
     var showsSimilarAlbums = false
-
+    var downloaded = false
+    
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var player: PlayerController
     @StateObject private var loader = LoadableModel<[BaseItemDto]>([])
     /// Measured here rather than inside the row so the suggestion row can
     /// render nothing when it has nothing, and still know how much to ask for.
     @State private var contentWidth: CGFloat = 0
-
-    private var tracks: [BaseItemDto] { loader.value }
+    
+    private var tracks: [BaseItemDto] {
+        let raw = downloaded
+            ? downloads.tracks(forItemId: headerItem.id ?? "")
+            : loader.value
+        // Download order is a global save counter, so a track first saved by
+        // another collection keeps that position here. Albums re-sort by disc
+        // then track (missing numbers sink to the end); playlists keep their
+        // user-assembled order.
+        guard headerItem.itemType == .musicAlbum else { return raw }
+        return raw.sorted {
+            ($0.parentIndexNumber ?? .max, $0.indexNumber ?? .max, $0.sortName ?? "")
+                < ($1.parentIndexNumber ?? .max, $1.indexNumber ?? .max, $1.sortName ?? "")
+        }
+    }
 
     var body: some View {
         List {
