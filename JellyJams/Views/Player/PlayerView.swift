@@ -117,6 +117,10 @@ struct PlayerView: View {
 
     private var secondaryControls: some View {
         HStack(spacing: 44) {
+            #if os(iOS)
+            AirPlayPicker()
+            #endif
+            
             Button { player.toggleShuffle() } label: {
                 Image(systemName: "shuffle")
                     .foregroundStyle(player.isShuffled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
@@ -133,9 +137,6 @@ struct PlayerView: View {
                 Image(systemName: "list.bullet")
             }
             .buttonStyle(.plain)
-            #if os(iOS)
-            AirPlayPicker()
-            #endif
         }
         .font(.title3)
     }
