@@ -14,6 +14,7 @@ struct MainShellView: View {
     @State private var selection: LibrarySection = .albums
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var playerPresentation: PlayerPresentation
+    @EnvironmentObject private var downloads: DownloadStore
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var settingsPresentation: SettingsPresentation
@@ -82,11 +83,14 @@ struct MainShellView: View {
                 }
             }
 
-            Tab("Downloads", systemImage: "arrow.down.circle", value: LibrarySection.downloads) {
+            Tab(value: LibrarySection.downloads) {
                 LibraryNavigationStack {
                     DownloadsView()
                 }
+            } label: {
+                downloadsLabel
             }
+            .badge(downloads.batches.isEmpty ? 0 : downloads.entries.count)
         }
         .nowPlayingTabAccessory()
     }
@@ -106,11 +110,14 @@ struct MainShellView: View {
             Tab(LibrarySection.favorites.title, systemImage: LibrarySection.favorites.systemImage, value: LibrarySection.favorites) {
                 sectionTab(.favorites)
             }
-            Tab(LibrarySection.downloads.title, systemImage: LibrarySection.downloads.systemImage, value: LibrarySection.downloads) {
+            Tab(value: LibrarySection.downloads) {
                 LibraryNavigationStack {
                     DownloadsView()
                 }
+            } label: {
+                downloadsLabel
             }
+            .badge(downloads.batches.isEmpty ? 0 : downloads.entries.count)
             Tab(LibrarySection.search.title, systemImage: LibrarySection.search.systemImage, value: LibrarySection.search) {
                 sectionTab(.search)
             }
@@ -127,5 +134,19 @@ struct MainShellView: View {
                 .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
         }
         content
+    }
+
+    /// The Downloads tab icon: a live progress ring while batches run, the
+    /// usual down-arrow otherwise.
+    private var downloadsLabel: some View {
+        Label {
+            Text(LibrarySection.downloads.title)
+        } icon: {
+            if downloads.batches.isEmpty == false {
+                Image(systemName: "arrow.down.circle.dotted")
+            } else {
+                Image(systemName: LibrarySection.downloads.systemImage)
+            }
+        }
     }
 }
