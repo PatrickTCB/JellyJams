@@ -12,6 +12,7 @@ import SwiftUI
 /// below the tab view on macOS.
 struct MainShellView: View {
     @State private var selection: LibrarySection = .albums
+    @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var playerPresentation: PlayerPresentation
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -21,6 +22,9 @@ struct MainShellView: View {
     var body: some View {
         settingsHost
             .sheet(isPresented: $playerPresentation.isShowingPlayer) { PlayerView() }
+            .onChange(of: session.serverReachable, initial: true) { _, reachable in
+                if !reachable { selection = .downloads }
+            }
     }
 
     /// iOS reaches settings through a sheet rather than a scene. It is hosted
@@ -58,27 +62,27 @@ struct MainShellView: View {
     /// view so that it floats above the tab bar instead of covering it. On
     /// iOS 26.1+ the tab bar hosts it as a bottom accessory instead.
     private var tabLayout: some View {
-        TabView {
-            Tab("Library", systemImage: "square.stack") {
+        TabView(selection: $selection) {
+            Tab("Library", systemImage: "square.stack", value: LibrarySection.albums) {
                 LibraryNavigationStack {
                     LibraryHubView()
                         .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
                 }
             }
 
-            Tab("Search", systemImage: "magnifyingglass") {
+            Tab("Search", systemImage: "magnifyingglass", value: LibrarySection.search) {
                 LibraryNavigationStack {
                     SectionRootView(section: .search)
                 }
             }
 
-            Tab("Favourites", systemImage: "heart") {
+            Tab("Favourites", systemImage: "heart", value: LibrarySection.favorites) {
                 LibraryNavigationStack {
                     SectionRootView(section: .favorites)
                 }
             }
 
-            Tab("Downloads", systemImage: "arrow.down.circle") {
+            Tab("Downloads", systemImage: "arrow.down.circle", value: LibrarySection.downloads) {
                 LibraryNavigationStack {
                     DownloadsView()
                 }

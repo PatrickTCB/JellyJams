@@ -88,6 +88,11 @@ final class JellyfinService: Sendable {
     func publicSystemInfo() async throws -> JellyfinAPI.PublicSystemInfo {
         try await apiClient.send(Paths.getPublicSystemInfo).value
     }
+    
+    func ping() async -> Bool {
+        do { _ = try await apiClient.send(Paths.getPingSystem).value; return true }
+        catch { return false }
+    }
 
     func authenticateByName(username: String, password: String) async throws -> JellyfinAPI.AuthenticationResult {
         try await apiClient.signIn(username: username, password: password)

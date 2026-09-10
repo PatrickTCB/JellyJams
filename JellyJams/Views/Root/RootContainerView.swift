@@ -27,6 +27,7 @@ struct RootContainerView: View {
                 downloads.configure(client: session.client)
                 playlistStore.configure(client: session.client)
                 favourites.configure(client: session.client)
+                await session.checkServerReachability()
             } else {
                 player.clearQueue()
                 player.configure(client: nil)

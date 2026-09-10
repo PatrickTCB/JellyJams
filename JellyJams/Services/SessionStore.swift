@@ -24,6 +24,7 @@ final class SessionStore: ObservableObject {
     @Published private(set) var currentUser: StoredUser?
     @Published private(set) var isRestoring = true
     @Published private(set) var errorMessage: String?
+    @Published private(set) var serverReachable: Bool = true
 
     let deviceInfo = DeviceInfo.current()
 
@@ -36,6 +37,14 @@ final class SessionStore: ObservableObject {
     /// ``JellyfinError/notAuthenticated`` instead of silently doing nothing.
     var library: LibraryRepository { LibraryRepository(client: client) }
 
+    // MARK: - Online status
+    /// checks to see if the configured Jellyfin server is even online
+    /// many users will only be able to access their jellyfin server when at home
+    /// on their LAN.
+    func checkServerReachability() async {
+        serverReachable = await client?.ping() ?? false
+    }
+    
     // MARK: - Restore
 
     func restore() {
