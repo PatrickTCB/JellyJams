@@ -9,15 +9,13 @@ final class PreferencesStoreTests: XCTestCase {
     private var suiteName = ""
     private var defaults = UserDefaults.standard
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
         suiteName = "PreferencesStoreTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         defaults.removePersistentDomain(forName: suiteName)
-        super.tearDown()
     }
 
     /// An absent key must mean on, not off. `UserDefaults.bool(forKey:)` returns

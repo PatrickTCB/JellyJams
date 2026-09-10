@@ -107,11 +107,21 @@ final class LibraryRepositoryTests: XCTestCase {
             .artistOverview(for: TestFixtures.item(id: "artist-id", type: .musicArtist))
 
         let requests = recorder.all
-        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.count, 3)
 
-        let albums = try XCTUnwrap(requests.first { $0.values(for: "includeItemTypes") == ["MusicAlbum"] })
+        let albumQueries = requests.filter { $0.values(for: "includeItemTypes") == ["MusicAlbum"] }
+        XCTAssertEqual(albumQueries.count, 2)
+
+        let albums = try XCTUnwrap(albumQueries.first { !$0.values(for: "albumArtistIds").isEmpty })
         XCTAssertEqual(albums.values(for: "albumArtistIds"), ["artist-id"])
         XCTAssertEqual(albums.value(for: "sortOrder"), "Descending")
+
+        let appearsOn = try XCTUnwrap(albumQueries.first { !$0.values(for: "contributingArtistIds").isEmpty })
+        XCTAssertEqual(appearsOn.values(for: "contributingArtistIds"), ["artist-id"])
+        XCTAssertTrue(
+            appearsOn.values(for: "albumArtistIds").isEmpty,
+            "Sending both filters would AND them, leaving only albums the artist led twice"
+        )
 
         let tracks = try XCTUnwrap(requests.first { $0.values(for: "includeItemTypes") == ["Audio"] })
         XCTAssertEqual(tracks.values(for: "artistIds"), ["artist-id"])
@@ -137,10 +147,20 @@ final class LibraryRepositoryTests: XCTestCase {
 
     func testArtistOverviewSeparatesAlbumsFromTracks() async throws {
         URLProtocolStub.handler = { request in
-            let isAlbums = RecordedRequest(request).values(for: "includeItemTypes") == ["MusicAlbum"]
-            let id = isAlbums ? "album-1" : "track-1"
-            let type = isAlbums ? "MusicAlbum" : "Audio"
-            let payload = Data(#"{"Items":[{"Id":"\#(id)","Name":"\#(id)","Type":"\#(type)"}],"TotalRecordCount":1,"StartIndex":0}"#.utf8)
+            let recorded = RecordedRequest(request)
+            let id: String
+            let type: String
+            if !recorded.values(for: "albumArtistIds").isEmpty {
+                id = "album-1"; type = "MusicAlbum"
+            } else if !recorded.values(for: "contributingArtistIds").isEmpty {
+                id = "appears-1"; type = "MusicAlbum"
+            } else {
+                id = "track-1"; type = "Audio"
+            }
+            // The track sample is capped, so its total must come from
+            // TotalRecordCount, not the returned item count.
+            let total = type == "Audio" ? 42 : 1
+            let payload = Data(#"{"Items":[{"Id":"\#(id)","Name":"\#(id)","Type":"\#(type)"}],"TotalRecordCount":\#(total),"StartIndex":0}"#.utf8)
             return (try emptyResponse(for: request, statusCode: 200), payload)
         }
 
@@ -148,7 +168,33 @@ final class LibraryRepositoryTests: XCTestCase {
             .artistOverview(for: TestFixtures.item(id: "artist-id", type: .musicArtist))
 
         XCTAssertEqual(overview.albums.compactMap(\.id), ["album-1"])
+        XCTAssertEqual(overview.appearsOn.compactMap(\.id), ["appears-1"])
         XCTAssertEqual(overview.topTracks.compactMap(\.id), ["track-1"])
+        XCTAssertEqual(overview.songCount, 42)
+    }
+
+    /// Servers differ on whether a contributing-artist query also returns
+    /// albums the artist led; either way an album must not appear in both
+    /// sections of the artist page.
+    func testArtistOverviewAppearsOnDropsAlbumsTheArtistLed() async throws {
+        URLProtocolStub.handler = { request in
+            let recorded = RecordedRequest(request)
+            guard !recorded.values(for: "albumArtistIds").isEmpty
+                    || !recorded.values(for: "contributingArtistIds").isEmpty else {
+                return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+            }
+            let isOwnAlbums = !recorded.values(for: "albumArtistIds").isEmpty
+            let items = isOwnAlbums
+                ? [("album-1", "MusicAlbum")]
+                : [("album-1", "MusicAlbum"), ("appears-1", "MusicAlbum")]
+            return (try emptyResponse(for: request, statusCode: 200), itemsPayload(items))
+        }
+
+        let overview = try await TestFixtures.stubbedRepository()
+            .artistOverview(for: TestFixtures.item(id: "artist-id", type: .musicArtist))
+
+        XCTAssertEqual(overview.albums.compactMap(\.id), ["album-1"])
+        XCTAssertEqual(overview.appearsOn.compactMap(\.id), ["appears-1"])
     }
 
     // MARK: - Search
