@@ -20,32 +20,25 @@ struct ArtistDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 CollectionHeader(
                     item: artist,
-                    subtitle: Format.albumCount(overview.albums.count),
+                    subtitle: Format.albumAndSongCount(overview.albums.count, overview.songCount),
                     isCircular: true,
                     canPlay: !overview.topTracks.isEmpty,
                     onPlay: { player.play(overview.topTracks) },
                     onShuffle: { player.play(overview.topTracks, shuffled: true) }
                 )
 
-                if overview.albums.isEmpty, loader.isPending {
+                if overview.albums.isEmpty, overview.appearsOn.isEmpty, loader.isPending {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 } else if let errorMessage = loader.errorMessage,
                           overview.albums.isEmpty,
+                          overview.appearsOn.isEmpty,
                           overview.topTracks.isEmpty {
                     LoadFailureView(title: "Couldn’t Load Artist", message: errorMessage) {
                         await load()
                     }
-                } else if !overview.albums.isEmpty {
-                    Text("Albums")
-                        .font(.title2.bold())
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 20) {
-                        ForEach(overview.albums) { album in
-                            NavigationLink(value: album) {
-                                ItemGridCell(item: album)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                } else {
+                    albumSection(title: "Albums", albums: overview.albums)
+                    albumSection(title: "Appears On", albums: overview.appearsOn)
                 }
 
                 GenreChips(genres: genres)
@@ -79,5 +72,23 @@ struct ArtistDetailView: View {
 
     private func load() async {
         await loader.load { try await session.library.artistOverview(for: artist) }
+    }
+
+    /// A headed album grid — "Albums" and "Appears On". Renders nothing for an
+    /// empty list so sections the artist has no entries in leave no gap.
+    @ViewBuilder
+    private func albumSection(title: LocalizedStringKey, albums: [BaseItemDto]) -> some View {
+        if !albums.isEmpty {
+            Text(title)
+                .font(.title2.bold())
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 20) {
+                ForEach(albums) { album in
+                    NavigationLink(value: album) {
+                        ItemGridCell(item: album)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 }

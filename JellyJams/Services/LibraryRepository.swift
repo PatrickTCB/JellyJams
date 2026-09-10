@@ -99,11 +99,15 @@ struct LibraryRepository: Sendable {
 
     struct ArtistOverview: Sendable, Equatable {
         var albums: [BaseItemDto] = []
+        var appearsOn: [BaseItemDto] = []
         var topTracks: [BaseItemDto] = []
+        /// Total tracks the artist appears on. `topTracks` is a capped random
+        /// sample, so its count is not this.
+        var songCount: Int = 0
     }
 
-    /// An artist's albums (newest first) plus a random sample of their tracks,
-    /// fetched concurrently.
+    /// An artist's albums (newest first), albums they only appear on, plus a
+    /// random sample of their tracks, fetched concurrently.
     func artistOverview(for artist: BaseItemDto) async throws -> ArtistOverview {
         let client = try requireClient()
         // Without an id the underlying queries would drop the artist filter and
@@ -118,6 +122,16 @@ struct LibraryRepository: Sendable {
             albumArtistIds: [artistId],
             limit: Self.artistAlbumLimit
         )
+        // The web app's "Appears On": albums where the artist contributed
+        // (compilations, features) without being the album artist.
+        async let appearsOnResult = client.getItems(
+            includeItemTypes: [.musicAlbum],
+            recursive: true,
+            sortBy: .productionYear,
+            sortOrder: .descending,
+            contributingArtistIds: [artistId],
+            limit: Self.artistAlbumLimit
+        )
         async let tracksResult = client.getItems(
             includeItemTypes: [.audio],
             recursive: true,
@@ -126,10 +140,20 @@ struct LibraryRepository: Sendable {
             limit: Self.artistTrackLimit
         )
 
-        let results = try await (albumsResult, tracksResult)
+        let results = try await (albumsResult, appearsOnResult, tracksResult)
+        let albums = results.0.items ?? []
+        // Servers differ on whether contributingArtistIds also returns albums
+        // the artist led, so never show the same album in both sections.
+        let ownIds = Set(albums.compactMap(\.id))
+        let appearsOn = (results.1.items ?? []).filter { item in
+            guard let id = item.id else { return false }
+            return !ownIds.contains(id)
+        }
         return ArtistOverview(
-            albums: results.0.items ?? [],
-            topTracks: results.1.items ?? []
+            albums: albums,
+            appearsOn: appearsOn,
+            topTracks: results.2.items ?? [],
+            songCount: results.2.totalRecordCount ?? results.2.items?.count ?? 0
         )
     }
 

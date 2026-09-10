@@ -23,7 +23,15 @@ enum Format {
         let n = count ?? 0
         return n == 1 ? "1 album" : "\(n) albums"
     }
-
+    
+    static func albumAndSongCount(_ albumCount: Int?, _ songsCount: Int?) -> String {
+        let n = albumCount ?? 0
+        let ns = songsCount ?? 0
+        let albumText = n == 1 ? "1 album" : "\(n) albums"
+        let songText = ns == 1 ? "1 song" : "\(ns) songs"
+        return "\(albumText)\n\(songText)"
+    }
+    
     static func playlistCount(_ count: Int?) -> String {
         let n = count ?? 0
         return n == 1 ? "1 playlist" : "\(n) playlists"
