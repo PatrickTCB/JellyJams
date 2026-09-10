@@ -237,6 +237,19 @@ final class JellyfinService: Sendable {
         return try validated(result)
     }
 
+    /// An artist's albums, newest first. Backs artist downloads, which save
+    /// each album as a normal album download.
+    func albums(forArtistId artistId: String) async throws -> [BaseItemDto] {
+        try await getItems(
+            includeItemTypes: [.musicAlbum],
+            recursive: true,
+            sortBy: .productionYear,
+            sortOrder: .descending,
+            albumArtistIds: [artistId],
+            limit: Self.maxCollectionTracks
+        ).items ?? []
+    }
+
     /// Resolves every audio track belonging to a collection item (album,
     /// artist, playlist or genre) in its natural playback order. An item that
     /// is already a track resolves to itself.

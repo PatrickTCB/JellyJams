@@ -2,6 +2,7 @@ import Foundation
 import JellyfinAPI
 
 typealias BaseItemDto = JellyfinAPI.BaseItemDto
+typealias NameIDPair = JellyfinAPI.NameIDPair
 typealias BaseItemDtoQueryResult = JellyfinAPI.BaseItemDtoQueryResult
 typealias ItemType = JellyfinAPI.BaseItemKind
 typealias ItemFilter = JellyfinAPI.ItemFilter

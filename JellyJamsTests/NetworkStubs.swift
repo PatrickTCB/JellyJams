@@ -136,6 +136,15 @@ func itemsPayload(_ items: [(id: String, type: String)]) -> Data {
     return Data(#"{"Items":[\#(encoded)],"TotalRecordCount":\#(items.count),"StartIndex":0}"#.utf8)
 }
 
+/// Same, but each item also carries an `AlbumArtists` attribution — as server
+/// album payloads do, which is what artist derivation reads.
+func itemsPayload(_ items: [(id: String, type: String, artist: String)]) -> Data {
+    let encoded = items
+        .map { #"{"Id":"\#($0.id)","Name":"\#($0.id)","Type":"\#($0.type)","AlbumArtists":[{"Id":"\#($0.artist)","Name":"\#($0.artist)"}]}"# }
+        .joined(separator: ",")
+    return Data(#"{"Items":[\#(encoded)],"TotalRecordCount":\#(items.count),"StartIndex":0}"#.utf8)
+}
+
 /// Builds an items payload containing one playlist per supplied identifier.
 func playlistsPayload(ids: [String]) -> Data {
     let items = ids

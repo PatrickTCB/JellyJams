@@ -60,10 +60,57 @@ struct DownloadedCollectionDetail: View {
 struct DownloadedCollectionRef: Hashable {
     let id: String
     let name: String
+    let isArtist: Bool
 
     init?(_ item: BaseItemDto) {
         guard let id = item.id else { return nil }
         self.id = id
         self.name = item.displayName
+        self.isArtist = item.itemType == .musicArtist
+    }
+}
+
+/// A downloaded artist opened from the Downloads section: their downloaded
+/// albums, entirely from the manifest — no server involved. Each album opens
+/// the same offline album detail a downloaded album does.
+struct DownloadedArtistDetail: View {
+    let artist: BaseItemDto
+
+    @EnvironmentObject private var downloads: DownloadStore
+
+    private var albums: [BaseItemDto] { downloads.downloadedAlbums(forArtistId: artist.id ?? "") }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(albums) { album in
+                    if let ref = DownloadedCollectionRef(album) {
+                        NavigationLink(value: ref) {
+                            row(for: album)
+                        }
+                    } else {
+                        row(for: album)
+                    }
+                }
+            } header: {
+                Text(Format.albumCount(albums.count))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.plain)
+        .overlay {
+            if albums.isEmpty {
+                ContentUnavailableView("No downloaded albums", systemImage: "square.stack")
+            }
+        }
+        .navigationTitle(artist.displayName)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+
+    private func row(for album: BaseItemDto) -> some View {
+        ItemRow(item: album)
     }
 }

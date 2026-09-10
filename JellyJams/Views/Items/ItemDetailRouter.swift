@@ -85,9 +85,16 @@ private struct DownloadedCollectionDestination: View {
     @EnvironmentObject private var downloads: DownloadStore
 
     var body: some View {
-        DownloadedCollectionDetail(
-            collection: downloads.collection(id: ref.id)
-                ?? BaseItemDto(id: ref.id, name: ref.name)
-        )
+        if ref.isArtist {
+            DownloadedArtistDetail(
+                artist: downloads.collection(id: ref.id)
+                    ?? BaseItemDto(id: ref.id, name: ref.name, type: .musicArtist)
+            )
+        } else {
+            DownloadedCollectionDetail(
+                collection: downloads.collection(id: ref.id)
+                    ?? BaseItemDto(id: ref.id, name: ref.name)
+            )
+        }
     }
 }

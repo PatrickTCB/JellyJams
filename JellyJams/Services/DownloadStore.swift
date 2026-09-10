@@ -5,11 +5,15 @@ import Foundation
 ///
 /// A file is downloaded once no matter how many collections ask for it. The
 /// manifest maps every track id to the set of *reference ids* that require it
-/// — an album, artist, playlist or genre id, or the track's own id when it was
+/// — an album, playlist or genre id, or the track's own id when it was
 /// downloaded as a song. Removing a collection first unlinks it from every
 /// track it required; tracks then requiring nothing are deleted from disk in a
 /// second pass. That reference counting is what keeps "download album, then a
 /// playlist overlapping it" from duplicating bytes or orphaning files.
+///
+/// Artists are not stored at all: downloading one downloads each of their
+/// albums as a normal album download, and the Artists list is derived from
+/// the downloaded albums' `albumArtists` metadata.
 ///
 /// The manifest — including the track and collection metadata the downloads
 /// section browses — is rewritten after every change, so downloads survive
@@ -68,6 +72,16 @@ final class DownloadStore: ObservableObject {
         }
     }
 
+    /// Removes every download: all files, entries and collection metadata.
+    func removeAll() {
+        for entry in entries.values {
+            try? FileManager.default.removeItem(at: directory.appending(path: entry.filename))
+        }
+        entries = [:]
+        collections = [:]
+        persist()
+    }
+
     /// Points the store at a new session. Downloaded files are kept.
     func configure(client: JellyfinService?) {
         guard client !== self.client else { return }
@@ -78,11 +92,15 @@ final class DownloadStore: ObservableObject {
     // MARK: - Queries
 
     /// Whether a downloaded copy of `item` is available: the file for a track,
-    /// or any saved track for a collection.
+    /// any saved track for an album, playlist or genre, or any downloaded
+    /// album for an artist.
     func isDownloaded(_ item: BaseItemDto) -> Bool {
         guard let id = item.id else { return false }
         if item.itemType == .audio {
             return entries[id] != nil
+        }
+        if item.itemType == .musicArtist {
+            return downloadedArtists().contains { $0.id == id }
         }
         return entries.values.contains { $0.requiredBy.contains(id) }
     }
@@ -120,6 +138,41 @@ final class DownloadStore: ObservableObject {
         collections[id]
     }
 
+    /// Artists behind the downloaded albums, derived from each album's
+    /// `albumArtists` metadata rather than stored — so downloading any album
+    /// surfaces its artist, and removing the last one drops the artist again.
+    /// Albums the server didn't attribute fall back to their name-only
+    /// `albumArtist` string.
+    func downloadedArtists() -> [BaseItemDto] {
+        var byId: [String: BaseItemDto] = [:]
+        for album in collections.values where album.itemType == .musicAlbum {
+            let pairs = album.albumArtists ?? []
+            // Albums the server didn't attribute carry at most a name-only
+            // `albumArtist` string; that name stands in as the artist key.
+            let named = pairs.isEmpty && !(album.albumArtist ?? "").isEmpty
+                ? [NameIDPair(id: nil, name: album.albumArtist)]
+                : pairs
+            for artist in named {
+                let key = artist.id ?? artist.name ?? ""
+                guard !key.isEmpty else { continue }
+                byId[key] = BaseItemDto(id: key, name: artist.name, type: .musicArtist)
+            }
+        }
+        return byId.values.sorted { $0.displayName < $1.displayName }
+    }
+
+    /// The downloaded albums attributed to `artistId`, name-sorted.
+    func downloadedAlbums(forArtistId artistId: String) -> [BaseItemDto] {
+        collections.values
+            .filter { album in
+                guard album.itemType == .musicAlbum else { return false }
+                let pairIds = (album.albumArtists ?? []).map { $0.id ?? $0.name ?? "" }
+                return pairIds.contains(artistId)
+                    || (album.albumArtists ?? []).isEmpty && album.albumArtist == artistId
+            }
+            .sorted { $0.displayName < $1.displayName }
+    }
+
     /// Tracks downloaded as songs (as opposed to via a collection), so the
     /// downloads section can show them under "Songs".
     func downloadedSongs() -> [BaseItemDto] {
@@ -131,7 +184,8 @@ final class DownloadStore: ObservableObject {
 
     // MARK: - Downloading
 
-    /// Downloads `item`: a track saves its file referencing itself; a
+    /// Downloads `item`: a track saves its file referencing itself; an artist
+    /// downloads each of its albums as a normal album download; any other
     /// collection resolves its tracks and saves each one referencing the
     /// collection. Files already on disk only gain the reference, which is how
     /// overlapping downloads dedupe.
@@ -152,6 +206,29 @@ final class DownloadStore: ObservableObject {
             batches.append(batch)
             Task {
                 await downloadOne(item, referencing: id, in: id, via: client)
+                finishBatch(id)
+            }
+        } else if item.itemType == .musicArtist {
+            batches.append(Batch(id: id, label: item.displayName))
+            Task {
+                do {
+                    let albums = try await client.albums(forArtistId: id)
+                    guard !albums.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
+                    for album in albums {
+                        guard let albumId = album.id else { continue }
+                        collections[albumId] = album
+                        let tracks = try await client.tracks(for: album)
+                        guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(album.displayName) }
+                        updateBatch(id) { $0.total += tracks.count }
+                        for track in tracks {
+                            await downloadOne(track, referencing: albumId, in: id, via: client)
+                        }
+                    }
+                } catch {
+                    if !error.isCancellation {
+                        errorMessage = "Couldn’t download “\(item.displayName)”. \(error.userFacingMessage)"
+                    }
+                }
                 finishBatch(id)
             }
         } else {
@@ -175,13 +252,19 @@ final class DownloadStore: ObservableObject {
         }
     }
 
-    /// Removes the download for `item`. A track unreferences itself; a
-    /// collection unreferences every track it required. Tracks left requiring
-    /// nothing are deleted from disk in a second pass.
+    /// Removes the download for `item`. A track unreferences itself; an artist
+    /// removes every album downloaded for it; any other collection unreferences
+    /// every track it required. Tracks left requiring nothing are deleted from
+    /// disk in a second pass.
     func remove(_ item: BaseItemDto) {
         guard let id = item.id else { return }
         if item.itemType == .audio {
             entries[id]?.requiredBy.remove(id)
+        } else if item.itemType == .musicArtist {
+            for album in downloadedAlbums(forArtistId: id) {
+                remove(album)
+            }
+            return
         } else {
             for var entry in entries.values where entry.requiredBy.contains(id) {
                 entry.requiredBy.remove(id)

@@ -16,6 +16,7 @@ struct DownloadsView: View {
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var player: PlayerController
     @State private var tab: Tab = .albums
+    @State private var confirmingDeleteAll = false
 
     private var songs: [BaseItemDto] { downloads.downloadedSongs() }
 
@@ -31,12 +32,25 @@ struct DownloadsView: View {
 
             switch tab {
             case .albums: collectionsList(type: .musicAlbum, placeholder: "square.stack")
-            case .artists: collectionsList(type: .musicArtist, placeholder: "music.mic")
+            case .artists: artistsList
             case .playlists: collectionsList(type: .playlist, placeholder: "music.note.list")
             case .songs: songsList
             }
         }
         .navigationTitle("Downloads")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button(role: .destructive) { confirmingDeleteAll = true } label: {
+                    Label("Delete All", systemImage: "trash")
+                }
+                .disabled(downloads.batches.isEmpty == false
+                          || (downloads.entries.isEmpty && downloads.collections.isEmpty))
+            }
+        }
+        .alert("Delete all downloaded music?", isPresented: $confirmingDeleteAll) {
+            Button("Delete All Downloads", role: .destructive) { downloads.removeAll() }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     private var songsList: some View {
@@ -64,6 +78,29 @@ struct DownloadsView: View {
         }
     }
 
+    /// Artists are derived from the downloaded albums rather than stored, so
+    /// downloading any album of an artist surfaces them here.
+    private var artistsList: some View {
+        let artists = downloads.downloadedArtists()
+        return List {
+            Section {
+                ForEach(artists) { artist in
+                    DownloadedItemRow(item: artist, placeholder: "music.mic", subtitle: .albums)
+                }
+            } header: {
+                Text(Format.albumCount(downloads.downloadedArtists().count))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.plain)
+        .overlay {
+            if artists.isEmpty {
+                ContentUnavailableView("No downloaded artists", systemImage: "music.mic")
+            }
+        }
+    }
+
     private func collectionsList(type: ItemType, placeholder: String) -> some View {
         List {
             Section {
@@ -86,10 +123,28 @@ struct DownloadsView: View {
 }
 
 private struct DownloadedItemRow: View {
+    enum Subtitle {
+        /// Number of songs saved for the item.
+        case songs
+        /// Number of downloaded albums attributed to the item (artists, whose
+        /// tracks are referenced by album, have no song count of their own).
+        case albums
+    }
+
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var session: SessionStore
     let item: BaseItemDto
     let placeholder: String
+    var subtitle: Subtitle = .songs
+
+    private var subtitleText: String {
+        switch subtitle {
+        case .songs:
+            Format.songCount(downloads.tracks(forItemId: item.id ?? "").count)
+        case .albums:
+            Format.albumCount(downloads.downloadedAlbums(forArtistId: item.id ?? "").count)
+        }
+    }
 
     var body: some View {
         Group {
@@ -118,7 +173,7 @@ private struct DownloadedItemRow: View {
             .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.displayName).lineLimit(1)
-                Text(Format.songCount(downloads.tracks(forItemId: item.id ?? "").count))
+                Text(subtitleText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
