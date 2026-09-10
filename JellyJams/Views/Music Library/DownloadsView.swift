@@ -88,7 +88,7 @@ struct DownloadsView: View {
                     DownloadedItemRow(item: artist, placeholder: "music.mic", subtitle: .albums)
                 }
             } header: {
-                Text(Format.albumCount(downloads.downloadedArtists().count))
+                Text(Format.artistCount(artists.count))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -108,7 +108,8 @@ struct DownloadsView: View {
                     DownloadedItemRow(item: item, placeholder: placeholder)
                 }
             } header: {
-                Text(Format.songCount(downloads.downloadedCollections(ofType: type).count))
+                let count = downloads.downloadedCollections(ofType: type).count
+                Text(type == .musicAlbum ? Format.albumCount(count) : Format.playlistCount(count))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

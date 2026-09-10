@@ -124,6 +124,14 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(Format.albumCount(1), "1 album")
         XCTAssertEqual(Format.albumCount(3), "3 albums")
         XCTAssertEqual(Format.albumCount(nil), "0 albums")
+
+        XCTAssertEqual(Format.playlistCount(1), "1 playlist")
+        XCTAssertEqual(Format.playlistCount(3), "3 playlists")
+        XCTAssertEqual(Format.playlistCount(nil), "0 playlists")
+
+        XCTAssertEqual(Format.artistCount(1), "1 artist")
+        XCTAssertEqual(Format.artistCount(3), "3 artists")
+        XCTAssertEqual(Format.artistCount(nil), "0 artists")
     }
 }
 
