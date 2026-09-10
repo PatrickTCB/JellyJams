@@ -6,7 +6,11 @@ import SwiftUI
 /// showing the same item agrees, and a change survives this view being rebuilt.
 struct FavouriteButton: View {
     let item: BaseItemDto
+    #if os(macOS)
+    var size: Font = .title2
+    #else
     var size: Font = .body
+    #endif
 
     @EnvironmentObject private var favourites: FavouriteStore
 
@@ -19,7 +23,11 @@ struct FavouriteButton: View {
                 .foregroundStyle(isFavourite ? .accentColor : Color.secondary)
                 .contentTransition(.symbolEffect(.replace))
         }
+        #if os(iOS)
         .buttonStyle(.borderless)
+        #else
+        .buttonStyle(.bordered)
+        #endif
         .disabled(favourites.isBusy(item))
         .help(isFavourite ? "Remove from Favourites" : "Add to Favourites")
         .accessibilityLabel(isFavourite ? "Remove from Favourites" : "Add to Favourites")

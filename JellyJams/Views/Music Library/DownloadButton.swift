@@ -3,7 +3,11 @@ import SwiftUI
 /// Icon-only download toggle with loading indicator
 struct DownloadButton: View {
     let item: BaseItemDto
+    #if os(macOS)
+    var size: Font = .title2
+    #else
     var size: Font = .body
+    #endif
 
     @EnvironmentObject private var downloads: DownloadStore
 
@@ -21,7 +25,11 @@ struct DownloadButton: View {
             }
             .help("Remove download")
             .accessibilityLabel("Remove download")
+            #if os(iOS)
             .buttonStyle(.borderless)
+            #else
+            .buttonStyle(.bordered)
+            #endif
             .tint(.accentColor)
         } else {
             Button {downloads.download(item)} label: {
@@ -30,7 +38,11 @@ struct DownloadButton: View {
             }
             .help("Download \(item.name ?? "item")")
             .accessibilityLabel("Download \(item.name ?? "item")")
+            #if os(iOS)
             .buttonStyle(.borderless)
+            #else
+            .buttonStyle(.bordered)
+            #endif
             .tint(Color.gray)
         }
     }
