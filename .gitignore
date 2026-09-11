@@ -1,7 +1,8 @@
 # Custom
 !debug-screenshots/.gitkeep
 debug-screenshots/*.png
-JellyJams*.zip
+Jelly Jams*.zip
+Jelly Jams.app
 
 # macOS
 .DS_Store
