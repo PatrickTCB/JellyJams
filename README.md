@@ -105,7 +105,7 @@ Mozilla Public License 2.0 — see [LICENSE](LICENSE).
 
 JellyJams isn't a direct fork or clone of the [Finamp](https://github.com/finamp-app/finamp) 
 but I have poured over their code extensively. It's a great app that I have consulted countless
-times to see real work examples of somebody working with the Jellyfin API as well as inspiration
+times to see real world examples of somebody working with the Jellyfin API as well as inspiration
 for layout and design.
 
 ## Icon
