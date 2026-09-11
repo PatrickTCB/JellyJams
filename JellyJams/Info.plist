@@ -35,6 +35,8 @@
 	<string>Jelly Jams — a native Jellyfin music client.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
 	<key>SUFeedURL</key>
 	<string>https://github.com/PatrickTCB/JellyJams/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
