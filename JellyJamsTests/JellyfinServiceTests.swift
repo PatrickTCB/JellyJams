@@ -335,6 +335,31 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
+    func testRemoveFromPlaylistDeletesEntryIds() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 204), Data())
+        }
+
+        try await makeClient().removeFromPlaylist(playlistId: "playlist-id", entryIds: ["entry-1", "entry-2"])
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(recorder.all.count, 1)
+        XCTAssertEqual(request.path, "/jellyfin/Playlists/playlist-id/Items")
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.values(for: "entryIds"), ["entry-1", "entry-2"])
+    }
+
+    func testRemoveFromPlaylistRejectsAnEmptySelection() async {
+        do {
+            try await makeClient().removeFromPlaylist(playlistId: "playlist-id", entryIds: [])
+            XCTFail("Expected an empty selection to be rejected")
+        } catch {
+            XCTAssertEqual(error as? JellyfinError, .missingItemIdentifier)
+        }
+    }
+
     func testPlaylistItemsRequiresAPlaylistIdentifier() async {
         do {
             _ = try await makeClient().getPlaylistItems(playlistId: nil)
