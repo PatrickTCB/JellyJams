@@ -6,18 +6,19 @@ import SwiftUI
 /// gesture: always on macOS, and on iPad (regular width) but not iPhone, where
 /// the list is pulled down instead.
 private struct RefreshToolbarModifier: ViewModifier {
+    var isAvailable = true
     let refresh: () async -> Void
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    private var isAvailable: Bool { horizontalSizeClass == .regular }
+    private var showsButton: Bool { isAvailable && horizontalSizeClass == .regular }
     #else
-    private var isAvailable: Bool { true }
+    private var showsButton: Bool { isAvailable }
     #endif
 
     func body(content: Content) -> some View {
         content.toolbar {
-            if isAvailable {
+            if showsButton {
                 ToolbarItem {
                     Button {
                         Task { await refresh() }
@@ -33,7 +34,9 @@ private struct RefreshToolbarModifier: ViewModifier {
 
 extension View {
     /// Adds a Refresh toolbar button (⌘R) on platforms without pull-to-refresh.
-    func refreshToolbarItem(_ refresh: @escaping () async -> Void) -> some View {
-        modifier(RefreshToolbarModifier(refresh: refresh))
+    /// Pass `isAvailable: false` to suppress it (e.g. offline content that
+    /// cannot reload).
+    func refreshToolbarItem(isAvailable: Bool = true, _ refresh: @escaping () async -> Void) -> some View {
+        modifier(RefreshToolbarModifier(isAvailable: isAvailable, refresh: refresh))
     }
 }

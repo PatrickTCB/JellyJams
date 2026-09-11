@@ -97,6 +97,12 @@ struct LibraryRepository: Sendable {
         try await requireClient().tracks(for: item)
     }
 
+    /// Removes entries from a playlist; entry ids come from
+    /// `BaseItemDto.playlistItemID`, not the track id.
+    func removeFromPlaylist(playlistId: String?, entryIds: [String]) async throws {
+        try await requireClient().removeFromPlaylist(playlistId: playlistId, entryIds: entryIds)
+    }
+
     struct ArtistOverview: Sendable, Equatable {
         var albums: [BaseItemDto] = []
         var appearsOn: [BaseItemDto] = []

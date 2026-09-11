@@ -52,7 +52,11 @@ struct TrackListDetail: View {
                 // row's state (the current-track highlight, a swipe in
                 // progress) with the track, not leave it on row 3.
                 ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                    TrackRow(track: track, showArtwork: showArtworkInRows) {
+                    TrackRow(
+                        track: track,
+                        showArtwork: showArtworkInRows,
+                        onRemoveFromPlaylist: canRemoveFromPlaylist ? { removeFromPlaylist(track) } : nil
+                    ) {
                         player.play(tracks, startAt: index)
                     }
                 }
@@ -108,6 +112,7 @@ struct TrackListDetail: View {
         }
         .task(id: headerItem.id) { await reload() }
         .refreshable { await reload() }
+        .refreshToolbarItem(isAvailable: !downloaded) { await reload() }
         #if os(iOS)
         .nowPlayingTabContentDock()
         #endif
@@ -191,6 +196,22 @@ struct TrackListDetail: View {
     }
 
     // MARK: - Loading
+
+    /// Removing makes no sense for downloaded collections (they're offline
+    /// copies, and the swipe must not mutate the server playlist).
+    private var canRemoveFromPlaylist: Bool {
+        headerItem.itemType == .playlist && !downloaded
+    }
+
+    private func removeFromPlaylist(_ track: BaseItemDto) {
+        guard let entryId = track.playlistItemID else { return }
+        Task {
+            // ponytail: failed removes surface as the track simply surviving
+            // the reload; no separate error UI.
+            try? await session.library.removeFromPlaylist(playlistId: headerItem.id, entryIds: [entryId])
+            await reload()
+        }
+    }
 
     private func reload() async {
         await loader.load { try await session.library.tracks(for: headerItem) }

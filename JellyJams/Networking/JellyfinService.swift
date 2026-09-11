@@ -318,6 +318,13 @@ final class JellyfinService: Sendable {
         }
     }
 
+    func removeFromPlaylist(playlistId: String?, entryIds: [String]) async throws {
+        guard let playlistId, !entryIds.isEmpty else { throw JellyfinError.missingItemIdentifier }
+        _ = try await apiClient.send(
+            Paths.removeItemFromPlaylist(playlistID: playlistId, entryIDs: entryIds)
+        )
+    }
+
     /// Creates a new audio playlist seeded with `itemIds` and returns its id.
     @discardableResult
     func createPlaylist(name: String, itemIds: [String]) async throws -> String {

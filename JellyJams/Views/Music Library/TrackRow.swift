@@ -6,6 +6,9 @@ import SwiftUI
 struct TrackRow: View {
     let track: BaseItemDto
     var showArtwork = false
+    /// Set by playlist detail views to expose "Remove from Playlist" in the
+    /// context menu and (on iOS) trailing swipe actions.
+    var onRemoveFromPlaylist: (() -> Void)?
     var onPlay: () -> Void
 
     @EnvironmentObject private var session: SessionStore
@@ -66,7 +69,13 @@ struct TrackRow: View {
         .swipeActions(edge: .trailing) {
             Button { player.playNext(track) } label: { Label("Play Next", systemImage: "text.insert") }
                 .tint(.accentColor)
-            Button { player.addToQueue([track]) } label: { Label("Queue", systemImage: "text.append") }
+            if let onRemoveFromPlaylist {
+                Button(role: .destructive, action: onRemoveFromPlaylist) {
+                    Label("Remove from Playlist", systemImage: "minus.circle")
+                }
+            } else {
+                Button { player.addToQueue([track]) } label: { Label("Queue", systemImage: "text.append") }
+            }
         }
         #endif
     }
@@ -92,6 +101,11 @@ struct TrackRow: View {
         Button { onPlay() } label: { Label("Play", systemImage: "play.fill") }
         Button { player.playNext(track) } label: { Label("Play Next", systemImage: "text.insert") }
         Button { player.addToQueue([track]) } label: { Label("Add to Queue", systemImage: "text.append") }
+        if let onRemoveFromPlaylist {
+            Button(role: .destructive, action: onRemoveFromPlaylist) {
+                Label("Remove from Playlist", systemImage: "minus.circle")
+            }
+        }
         Divider()
         Button { favourites.toggle(track) } label: {
             Label(isFavourite ? "Remove from Favourites" : "Add to Favourites",
