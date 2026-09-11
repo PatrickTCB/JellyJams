@@ -21,6 +21,9 @@ packages:
   JellyfinAPI:
     url: https://github.com/jellyfin/jellyfin-sdk-swift.git
     exactVersion: 3.1.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    exactVersion: 2.9.6
 
 targets:
   JellyJams:
@@ -31,8 +34,11 @@ targets:
       iOS: "18.0"
     sources:
       - path: JellyJams
+        type: syncedFolder
     dependencies:
       - package: JellyfinAPI
+      - package: Sparkle
+        destinationFilters: [macOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: net.aseriesoftubes.JellyJams
@@ -54,6 +60,7 @@ targets:
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: YES
         TARGETED_DEVICE_FAMILY: "1,2"
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": JellyJams/JellyJams.macOS.entitlements
+        "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks"
 
   JellyJamsTests:
     type: bundle.unit-test
