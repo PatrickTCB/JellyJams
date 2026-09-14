@@ -99,6 +99,14 @@ final class PlaylistStore: ObservableObject {
         try await client.createPlaylist(name: trimmed, itemIds: itemIds)
     }
 
+    /// Deletes a playlist and reloads the cache so it disappears from menus
+    /// immediately.
+    func deletePlaylist(id: String) async throws {
+        guard let client else { throw JellyfinError.notAuthenticated }
+        defer { refresh() }
+        try await client.deletePlaylist(playlistId: id)
+    }
+
     func dismissError() {
         errorMessage = nil
     }

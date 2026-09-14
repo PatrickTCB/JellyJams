@@ -353,6 +353,11 @@ final class JellyfinService: Sendable {
         return playlistId
     }
 
+    /// Deletes a playlist from the server's library.
+    func deletePlaylist(playlistId: String) async throws {
+        _ = try await apiClient.send(Paths.deleteItem(itemID: playlistId))
+    }
+
     // MARK: - Favourites
 
     func setFavourite(itemId: String?, isFavorite: Bool) async throws {

@@ -172,6 +172,20 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertNil(body["Ids"])
     }
 
+    func testDeletePlaylistSendsADeleteItemRequest() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 204), Data())
+        }
+
+        try await makeClient().deletePlaylist(playlistId: "party")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.path, "/jellyfin/Items/party")
+        XCTAssertEqual(request.method, "DELETE")
+    }
+
     func testTracksForAlbumRequestsChildAudioInDiscAndTrackOrder() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in

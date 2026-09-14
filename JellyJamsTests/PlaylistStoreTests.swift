@@ -75,6 +75,28 @@ final class PlaylistStoreTests: XCTestCase {
         XCTAssertEqual(store.playlists.compactMap(\.id), ["party", "road-trip"])
     }
 
+    func testDeletingAPlaylistReloadsTheCache() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            if request.httpMethod == "DELETE" {
+                return (try emptyResponse(for: request, statusCode: 204), Data())
+            }
+            let existing = recorder.count(forPath: "/jellyfin/Items")
+            let ids = existing <= 1 ? ["party", "chill"] : ["chill"]
+            return (try emptyResponse(for: request, statusCode: 200), playlistsPayload(ids: ids))
+        }
+        let store = PlaylistStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        try await waitForLoad(store)
+        XCTAssertEqual(store.playlists.compactMap(\.id), ["party", "chill"])
+
+        try await store.deletePlaylist(id: "party")
+        try await waitForLoad(store)
+
+        XCTAssertEqual(store.playlists.compactMap(\.id), ["chill"])
+    }
+
     /// The reload triggered by creating a playlist must supersede a list load
     /// that was already in flight, otherwise the older response lands last and
     /// hides the new playlist until the cache goes stale.

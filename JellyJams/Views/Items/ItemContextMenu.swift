@@ -13,8 +13,10 @@ struct ItemContextMenu: ViewModifier {
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
+    @Environment(\.gridRefreshAction) private var gridRefreshAction
 
     @State private var isPresentingNewPlaylist = false
+    @State private var isConfirmingDeletePlaylist = false
     @State private var newPlaylistName = ""
     @State private var errorMessage: String?
 
@@ -25,6 +27,7 @@ struct ItemContextMenu: ViewModifier {
         case addToQueue
         case addToPlaylist(id: String)
         case newPlaylist(name: String)
+        case deletePlaylist
     }
 
     /// Playlists a collection can be added to. A playlist can't be added to
@@ -32,6 +35,8 @@ struct ItemContextMenu: ViewModifier {
     private var destinationPlaylists: [BaseItemDto] {
         playlistStore.playlists.filter { $0.id != nil && $0.id != item.id }
     }
+
+    private var isPlaylist: Bool { item.itemType == .playlist }
 
     func body(content: Content) -> some View {
         content
@@ -57,6 +62,12 @@ struct ItemContextMenu: ViewModifier {
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .alert("Delete Playlist", isPresented: $isConfirmingDeletePlaylist) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) { perform(.deletePlaylist) }
+            } message: {
+                Text("“\(item.displayName)” will be deleted from the server, along with any downloaded copy. This can’t be undone.")
             }
     }
 
@@ -113,6 +124,18 @@ struct ItemContextMenu: ViewModifier {
             )
         }
         .disabled(downloads.isBusy(item))
+
+        if isPlaylist {
+            Divider()
+            Button(role: .destructive) {
+                Task {
+                    await Self.waitForPresentationDismissal()
+                    isConfirmingDeletePlaylist = true
+                }
+            } label: {
+                Label("Delete Playlist", systemImage: "trash")
+            }
+        }
     }
 
     // MARK: - Actions
@@ -151,6 +174,15 @@ struct ItemContextMenu: ViewModifier {
 
         Task {
             do {
+                if case .deletePlaylist = action {
+                    guard let id = item.id else { throw JellyfinError.missingItemIdentifier }
+                    try await playlistStore.deletePlaylist(id: id)
+                    if downloads.isDownloaded(item) {
+                        downloads.remove(item)
+                    }
+                    await gridRefreshAction?()
+                    return
+                }
                 let tracks = try await client.tracks(for: item)
                 guard !tracks.isEmpty else {
                     throw JellyfinError.emptyCollection(item.displayName)
@@ -170,6 +202,8 @@ struct ItemContextMenu: ViewModifier {
                 case .newPlaylist(let name):
                     try await playlistStore.createPlaylist(named: name,
                                                            itemIds: tracks.compactMap(\.id))
+                case .deletePlaylist:
+                    break // handled before track loading
                 }
             } catch {
                 present(error: error.userFacingMessage)

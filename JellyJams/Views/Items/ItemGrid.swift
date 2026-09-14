@@ -53,5 +53,6 @@ struct ItemGrid: View {
                 ContentUnavailableView(emptyMessage, systemImage: emptySystemImage)
             }
         }
+        .gridRefreshAction { await model.reload() }
     }
 }
