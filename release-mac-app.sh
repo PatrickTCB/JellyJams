@@ -1,9 +1,7 @@
-#!/bin/bash
-set -e
-VER=$1
-NOTES=$2
-
-ditto -c -k --sequesterRsrc --keepParent "Jelly Jams.app" "JellyJams-$VER.zip"
-generate_appcast --download-url-prefix "https://github.com/PatrickTCB/JellyJams/releases/download/v$VER/" .
-gh release create "v$VER" --title "Jelly Jams v$VER" --notes "$NOTES" "JellyJams-$VER.zip" appcast.xml
-rm JellyJams-$VER.zip
+#!/bin/sh
+ditto -c -k --sequesterRsrc --keepParent "Jelly Jams.app" "JellyJams-$1.zip"
+generate_appcast --download-url-prefix "https://github.com/PatrickTCB/JellyJams/releases/download/v$1/" .
+gh release create "v$1" --title "Jelly Jams v$1" --notes "$2" "JellyJams-$1.zip" appcast.xml
+rm JellyJams-$1.zip
+rm appcast.xml
+rm -r Jelly\ Jams.app
