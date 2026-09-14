@@ -102,6 +102,13 @@ final class JellyfinService: Sendable {
         try await apiClient.send(Paths.reportSessionEnded)
     }
 
+    func item(byId id: String) async throws -> BaseItemDto? {
+        let userId = try requireUserId()
+        let request = Paths.getItem(itemID: id, userID: userId)
+        let result = try await apiClient.send(request).value
+        return result
+    }
+
     // MARK: - Library
 
     func getItems(

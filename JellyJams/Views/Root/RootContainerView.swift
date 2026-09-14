@@ -9,6 +9,7 @@ struct RootContainerView: View {
     @EnvironmentObject private var libraryCache: LibraryCache
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -28,6 +29,7 @@ struct RootContainerView: View {
                 playlistStore.configure(client: session.client)
                 favourites.configure(client: session.client)
                 await session.checkServerReachability()
+                player.restorePlaybackState()
             } else {
                 player.clearQueue()
                 player.configure(client: nil)
@@ -36,6 +38,13 @@ struct RootContainerView: View {
                 favourites.configure(client: nil)
                 libraryCache.clear()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            #if os(iOS)
+            if phase == .background || phase == .inactive {
+                player.savePlaybackState()
+            }
+            #endif
         }
         .alert(
             "Account Error",

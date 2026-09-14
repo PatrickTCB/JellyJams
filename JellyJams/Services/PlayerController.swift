@@ -20,6 +20,23 @@ struct QueueEntry: Identifiable, Sendable {
     }
 }
 
+private struct PersistedQueueEntry: Codable, Sendable {
+    let id: UUID
+    let itemId: String
+    let mediaSourceID: String?
+    let playlistItemID: String?
+    let runtimeSeconds: Double?
+}
+
+private struct PlaybackState: Codable, Sendable {
+    let queue: [PersistedQueueEntry]
+    let currentIndex: Int?
+    let currentTime: Double
+    let isShuffled: Bool
+    let repeatMode: RepeatMode
+    let playSessionId: String
+}
+
 /// Owns audio playback: the queue, the `AVPlayer`, transport controls, shuffle
 /// and repeat, system Now Playing integration, and server playback reporting.
 @MainActor
@@ -107,6 +124,86 @@ final class PlayerController: ObservableObject {
 
     func configure(downloads: DownloadStore?) {
         self.downloads = downloads
+    }
+
+    // MARK: - State Persistence
+
+    private let playbackStateKey = "jellyjams.playbackState"
+
+    func savePlaybackState() {
+        #if os(iOS)
+        guard hasQueue else { return }
+        let persistedQueue = queue.map { entry in
+            PersistedQueueEntry(
+                id: entry.id,
+                itemId: entry.item.id ?? "",
+                mediaSourceID: entry.item.mediaSourceID,
+                playlistItemID: entry.item.playlistItemID,
+                runtimeSeconds: entry.item.runtimeSeconds
+            )
+        }
+        let state = PlaybackState(
+            queue: persistedQueue,
+            currentIndex: currentIndex,
+            currentTime: currentTime,
+            isShuffled: isShuffled,
+            repeatMode: repeatMode,
+            playSessionId: playSessionId
+        )
+        if let data = try? JSONEncoder().encode(state) {
+            UserDefaults.standard.set(data, forKey: playbackStateKey)
+        }
+        #endif
+    }
+
+    func restorePlaybackState() {
+        #if os(iOS)
+        guard let client, let data = UserDefaults.standard.data(forKey: playbackStateKey) else { return }
+        guard let state = try? JSONDecoder().decode(PlaybackState.self, from: data) else {
+            UserDefaults.standard.removeObject(forKey: playbackStateKey)
+            return
+        }
+        guard !state.queue.isEmpty else { return }
+
+        Task {
+            await rehydrateQueue(from: state, client: client)
+        }
+        #endif
+    }
+
+    private func rehydrateQueue(from state: PlaybackState, client: JellyfinService) async {
+        var resolvedItems: [BaseItemDto] = []
+        for entry in state.queue {
+            guard !entry.itemId.isEmpty else { continue }
+            do {
+                if let item = try await client.item(byId: entry.itemId) {
+                    resolvedItems.append(item)
+                }
+            } catch {
+                playbackLogger.debug("Could not restore item \(entry.itemId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        guard !resolvedItems.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: playbackStateKey)
+            return
+        }
+
+        let entries = resolvedItems.map(QueueEntry.init)
+        queue = entries
+        isShuffled = state.isShuffled
+        repeatMode = state.repeatMode
+        playSessionId = state.playSessionId
+
+        if let index = state.currentIndex, queue.indices.contains(index) {
+            currentIndex = index
+            currentTime = state.currentTime
+            startPlayback(at: index, reportingPreviousItem: false, resuming: false)
+            if state.currentTime > 0 {
+                seek(to: state.currentTime)
+            }
+        }
+
+        UserDefaults.standard.removeObject(forKey: playbackStateKey)
     }
 
     /// Tears down the observers that keep the `AVPlayer` (and this controller)
