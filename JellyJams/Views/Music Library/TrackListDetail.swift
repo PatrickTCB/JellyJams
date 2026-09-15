@@ -6,6 +6,9 @@ import SwiftUI
 struct TrackListDetail: View {
     let headerItem: BaseItemDto
     var subtitle: String?
+    /// The library item the subtitle names (the album's artist), so it can be
+    /// pushed. Nil for callers with a plain-text subtitle or none.
+    var subtitleItem: BaseItemDto?
     var showArtworkInRows = false
     /// Opt-in so playlists, which are user-assembled and carry no genre tags of
     /// their own, don't grow an empty section.
@@ -16,6 +19,7 @@ struct TrackListDetail: View {
     var downloaded = false
     
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var navigator: LibraryNavigator
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var player: PlayerController
     @StateObject private var loader = LoadableModel<[BaseItemDto]>([])
@@ -150,10 +154,21 @@ struct TrackListDetail: View {
                 .lineLimit(3)
                 .multilineTextAlignment(alignment == .center ? .center : .leading)
             if let subtitle {
-                Text(subtitle)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                // A plain Button pushing through ``LibraryNavigator``, not a
+                // `NavigationLink`: the subtitle sits in the header's List
+                // row, where a `NavigationLink` would make the whole row one
+                // tap target. Same reason as the chips in ``GenreChips``.
+                if let subtitleItem {
+                    Button {
+                        navigator.open(subtitleItem)
+                    } label: {
+                        subtitleText(subtitle)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open artist \(subtitle)")
+                } else {
+                    subtitleText(subtitle)
+                }
             }
             Text(metaLine)
                 .font(.subheadline)
@@ -183,6 +198,13 @@ struct TrackListDetail: View {
             .buttonStyle(.bordered)
             .disabled(tracks.isEmpty)
         }
+    }
+
+    private func subtitleText(_ text: String) -> some View {
+        Text(text)
+            .font(.title3)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
     }
 
     private var metaLine: String {
