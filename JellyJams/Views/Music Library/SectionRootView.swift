@@ -22,7 +22,8 @@ struct SectionRootView: View {
             FavouritesView(
                 songs: libraryCache.items(for: .favouriteSongs),
                 albums: libraryCache.items(for: .favouriteAlbums),
-                artists: libraryCache.items(for: .favouriteArtists)
+                artists: libraryCache.items(for: .favouriteArtists),
+                playlists: libraryCache.items(for: .favouritePlaylists)
             )
         case .search:
             SearchView()

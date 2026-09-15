@@ -2,7 +2,7 @@ import SwiftUI
 
 struct FavouritesView: View {
     enum Tab: String, CaseIterable, Identifiable {
-        case songs, albums, artists
+        case songs, albums, artists, playlists
 
         var id: String { rawValue }
         var title: String { rawValue.capitalized }
@@ -13,6 +13,7 @@ struct FavouritesView: View {
     @ObservedObject var songs: PagedItems
     @ObservedObject var albums: PagedItems
     @ObservedObject var artists: PagedItems
+    @ObservedObject var playlists: PagedItems
     @State private var tab: Tab = .songs
 
     /// The model backing the selected tab. Each tab keeps its own sort and
@@ -22,6 +23,7 @@ struct FavouritesView: View {
         case .songs: songs
         case .albums: albums
         case .artists: artists
+        case .playlists: playlists
         }
     }
 
@@ -39,6 +41,7 @@ struct FavouritesView: View {
             case .songs: songsList
             case .albums: ItemGrid(model: albums, emptyMessage: "No favourite albums", emptySystemImage: "heart")
             case .artists: ItemGrid(model: artists, minCellWidth: 150, emptyMessage: "No favourite artists", emptySystemImage: "heart")
+            case .playlists: ItemGrid(model: playlists, emptyMessage: "No favourite playlists", emptySystemImage: "heart")
             }
         }
         .navigationTitle("Favourites")
@@ -59,6 +62,8 @@ struct FavouritesView: View {
                 ToolbarItem {
                     SortMenu(sortBy: $artists.sortBy, sortOrder: $artists.sortOrder, options: artists.sortOptions)
                 }
+            default:
+                ToolbarItemGroup {}
             }
         }
         .refreshToolbarItem { await current.reload() }

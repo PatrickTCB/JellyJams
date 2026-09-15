@@ -17,6 +17,7 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
     case favouriteSongs
     case favouriteAlbums
     case favouriteArtists
+    case favouritePlaylists
 
     /// The kind of item the list contains. The favourite lists request exactly
     /// the same item types as their browse counterparts and differ only by
@@ -33,7 +34,7 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
         case .albums, .favouriteAlbums: .albums
         case .artists, .favouriteArtists: .artists
         case .songs, .favouriteSongs: .songs
-        case .playlists: .playlists
+        case .playlists, .favouritePlaylists: .playlists
         }
     }
 
@@ -41,7 +42,7 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
     /// one; everything else browses the whole library.
     var filters: [ItemFilter]? {
         switch self {
-        case .favouriteSongs, .favouriteAlbums, .favouriteArtists: [.isFavorite]
+        case .favouriteSongs, .favouriteAlbums, .favouriteArtists, .favouritePlaylists: [.isFavorite]
         case .albums, .artists, .songs, .playlists: nil
         }
     }
@@ -58,7 +59,7 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
     var defaultSortBy: SortBy {
         switch self {
         case .albums, .favouriteAlbums: .albumArtist
-        case .artists, .favouriteArtists, .playlists: .sortName
+        case .artists, .favouriteArtists, .playlists, .favouritePlaylists: .sortName
         case .songs, .favouriteSongs: .artist
         }
     }
@@ -77,7 +78,7 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
             [.artist, .sortName, .album, .albumArtist, .dateCreated, .datePlayed, .runtime, .random]
         case .favouriteArtists:
             [.sortName, .random]
-        case .artists, .playlists, .favouriteSongs:
+        case .artists, .playlists, .favouriteSongs, .favouritePlaylists:
             []
         }
     }
