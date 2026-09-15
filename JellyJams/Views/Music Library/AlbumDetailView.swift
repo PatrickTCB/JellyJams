@@ -6,7 +6,7 @@ struct AlbumDetailView: View {
     var body: some View {
         TrackListDetail(
             headerItem: album,
-            subtitle: album.subtitleArtist,
+            subtitle: album.subtitleAlbumArtist,
             showsGenres: true,
             showsSimilarAlbums: true
         )

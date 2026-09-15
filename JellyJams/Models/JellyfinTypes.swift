@@ -29,6 +29,12 @@ extension JellyfinAPI.BaseItemDto {
     var runtimeSeconds: Double? { Ticks.seconds(fromTicks: runTimeTicks) }
 
     var subtitleArtist: String? {
+        if let artists, !artists.isEmpty { return artists.joined(separator: ", ") }
+        if let albumArtist, !albumArtist.isEmpty { return albumArtist }
+        return nil
+    }
+    
+    var subtitleAlbumArtist: String? {
         if let albumArtist, !albumArtist.isEmpty { return albumArtist }
         if let artists, !artists.isEmpty { return artists.joined(separator: ", ") }
         return nil

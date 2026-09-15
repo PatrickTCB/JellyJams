@@ -21,7 +21,7 @@ struct ItemRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.displayName).lineLimit(1)
-                if let subtitle = item.subtitleArtist {
+                if let subtitle = item.subtitleAlbumArtist {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -16,7 +16,7 @@ struct DownloadedCollectionDetail: View {
         if collection.type == .musicAlbum {
             TrackListDetail(
                 headerItem: collection,
-                subtitle: collection.subtitleArtist,
+                subtitle: collection.subtitleAlbumArtist,
                 showsGenres: false,
                 showsSimilarAlbums: false,
                 downloaded: true

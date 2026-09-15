@@ -13,7 +13,7 @@ struct ItemGridCell: View {
     private var subtitle: String? {
         switch item.itemType {
         case .musicAlbum:
-            return item.subtitleArtist
+            return item.subtitleAlbumArtist
         case .musicArtist:
             return nil
         case .playlist:
