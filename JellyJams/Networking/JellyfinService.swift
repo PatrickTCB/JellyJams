@@ -46,6 +46,7 @@ final class JellyfinService: Sendable {
             networkConfiguration = sessionConfiguration
         } else {
             let config = URLSessionConfiguration.default
+            config.httpAdditionalHeaders = ["User-Agent": "\(deviceInfo.clientName)/\(deviceInfo.version) \(deviceInfo.deviceOS)"]
             config.timeoutIntervalForRequest = 30
             config.timeoutIntervalForResource = 60
             config.waitsForConnectivity = true

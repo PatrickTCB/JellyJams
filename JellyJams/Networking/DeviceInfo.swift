@@ -11,6 +11,7 @@ struct DeviceInfo: Sendable, Hashable {
     var version: String
     var deviceName: String
     var deviceId: String
+    var deviceOS: String
 
     static let deviceIdDefaultsKey = "jellyjams.deviceId"
 
@@ -30,7 +31,8 @@ struct DeviceInfo: Sendable, Hashable {
             clientName: "JellyJams",
             version: version,
             deviceName: Self.currentDeviceName(),
-            deviceId: deviceId
+            deviceId: deviceId,
+            deviceOS: Self.currentDeviceOS()
         )
     }
 
@@ -40,6 +42,15 @@ struct DeviceInfo: Sendable, Hashable {
         return UIDevice.current.name
         #else
         return Host.current().localizedName ?? "Mac"
+        #endif
+    }
+    
+    @MainActor
+    private static func currentDeviceOS() -> String {
+        #if os(iOS)
+        return "iOS"
+        #else
+        return "macOS"
         #endif
     }
 
