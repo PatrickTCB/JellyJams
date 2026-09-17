@@ -5,33 +5,40 @@
 A native **SwiftUI** music client for [Jellyfin](https://jellyfin.org), running on
 **macOS**, **iPadOS**, and **iOS** from a single multiplatform target.
 
-I will put this on the app store, and aspire to distribute the Mac app via Homebrew.
-Once those things happen, I'll updated this section with info on how to install from
-these places.
+**macOS:** download the latest [release](https://github.com/PatrickTCB/JellyJams/releases) —
+the app updates itself via [Sparkle](https://sparkle-project.org).
 
-If you want to use the app before then, you've gotta build it yourself and use xcode
-to get it on to your phone.
+**iOS:** for now you've gotta build it yourself and use Xcode to get it on your phone. Once
+it's on the App Store, I'll update this. I also aspire to have it on AltStore.
 
 All communication with Jellyfin is done using their official SDK [`jellyfin-sdk-swift`](https://github.com/jellyfin/jellyfin-sdk-swift). 
 I pinned the version to 3.1.0, but might change that as I work with the SDK and
 better understand what the change process is like.
 
-**Status:** early but usable. The basic playback and navigation all work, however, 
-there is still lots to do. Below is a list of stuff that's not done, that I think 
-I will do but this is in no way a promise. I've got plans for features, but the 
-order in which I do them will depend on what's most fun for me to work on.
+**Status:** early but usable. Playback, navigation, offline downloads, AirPlay controls, 
+and playlist management (create, add/remove songs, delete) all work. Below is a list of stuff that's
+not done, that I think I will do but this is in no way a promise. The order will
+depend on what's most fun for me to work on.
 
-**Not implemented yet:** offline downloads, transcoding (direct play only), lyrics,
-ReplayGain, gapless/crossfade, sleep timer, CarPlay, widgets, Quick Connect, AirPlay 
-controls, and full playlist management.
+**Not implemented yet:** transcoding (direct play only), lyrics, ReplayGain,
+gapless/crossfade, sleep timer, CarPlay, widgets, Quick Connect, and AirPlay controls.
 
-I expect to be on the App Store in a few weeks, there's no planned Test Flight beta or
-anything like that. 
+There's no planned public Test Flight beta or anything like that.
+
+**What's in the app**
+
+- Albums, artists, songs, and playlists, with sorting and genre filtering
+- Favourites view (songs, albums, artists, and favourite playlists)
+- Offline downloads — tracks, albums, or a whole artist's albums — with a Downloads
+  tab, progress badges, and automatic fallback to downloads when the server is
+  unreachable
+- Full-screen player with queue, shuffle, and repeat
+- Search across the whole library
 
 **Platform integration**
 
 - Context menus everywhere: right-click on macOS, long-press on iOS and iPadOS — play,
-  shuffle, play next, add to queue, add to playlist, toggle favourite
+  shuffle, play next, add to queue, add to playlist, download, toggle favourite
 - Swipe actions on tracks on iOS
 - Lock screen, Control Center, and media-key control via `MPRemoteCommandCenter`, with
   artwork in the system Now Playing panel
@@ -47,6 +54,7 @@ anything like that.
 | ⌘⇧S | Toggle shuffle |
 | ⌘⇧R | Cycle repeat mode |
 | ⌘R | Refresh current view |
+| ⌘, | Open Settings |
 
 ## Requirements
 
@@ -64,8 +72,8 @@ anything like that.
 committed, so you must generate it after cloning:
 
 ```bash
-git clone <this-repo>
-cd jellyjams
+git clone https://github.com/PatrickTCB/JellyJams.git
+cd JellyJams
 xcodegen generate
 ```
 
