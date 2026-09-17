@@ -60,6 +60,7 @@ targets:
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: YES
         TARGETED_DEVICE_FAMILY: "1,2"
         "CODE_SIGN_ENTITLEMENTS[sdk=macosx*]": JellyJams/JellyJams.macOS.entitlements
+        "CODE_SIGN_ENTITLEMENTS[sdk=iphone*]": JellyJams/JellyJams.entitlements
         "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks"
 
   JellyJamsTests:

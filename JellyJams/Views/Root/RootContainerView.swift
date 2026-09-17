@@ -23,6 +23,9 @@ struct RootContainerView: View {
         }
         .task(id: session.isSignedIn) {
             player.configure(downloads: downloads)
+            #if os(iOS)
+            CarPlayController.shared.configure(session: session, player: player, downloads: downloads)
+            #endif
             if session.isSignedIn {
                 player.configure(client: session.client)
                 downloads.configure(client: session.client)

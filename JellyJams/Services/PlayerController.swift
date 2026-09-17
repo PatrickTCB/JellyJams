@@ -660,6 +660,14 @@ final class PlayerController: ObservableObject {
 
     // MARK: - Audio session
 
+    /// Serial queue for audio-session activation/deactivation.
+    ///
+    /// `AVAudioSession.setActive` can block while it coordinates with the audio
+    /// system, so it must not run on the main thread. A serial queue also keeps
+    /// a rapid play-then-stop ordered: the deactivation can't overtake the
+    /// activation that was submitted first.
+    private let audioSessionQueue = DispatchQueue(label: "net.aseriesoftubes.JellyJams.audioSession", qos: .userInitiated)
+
     /// Every path that starts the `AVPlayer` goes through here, so the audio
     /// session is claimed exactly once and only at the moment sound is about to
     /// come out.
@@ -689,14 +697,24 @@ final class PlayerController: ObservableObject {
     /// Deliberately not done at sign-in: launching Jelly Jams, or signing in to
     /// browse, would stop whatever the user was already listening to before
     /// they had asked for a single track.
+    ///
+    /// The synchronous `setActive` blocks, so it is dispatched onto a
+    /// background queue. The flag is flipped up front so a burst of transport
+    /// actions doesn't each re-request the session while the first request is
+    /// still in flight, and it is restored only if activation fails.
     private func activateAudioSession() {
         #if os(iOS)
         guard !isAudioSessionActive else { return }
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-            isAudioSessionActive = true
-        } catch {
-            playbackLogger.error("Could not activate audio session: \(error.localizedDescription, privacy: .public)")
+        isAudioSessionActive = true
+        audioSessionQueue.async {
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                playbackLogger.error("Could not activate audio session: \(error.localizedDescription, privacy: .public)")
+                Task { @MainActor in
+                    self.isAudioSessionActive = false
+                }
+            }
         }
         #endif
     }
@@ -709,10 +727,12 @@ final class PlayerController: ObservableObject {
         #if os(iOS)
         guard isAudioSessionActive else { return }
         isAudioSessionActive = false
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-        } catch {
-            playbackLogger.error("Could not deactivate audio session: \(error.localizedDescription, privacy: .public)")
+        audioSessionQueue.async {
+            do {
+                try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            } catch {
+                playbackLogger.error("Could not deactivate audio session: \(error.localizedDescription, privacy: .public)")
+            }
         }
         #endif
     }
