@@ -1,12 +1,12 @@
 import SwiftUI
 
 /// Top-level view that swaps between onboarding and the signed-in app based on
-/// session state.
+/// session state. Service wiring happens in ``AppServices``; this view only
+/// renders, and hosts the alerts that need to outlive the screens raising
+/// them.
 struct RootContainerView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var playlistStore: PlaylistStore
-    @EnvironmentObject private var libraryCache: LibraryCache
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
     @Environment(\.scenePhase) private var scenePhase
@@ -19,27 +19,6 @@ struct RootContainerView: View {
                 MainShellView()
             } else {
                 ServerLoginView()
-            }
-        }
-        .task(id: session.isSignedIn) {
-            player.configure(downloads: downloads)
-            #if os(iOS)
-            CarPlayController.shared.configure(session: session, player: player, downloads: downloads)
-            #endif
-            if session.isSignedIn {
-                player.configure(client: session.client)
-                downloads.configure(client: session.client)
-                playlistStore.configure(client: session.client)
-                favourites.configure(client: session.client)
-                await session.checkServerReachability()
-                player.restorePlaybackState()
-            } else {
-                player.clearQueue()
-                player.configure(client: nil)
-                downloads.configure(client: nil)
-                playlistStore.configure(client: nil)
-                favourites.configure(client: nil)
-                libraryCache.clear()
             }
         }
         .onChange(of: scenePhase) { _, phase in

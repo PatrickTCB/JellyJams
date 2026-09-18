@@ -14,7 +14,7 @@ final class CheckForUpdatesViewModel: ObservableObject {
 }
 
 // This is the view for the Check for Updates menu item
-// Note this intermediate view is necessary for the disabled state on the menu item to work properly before Monterey.
+// Note: this intermediate view is necessary for the disabled state on the menu item to work properly before Monterey.
 // See https://stackoverflow.com/questions/68553092/menu-not-updating-swiftui-bug for more info
 struct CheckForUpdatesView: View {
     @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
@@ -36,26 +36,46 @@ struct CheckForUpdatesView: View {
 
 @main
 struct JellyJamsApp: App {
-    @StateObject private var session = SessionStore()
-    @StateObject private var player = PlayerController()
-    @StateObject private var playerPresentation = PlayerPresentation()
-    @StateObject private var playlistStore = PlaylistStore()
-    @StateObject private var libraryCache = LibraryCache()
-    @StateObject private var favourites = FavouriteStore()
-    @StateObject private var settingsPresentation = SettingsPresentation()
-    @StateObject private var preferences = PreferencesStore()
-    @StateObject private var downloads = DownloadStore()
+    // The instances come from ``AppServices``, the process-wide owner, so a
+    // background launch that never creates a scene — an App Intent — still
+    // shares this exact graph. `@StateObject` adopts them so the scene graph
+    // observes the same objects.
+    @StateObject private var session: SessionStore
+    @StateObject private var player: PlayerController
+    @StateObject private var playerPresentation: PlayerPresentation
+    @StateObject private var playlistStore: PlaylistStore
+    @StateObject private var libraryCache: LibraryCache
+    @StateObject private var favourites: FavouriteStore
+    @StateObject private var settingsPresentation: SettingsPresentation
+    @StateObject private var preferences: PreferencesStore
+    @StateObject private var downloads: DownloadStore
     #if os(macOS)
     private let updaterController: SPUStandardUpdaterController
-        
+    #endif
+
     init() {
+        // Referencing `shared` here — not only in the property autoclosures —
+        // forces the service graph, its session restore and its wiring to run
+        // at process start, even when no scene ever appears.
+        let services = AppServices.shared
+        _session = StateObject(wrappedValue: services.session)
+        _player = StateObject(wrappedValue: services.player)
+        _playerPresentation = StateObject(wrappedValue: services.playerPresentation)
+        _playlistStore = StateObject(wrappedValue: services.playlistStore)
+        _libraryCache = StateObject(wrappedValue: services.libraryCache)
+        _favourites = StateObject(wrappedValue: services.favourites)
+        _settingsPresentation = StateObject(wrappedValue: services.settingsPresentation)
+        _preferences = StateObject(wrappedValue: services.preferences)
+        _downloads = StateObject(wrappedValue: services.downloads)
+        #if os(macOS)
         // If you want to start the updater manually, pass false to startingUpdater and call .startUpdater() later
         // This is where you can also pass an updater delegate if you need one
         let runningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
         updaterController = SPUStandardUpdaterController(startingUpdater: !runningTests, updaterDelegate: nil, userDriverDelegate: nil)
+        #endif
     }
-    #endif
+
     var body: some Scene {
         WindowGroup {
             RootContainerView()
@@ -68,7 +88,6 @@ struct JellyJamsApp: App {
                 .environmentObject(settingsPresentation)
                 .environmentObject(preferences)
                 .environmentObject(downloads)
-                .onAppear { session.restore() }
                 .frame(minWidth: 400, minHeight: 300)
         }
         .commands {

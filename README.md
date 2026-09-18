@@ -62,7 +62,7 @@ There's no planned public Test Flight beta or anything like that.
 - **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — `brew install xcodegen`
 - A **Jellyfin server**. The pinned SDK is generated from the **Jellyfin 12** API, so a
   Jellyfin 12 server is expected.
-- Deployment targets are **macOS 15** and **iOS/iPadOS 18**
+- Deployment targets are **macOS 15** and **iOS/iPadOS 27**
 
 ## Building
 

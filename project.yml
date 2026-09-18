@@ -4,7 +4,7 @@ options:
   createIntermediateGroups: true
   deploymentTarget:
     macOS: "15.0"
-    iOS: "18.0"
+    iOS: "27.0"
   groupSortPosition: top
 
 settings:
@@ -31,7 +31,7 @@ targets:
     supportedDestinations: [macOS, iOS]
     deploymentTarget:
       macOS: "15.0"
-      iOS: "18.0"
+      iOS: "27.0"
     sources:
       - path: JellyJams
         type: syncedFolder

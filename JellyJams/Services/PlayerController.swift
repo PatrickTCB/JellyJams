@@ -76,7 +76,8 @@ final class PlayerController: ObservableObject {
     /// change, which is what "was it playing before the call?" has to mean.
     private var isPlaybackRequested = false
     #if os(iOS)
-    private var interruptionObserver: NSObjectProtocol?
+    private var sessionInactiveObserver: NSObjectProtocol?
+    private var resumptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
     /// Whether this app currently holds the audio session. Claiming it is what
     /// silences whatever else is playing, so it is tracked rather than
@@ -187,6 +188,14 @@ final class PlayerController: ObservableObject {
             UserDefaults.standard.removeObject(forKey: playbackStateKey)
             return
         }
+        // A queue that appeared while the saved state was being fetched belongs
+        // to something newer — playback the user started before the fetch
+        // completed, or playback an App Intent began in the background. The
+        // stale saved queue must not replace it.
+        guard queue.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: playbackStateKey)
+            return
+        }
 
         let entries = resolvedItems.map(QueueEntry.init)
         queue = entries
@@ -214,7 +223,8 @@ final class PlayerController: ObservableObject {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let failedToEndObserver { NotificationCenter.default.removeObserver(failedToEndObserver) }
         #if os(iOS)
-        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        if let sessionInactiveObserver { NotificationCenter.default.removeObserver(sessionInactiveObserver) }
+        if let resumptionObserver { NotificationCenter.default.removeObserver(resumptionObserver) }
         if let routeChangeObserver { NotificationCenter.default.removeObserver(routeChangeObserver) }
         #endif
         itemStatusObserver?.invalidate()
@@ -550,7 +560,7 @@ final class PlayerController: ObservableObject {
 
     private func setupEndObserver() {
         endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
@@ -570,21 +580,22 @@ final class PlayerController: ObservableObject {
     /// mid-track), which arrive as a notification rather than a status change.
     private func setupFailureObserver() {
         failedToEndObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemFailedToPlayToEndTime,
+            forName: AVPlayerItem.failedToPlayToEndTimeNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
             let failedItemID = (notification.object as AnyObject?).map(ObjectIdentifier.init)
-            let failedItem = notification.object as? AVPlayerItem
             let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-            let reason = Self.reason(from: error, statusCode: failedItem?.errorLog()?.events.last?.errorStatusCode)
             Task { @MainActor [weak self] in
                 guard let self,
                       let failedItemID,
                       let current = self.player.currentItem,
                       ObjectIdentifier(current) == failedItemID
                 else { return }
-                self.failPlayback(reason: reason)
+                let statusCode = await Self.lastErrorStatusCode(of: current)
+                // The fetch suspends; make sure the item is still current.
+                guard self.player.currentItem.map(ObjectIdentifier.init) == failedItemID else { return }
+                self.failPlayback(reason: Self.reason(from: error, statusCode: statusCode))
             }
         }
     }
@@ -602,11 +613,10 @@ final class PlayerController: ObservableObject {
                       ObjectIdentifier(current) == observedItemID,
                       current.status == .failed
                 else { return }
-                let reason = Self.reason(
-                    from: current.error,
-                    statusCode: current.errorLog()?.events.last?.errorStatusCode
-                )
-                self.failPlayback(reason: reason)
+                let statusCode = await Self.lastErrorStatusCode(of: current)
+                // The fetch suspends; make sure the item is still current.
+                guard self.player.currentItem.map(ObjectIdentifier.init) == observedItemID else { return }
+                self.failPlayback(reason: Self.reason(from: current.error, statusCode: statusCode))
             }
         }
     }
@@ -625,6 +635,23 @@ final class PlayerController: ObservableObject {
         errorMessage = "Couldn’t play “\(name)”. \(reason)"
         updateNowPlaying()
         playbackLogger.error("Playback failed: \(reason, privacy: .public)")
+    }
+
+    /// Fetches the HTTP status code of the item's most recent logged error.
+    ///
+    /// `errorLog()` used to be synchronous but could block the calling thread,
+    /// so it was replaced by this async variant in macOS/iOS 27. iOS targets 27
+    /// outright; macOS still supports older systems, where the synchronous
+    /// property remains correct (and only starts warning once the deployment
+    /// target reaches 27).
+    nonisolated private static func lastErrorStatusCode(of item: AVPlayerItem) async -> Int? {
+        #if os(macOS)
+        guard #available(macOS 27, *) else {
+            return item.errorLog()?.events.last?.errorStatusCode
+        }
+        #endif
+        guard let log = await item.errorLog else { return nil }
+        return log.events.last?.errorStatusCode
     }
 
     /// Builds a plain-language reason from an `AVFoundation`/`URL` error, favouring
@@ -749,27 +776,34 @@ final class PlayerController: ObservableObject {
         let center = NotificationCenter.default
         let session = AVAudioSession.sharedInstance()
 
-        interruptionObserver = center.addObserver(
-            forName: AVAudioSession.interruptionNotification,
+        sessionInactiveObserver = center.addObserver(
+            forName: AVAudioSession.didBecomeInactiveNotification,
             object: session,
             queue: .main
         ) { [weak self] notification in
-            let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            let context = notification.userInfo?[AVAudioSession.deactivationContextKey]
+                as? AVAudioSession.DeactivationContext
             Task { @MainActor [weak self] in
-                guard let self,
-                      let rawType,
-                      let type = AVAudioSession.InterruptionType(rawValue: rawType)
-                else { return }
-                switch type {
-                case .began:
-                    self.handleInterruptionBegan()
-                case .ended:
-                    let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions ?? 0)
-                    self.handleInterruptionEnded(shouldResume: options.contains(.shouldResume))
-                @unknown default:
-                    break
-                }
+                guard let self else { return }
+                // The app's own `setActive(false)` on a full stop also makes the
+                // session inactive; that is a deliberate stop, not something
+                // to react to. Everything else — a call, another app taking
+                // the session, the system suspending us — is an interruption.
+                guard context?.source != .app else { return }
+                self.handleInterruptionBegan()
+            }
+        }
+
+        resumptionObserver = center.addObserver(
+            forName: AVAudioSession.resumptionRecommendationNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] notification in
+            let context = notification.userInfo?[AVAudioSession.resumptionContextKey]
+                as? AVAudioSession.ResumptionContext
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.handleInterruptionEnded(shouldResume: context?.recommendation == .shouldResume)
             }
         }
 
@@ -801,9 +835,9 @@ final class PlayerController: ObservableObject {
         pause()
     }
 
-    /// Resumes only when the system says so. An interruption that ends without
-    /// `.shouldResume` — the user switched to another audio app — should leave
-    /// us paused rather than fight for the speaker.
+    /// Resumes only when the system recommends it. A recommendation to stay
+    /// paused — the user switched to another audio app — should leave us
+    /// paused rather than fight for the speaker.
     private func handleInterruptionEnded(shouldResume: Bool) {
         let shouldRestart = shouldResume && wasPlayingBeforeInterruption
         wasPlayingBeforeInterruption = false

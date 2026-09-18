@@ -65,6 +65,7 @@ enum TestFixtures {
         clientName: "JellyJamsTests",
         version: "1",
         deviceName: "Test Mac",
-        deviceId: "device-id"
+        deviceId: "device-id",
+        deviceOS: "macOS"
     )
 }
