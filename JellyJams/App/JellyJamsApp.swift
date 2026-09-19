@@ -36,6 +36,10 @@ struct CheckForUpdatesView: View {
 
 @main
 struct JellyJamsApp: App {
+    #if os(iOS)
+    // Routes classic-Siri (SiriKit Media) intents to their in-app handlers.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
     // The instances come from ``AppServices``, the process-wide owner, so a
     // background launch that never creates a scene — an App Intent — still
     // shares this exact graph. `@StateObject` adopts them so the scene graph
