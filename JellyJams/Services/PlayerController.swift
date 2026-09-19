@@ -110,7 +110,7 @@ final class PlayerController: ObservableObject {
         prepareAudioSession()
         setupAudioSessionObservers()
         NowPlayingCenter.shared.configure(RemoteCommandHandlers(
-            play: { [weak self] in self?.resume() },
+            play: { [weak self] in self?.playOrResume() },
             pause: { [weak self] in self?.pause() },
             toggle: { [weak self] in self?.togglePlayPause() },
             next: { [weak self] in self?.next() },
@@ -298,6 +298,56 @@ final class PlayerController: ObservableObject {
         isPlaying ? pause() : resume()
     }
 
+    /// Play/resume for the system transport ("Hey Siri, play", the Control
+    /// Centre play button): resumes when a track is loaded, and starts a
+    /// favourites shuffle (all songs when nothing is favourited) when the
+    /// queue is empty, so a play command with nothing queued does something
+    /// useful instead of nothing.
+    func playOrResume() {
+        guard currentItem == nil else {
+            resume()
+            return
+        }
+        guard let client else { return }
+        Task {
+            do {
+                let tracks = try await Self.fallbackQueue(client: client)
+                guard !tracks.isEmpty else { return }
+                play(tracks)
+            } catch {
+                playbackLogger.error("Could not start shuffle from the play command: \\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// The queue for a "play something" request with nothing specific named:
+    /// favourite songs in a random order, falling back to a random sample of
+    /// all songs when nothing is favourited. The order comes from the server
+    /// (`sortBy: .random`), so it is played as delivered.
+    ///
+    /// Shared with the Siri play intent, which uses it when asked to "play
+    /// Jelly Jams" with no content named.
+    nonisolated static func fallbackQueue(client: JellyfinService) async throws -> [BaseItemDto] {
+        let favourites = try await client.getItems(
+            includeItemTypes: [.audio],
+            recursive: true,
+            sortBy: .random,
+            filters: [.isFavorite],
+            limit: fallbackQueueLimit
+        ).items ?? []
+        if !favourites.isEmpty { return favourites }
+        return try await client.getItems(
+            includeItemTypes: [.audio],
+            recursive: true,
+            sortBy: .random,
+            limit: fallbackQueueLimit
+        ).items ?? []
+    }
+
+    /// How many songs a server-side shuffle asks for — the same bound the
+    /// CarPlay "shuffle" rows use.
+    private static let fallbackQueueLimit = 1000
+
     func resume() {
         guard currentItem != nil else { return }
         startPlayer()
@@ -321,10 +371,13 @@ final class PlayerController: ObservableObject {
     func next() {
         guard let index = currentIndex else { return }
         if index + 1 < queue.count {
+            playbackLogger.debug("Advancing from queue index \(index) to \(index + 1)")
             startPlayback(at: index + 1)
         } else if repeatMode == .repeatAll, !queue.isEmpty {
+            playbackLogger.debug("Wrapping from queue index \(index) back to 0 (Repeat All)")
             startPlayback(at: 0)
         } else {
+            playbackLogger.info("Reached the end of the queue")
             finishPlayback()
         }
     }
@@ -474,6 +527,7 @@ final class PlayerController: ObservableObject {
         resuming: Bool = true
     ) {
         guard let client, queue.indices.contains(index) else { return }
+        playbackLogger.debug("Loading queue index \(index) of \(self.queue.count)\(resuming ? " (playing)" : " (paused)")")
         let item = queue[index].item
         let nextPlaySessionId = UUID().uuidString
         let streamURL: URL
@@ -528,11 +582,13 @@ final class PlayerController: ObservableObject {
 
     private func handleTrackEnd() {
         if repeatMode == .repeatOne {
+            playbackLogger.debug("Track ended with Repeat One; replaying from the start")
             seek(to: 0)
             startPlayer()
             isPlaying = true
             reportStart()
         } else {
+            playbackLogger.debug("Track ended; advancing the queue")
             next()
         }
     }
@@ -559,18 +615,29 @@ final class PlayerController: ObservableObject {
     }
 
     private func setupEndObserver() {
+        // `didPlayToEndTime` is the *natural* end of a track; the failure
+        // notification is a different event handled in
+        // ``setupFailureObserver()``. Swapping the two leaves the queue unable
+        // to advance past a track that finishes normally.
         endObserver = NotificationCenter.default.addObserver(
-            forName: AVPlayerItem.failedToPlayToEndTimeNotification,
+            forName: AVPlayerItem.didPlayToEndTimeNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
             let endedItemIdentifier = (notification.object as AnyObject?).map(ObjectIdentifier.init)
             Task { @MainActor [weak self] in
-                guard let self,
-                      let endedItemIdentifier,
+                guard let self else { return }
+                guard let endedItemIdentifier,
                       let currentItem = self.player.currentItem,
                       ObjectIdentifier(currentItem) == endedItemIdentifier
-                else { return }
+                else {
+                    // Routine for a stale notification about an item we have
+                    // already replaced; logged because "silently ignored" is
+                    // exactly what a dead queue-advance looks like.
+                    playbackLogger.debug("Discarded an end-of-track event for an item that is no longer current")
+                    return
+                }
+                playbackLogger.info("Track at queue index \(self.currentIndex ?? -1) played to end")
                 self.handleTrackEnd()
             }
         }
@@ -789,7 +856,10 @@ final class PlayerController: ObservableObject {
                 // session inactive; that is a deliberate stop, not something
                 // to react to. Everything else — a call, another app taking
                 // the session, the system suspending us — is an interruption.
-                guard context?.source != .app else { return }
+                guard context?.source != .app else {
+                    playbackLogger.debug("Audio session went inactive at our own request (full stop); not an interruption")
+                    return
+                }
                 self.handleInterruptionBegan()
             }
         }
@@ -831,6 +901,7 @@ final class PlayerController: ObservableObject {
         // Captured before `pause()`, which clears it.
         wasPlayingBeforeInterruption = isPlaybackRequested
         isAudioSessionActive = false
+        playbackLogger.info("Audio session went inactive (was playing: \(self.wasPlayingBeforeInterruption))")
         guard isPlaybackRequested else { return }
         pause()
     }
@@ -841,6 +912,7 @@ final class PlayerController: ObservableObject {
     private func handleInterruptionEnded(shouldResume: Bool) {
         let shouldRestart = shouldResume && wasPlayingBeforeInterruption
         wasPlayingBeforeInterruption = false
+        playbackLogger.info("Interruption ended (system recommends resuming: \(shouldResume))")
         guard shouldRestart, currentItem != nil else { return }
         resume()
     }
@@ -850,6 +922,7 @@ final class PlayerController: ObservableObject {
     /// music out loud to the room.
     private func handleOutputDeviceLost() {
         guard isPlaybackRequested else { return }
+        playbackLogger.info("Audio output device went away; pausing")
         pause()
     }
     #endif
