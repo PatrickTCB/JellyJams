@@ -111,12 +111,17 @@ extension SongQuery: EntityStringQuery {
     func entities(matching string: String) async throws -> [SongEntity] {
         let client = await AppServices.shared.session.client
         guard let client else { return [] }
-        let result = try await client.getItems(
-            includeItemTypes: [.audio], recursive: true, searchTerm: string, limit: 10
-        )
-        return (result.items ?? []).map {
-            SongEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600))
+        // Spoken phrase parameters arrive here (e.g. "Whiplash by
+        // Architects" from "Play Whiplash by Architects in Jelly Jams"), so
+        // resolve through the shared pipeline to get the title-and-artist
+        // split instead of a literal search for the whole phrase, then keep
+        // only the songs — the other kinds belong to their own play intents.
+        let candidates = try await SiriAudioSearch.search(matching: string, client: client)
+        let songs = candidates.compactMap { entity -> SongEntity? in
+            if case .song(let song) = entity { return song }
+            return nil
         }
+        return Array(songs.prefix(10))
     }
 }
 #endif
