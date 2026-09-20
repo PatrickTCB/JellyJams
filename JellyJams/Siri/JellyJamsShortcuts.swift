@@ -24,6 +24,7 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
             phrases: [
                 "Play \(AppShortcutPhraseToken.applicationName)",
                 "Play music in \(AppShortcutPhraseToken.applicationName)",
+                "Play some music in \(AppShortcutPhraseToken.applicationName)",
             ],
             shortTitle: "Play Music",
             systemImageName: "play.circle.fill"
