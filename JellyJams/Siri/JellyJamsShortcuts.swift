@@ -5,6 +5,13 @@ import AppIntents
 /// when routing music requests to the app, and what puts Jelly Jams in the
 /// list of apps Siri offers for audio playback requests.
 ///
+/// Phrases are *examples*, not a whitelist: Siri/Apple Intelligence
+/// generalise over the handful given here, so a few well-chosen examples
+/// cover far more than the words on the page. The "play some music" open
+/// case is deliberately parameterless and routes into the `.unspecified`
+/// branch of `AudioSearchQuery` (favourite songs) rather than trying to
+/// enumerate every phrasing a user might use.
+///
 /// ``PlayAudioIntent`` carries the schema-backed request; its `audioEntity`
 /// is a `@UnionValue`, which phrases cannot interpolate, so its phrases are
 /// parameterless and Siri fills the parameter from the utterance through the
@@ -19,68 +26,78 @@ import AppIntents
 /// toolchain.
 struct JellyJamsShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+
+         // Open / generic play: "Play (some) music in Jelly Jams" with no
+         // named thing -- the `.unspecified` branch of `AudioSearchQuery`
+         // resolves it to the user's favourite songs.
         AppShortcut(
             intent: PlayAudioIntent(),
             phrases: [
-                "Play \(AppShortcutPhraseToken.applicationName)",
-                "Play music in \(AppShortcutPhraseToken.applicationName)",
-                "Play some music in \(AppShortcutPhraseToken.applicationName)",
-            ],
+                 "Play music in \(AppShortcutPhraseToken.applicationName)",
+                 "Play some music in \(AppShortcutPhraseToken.applicationName)",
+             ],
             shortTitle: "Play Music",
             systemImageName: "play.circle.fill"
-        )
+         )
 
-        AppShortcut(
-            intent: SearchAndPlayIntent(),
-            phrases: [
-                "Search and play in \(AppShortcutPhraseToken.applicationName)",
-            ],
-            shortTitle: "Search and Play",
-            systemImageName: "magnifyingglass"
-        )
-
+         // Named-item plays; the spoken placeholder binds to the entity's
+         // `EntityStringQuery` through the `\(self.$x)` parameter form.
         AppShortcut(
             intent: PlaySongIntent(),
             phrases: [
-                "Play \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
-                "Play song \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
-                "Play the song \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
-            ],
+                 "Play \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play song \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
+             ],
             shortTitle: "Play Song",
             systemImageName: "music.note"
-        )
+         )
 
         AppShortcut(
             intent: PlayAlbumIntent(),
             phrases: [
-                "Play album \(\.$album) in \(AppShortcutPhraseToken.applicationName)",
-                "Play the album \(\.$album) in \(AppShortcutPhraseToken.applicationName)",
-            ],
+                 "Play album \(\.$album) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play the album \(\.$album) in \(AppShortcutPhraseToken.applicationName)",
+             ],
             shortTitle: "Play Album",
             systemImageName: "music.note.square.stack"
-        )
+         )
 
         AppShortcut(
             intent: PlayArtistIntent(),
             phrases: [
-                "Play music by \(\.$artist) in \(AppShortcutPhraseToken.applicationName)",
-                "Play songs by \(\.$artist) in \(AppShortcutPhraseToken.applicationName)",
-                "Play artist \(\.$artist) in \(AppShortcutPhraseToken.applicationName)",
-            ],
+                 "Play music by \(\.$artist) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play songs by \(\.$artist) in \(AppShortcutPhraseToken.applicationName)",
+             ],
             shortTitle: "Play Artist",
             systemImageName: "music.mic"
-        )
+         )
 
         AppShortcut(
             intent: PlayPlaylistIntent(),
             phrases: [
-                "Play my playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
-                "Play playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
-                "Play the playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
-            ],
+                 "Play my playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
+             ],
             shortTitle: "Play Playlist",
             systemImageName: "music.note.list"
-        )
-    }
+         )
+     }
+
+     /// Phrases that must never trigger a Jelly Jams shortcut. "stop"/"pause"
+     /// are playback-stop commands, not "play" intents, so we don't want them
+     /// swept in by the open-play phrase above.
+     ///
+     /// Constructed on demand as a computed `static var`, exactly like
+     /// `appShortcuts`, rather than a stored `static let`/`var`: a stored
+     /// global of the non-`Sendable` `NegativeAppShortcutPhrases` would be
+     /// rejected as a non-isolated shared-mutable-state global under Swift 6.
+     static var negativePhrases: NegativeAppShortcutPhrases {
+          NegativeAppShortcutPhrases(phrases: [
+               "Stop playing",
+               "Stop Jelly Jams",
+               "Stop",
+               "Pause",
+           ])
+      }
 }
 #endif

@@ -4,9 +4,9 @@ import Foundation
 /// The Jellyfin-side search behind Siri's audio requests.
 ///
 /// Siri delivers a free-form phrase ("Whiplash by Architects"); this maps it
-/// onto library queries and ranks the candidates. The Shortcuts-facing
-/// ``SearchAndPlayIntent`` shares the pipeline, so a shortcut exercises the
-/// exact same resolution Siri uses.
+/// onto library queries and ranks the candidates. ``AudioSearchQuery`` shares
+/// the pipeline, so Siri resolves voice requests through the exact same code
+/// path that used to live in ``SearchAndPlayIntent``.
 enum SiriAudioSearch {
 
     /// Candidates for a spoken or typed query, best matches first: songs,
