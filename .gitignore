@@ -4,7 +4,7 @@ debug-screenshots/*.png
 Jelly*Jams*.zip
 Jelly Jams.app
 appcast.xml
-
+.qwen/
 # macOS
 .DS_Store
 ._*
