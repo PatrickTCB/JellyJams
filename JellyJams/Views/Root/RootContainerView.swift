@@ -9,6 +9,7 @@ struct RootContainerView: View {
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var playlistStore: PlaylistStore
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -78,6 +79,20 @@ struct RootContainerView: View {
             Button("OK", role: .cancel) { downloads.dismissError() }
         } message: {
             Text(downloads.errorMessage ?? "")
+        }
+        // Playlist writes are raised from context menus that are on their way
+        // out by the time the request fails, so the alert is hosted here on a
+        // view that stays put rather than on the affordance itself.
+        .alert(
+            "Playlist Problem",
+            isPresented: Binding(
+                get: { playlistStore.actionErrorMessage != nil },
+                set: { if !$0 { playlistStore.dismissActionError() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { playlistStore.dismissActionError() }
+        } message: {
+            Text(playlistStore.actionErrorMessage ?? "")
         }
     }
 }

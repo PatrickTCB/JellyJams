@@ -18,7 +18,6 @@ struct ItemContextMenu: ViewModifier {
     @State private var isPresentingNewPlaylist = false
     @State private var isConfirmingDeletePlaylist = false
     @State private var newPlaylistName = ""
-    @State private var errorMessage: String?
 
     private enum CollectionAction {
         case play
@@ -51,17 +50,6 @@ struct ItemContextMenu: ViewModifier {
                 }
             } message: {
                 Text("Create a playlist from the songs in “\(item.displayName)”.")
-            }
-            .alert(
-                "Couldn’t Complete Action",
-                isPresented: Binding(
-                    get: { errorMessage != nil },
-                    set: { if !$0 { errorMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) { errorMessage = nil }
-            } message: {
-                Text(errorMessage ?? "")
             }
             .alert("Delete Playlist", isPresented: $isConfirmingDeletePlaylist) {
                 Button("Cancel", role: .cancel) { }
@@ -140,20 +128,15 @@ struct ItemContextMenu: ViewModifier {
 
     // MARK: - Actions
 
-    /// Presentations raised in the same run loop turn as a dismissing menu or
-    /// alert are swallowed, so anything that shows an alert waits for the
-    /// previous presentation to leave the screen first.
+    /// Presentations raised in the same run loop turn as a dismissing context
+    /// menu are swallowed, so a prompt opened straight from a menu button
+    /// waits for the menu to leave the screen first. Action errors don't need
+    /// this — they surface through the root-hosted alert, which no dismissal
+    /// can compete with.
     private func presentNewPlaylistPrompt() {
         Task {
             await Self.waitForPresentationDismissal()
             isPresentingNewPlaylist = true
-        }
-    }
-
-    private func present(error message: String?) {
-        Task {
-            await Self.waitForPresentationDismissal()
-            errorMessage = message
         }
     }
 
@@ -163,12 +146,12 @@ struct ItemContextMenu: ViewModifier {
 
     private func perform(_ action: CollectionAction) {
         guard let client = session.client else {
-            present(error: JellyfinError.notAuthenticated.errorDescription)
+            playlistStore.presentActionError(JellyfinError.notAuthenticated.errorDescription)
             return
         }
         if case .newPlaylist(let name) = action,
            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            present(error: JellyfinError.emptyPlaylistName.errorDescription)
+            playlistStore.presentActionError(JellyfinError.emptyPlaylistName.errorDescription)
             return
         }
 
@@ -206,7 +189,7 @@ struct ItemContextMenu: ViewModifier {
                     break // handled before track loading
                 }
             } catch {
-                present(error: error.userFacingMessage)
+                playlistStore.presentActionError(error.userFacingMessage)
             }
         }
     }

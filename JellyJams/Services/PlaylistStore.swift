@@ -8,6 +8,12 @@ final class PlaylistStore: ObservableObject {
     @Published private(set) var playlists: [BaseItemDto] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    /// Errors raised by "Add to Playlist"-style actions in context menus. The
+    /// menu is usually on its way out by the time the request fails, so these
+    /// are hosted by the root container rather than the affordance that raised
+    /// them. Kept separate from ``errorMessage``, which covers background
+    /// cache refreshes that shouldn't interrupt the user with an alert.
+    @Published private(set) var actionErrorMessage: String?
 
     /// How long a cached list is trusted before a menu triggers a refresh.
     private let staleInterval: TimeInterval = 300
@@ -109,6 +115,16 @@ final class PlaylistStore: ObservableObject {
 
     func dismissError() {
         errorMessage = nil
+    }
+
+    func dismissActionError() {
+        actionErrorMessage = nil
+    }
+
+    /// Records an error raised by a playlist action in a context menu so the
+    /// root-hosted alert can present it.
+    func presentActionError(_ message: String?) {
+        actionErrorMessage = message
     }
 
     private func cancelLoad() {

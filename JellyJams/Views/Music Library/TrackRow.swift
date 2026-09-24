@@ -13,8 +13,12 @@ struct TrackRow: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
+
+    @State private var isPresentingNewPlaylist = false
+    @State private var newPlaylistName = ""
 
     private var isCurrent: Bool { player.currentItem?.id == track.id }
     private var isFavourite: Bool { favourites.isFavourite(track) }
@@ -57,6 +61,17 @@ struct TrackRow: View {
         }
         .buttonStyle(.plain)
         .contextMenu { contextMenu }
+        .onAppear { playlistStore.refreshIfNeeded() }
+        .alert("New Playlist", isPresented: $isPresentingNewPlaylist) {
+            TextField("Name", text: $newPlaylistName)
+            Button("Cancel", role: .cancel) { newPlaylistName = "" }
+            Button("Create") {
+                perform(.newPlaylist(name: newPlaylistName))
+                newPlaylistName = ""
+            }
+        } message: {
+            Text("Create a playlist containing “\(track.displayName)”.")
+        }
         #if os(iOS)
         .swipeActions(edge: .leading) {
             Button {
@@ -97,10 +112,39 @@ struct TrackRow: View {
         }
     }
 
+    private enum TrackAction {
+        case addToPlaylist(id: String)
+        case newPlaylist(name: String)
+    }
+
+    private var destinationPlaylists: [BaseItemDto] {
+        playlistStore.playlists.filter { $0.id != nil }
+    }
+
     @ViewBuilder private var contextMenu: some View {
         Button { onPlay() } label: { Label("Play", systemImage: "play.fill") }
         Button { player.playNext(track) } label: { Label("Play Next", systemImage: "text.insert") }
         Button { player.addToQueue([track]) } label: { Label("Add to Queue", systemImage: "text.append") }
+
+        Menu {
+            Button {
+                presentNewPlaylistPrompt()
+            } label: {
+                Label("New Playlist…", systemImage: "plus")
+            }
+
+            if !destinationPlaylists.isEmpty {
+                Divider()
+                ForEach(destinationPlaylists) { playlist in
+                    Button(playlist.displayName) {
+                        if let id = playlist.id { perform(.addToPlaylist(id: id)) }
+                    }
+                }
+            }
+        } label: {
+            Label("Add to Playlist", systemImage: "text.badge.plus")
+        }
+
         if let onRemoveFromPlaylist {
             Button(role: .destructive, action: onRemoveFromPlaylist) {
                 Label("Remove from Playlist", systemImage: "minus.circle")
@@ -126,5 +170,42 @@ struct TrackRow: View {
             )
         }
         .disabled(downloads.isBusy(track))
+    }
+
+    // MARK: - Playlist Actions
+
+    /// Presentations raised in the same run loop turn as a dismissing context
+    /// menu are swallowed, so a prompt opened straight from a menu button
+    /// waits for the menu to leave the screen first. Action errors don't need
+    /// this — they surface through the root-hosted alert, which no dismissal
+    /// can compete with.
+    private func presentNewPlaylistPrompt() {
+        Task {
+            await Self.waitForPresentationDismissal()
+            isPresentingNewPlaylist = true
+        }
+    }
+
+    private static func waitForPresentationDismissal() async {
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    private func perform(_ action: TrackAction) {
+        guard let id = track.id else {
+            playlistStore.presentActionError(JellyfinError.missingItemIdentifier.errorDescription)
+            return
+        }
+        Task {
+            do {
+                switch action {
+                case .addToPlaylist(let playlistId):
+                    try await playlistStore.add(itemIds: [id], toPlaylistWithId: playlistId)
+                case .newPlaylist(let name):
+                    try await playlistStore.createPlaylist(named: name, itemIds: [id])
+                }
+            } catch {
+                playlistStore.presentActionError(error.userFacingMessage)
+            }
+        }
     }
 }
