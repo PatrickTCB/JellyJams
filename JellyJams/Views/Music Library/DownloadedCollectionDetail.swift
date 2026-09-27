@@ -11,7 +11,10 @@ struct DownloadedCollectionDetail: View {
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var player: PlayerController
     let collection: BaseItemDto
-    
+    /// The tracks the user has selected (rows are keyed by track id): click
+    /// to select, double-click to play, shift-arrow to extend.
+    @State private var selection: Set<String> = []
+
     var body: some View {
         if collection.type == .musicAlbum {
             TrackListDetail(
@@ -30,17 +33,33 @@ struct DownloadedCollectionDetail: View {
             var tracks: [BaseItemDto] {
                 downloads.tracks(forItemId: collection.id ?? "")
             }
+            /// The selected tracks in list order — what selection actions
+            /// act on.
+            var selectedTracks: [BaseItemDto] {
+                TrackEntry.rows(tracks).filter { selection.contains($0.id) }.map(\.item)
+            }
             
-            List {
+            List(selection: $selection) {
                 Section {
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        TrackRow(track: track) {
+                    ForEach(Array(TrackEntry.rows(tracks).enumerated()), id: \.element.id) { index, entry in
+                        TrackRow(track: entry.item, selectedTracks: selectedTracks) {
                             player.play(tracks, startAt: index)
                         }
                     }
                 }
             }
             .listStyle(.plain)
+            .shiftArrowSelection($selection, ids: tracks.compactMap(\.id))
+            .onKeyPress(.escape) {
+                selection = []
+                return .handled
+            }
+            .focusable()
+            .toolbar {
+                if !selectedTracks.isEmpty {
+                    ToolbarItem { TrackSelectionMenu(tracks: selectedTracks) }
+                }
+            }
             .overlay {
                 if tracks.isEmpty {
                     ContentUnavailableView("No songs", systemImage: "music.note")

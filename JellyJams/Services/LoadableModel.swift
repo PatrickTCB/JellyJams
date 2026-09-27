@@ -68,6 +68,15 @@ final class LoadableModel<Value>: ObservableObject {
         isLoading = false
     }
 
+    /// Applies an in-place change to the loaded value, for optimistic updates
+    /// that must land before the server confirms them — a drag reorder shows
+    /// its result instantly and reconciles with the server afterwards. This
+    /// deliberately bypasses the load state machine: it is not a load, so no
+    /// spinner, error or "loaded once" transition belongs to it.
+    func mutate(_ transform: (inout Value) -> Void) {
+        transform(&value)
+    }
+
     /// Returns to the state before anything was loaded and abandons any load in
     /// flight. Used when the question itself goes away — an emptied search box
     /// has no results, not zero results.

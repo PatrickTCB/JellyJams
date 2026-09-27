@@ -26,6 +26,16 @@ struct TrackListDetail: View {
     /// Measured here rather than inside the row so the suggestion row can
     /// render nothing when it has nothing, and still know how much to ask for.
     @State private var contentWidth: CGFloat = 0
+    /// The selected rows — playlist entries keyed by entry id
+    /// (`playlistItemID`), which stays unique even when the same song is in
+    /// the playlist twice; album rows by track id. Selection exists on every
+    /// collection now (click to select, double-click to play); only
+    /// playlists act on it — removal, reordering — since albums are
+    /// disc/track sorted and downloaded collections are offline copies.
+    @State private var selection: Set<String> = []
+    /// True while a drag's server replay is still settling, so a second
+    /// drag can't race the first one's POSTs and interleave the sequences.
+    @State private var isReplayingMoves = false
     
     private var tracks: [BaseItemDto] {
         let raw = downloaded
@@ -43,7 +53,7 @@ struct TrackListDetail: View {
     }
 
     var body: some View {
-        List {
+        List(selection: $selection) {
             Section {
                 header
                     .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
@@ -51,19 +61,7 @@ struct TrackListDetail: View {
             }
 
             Section {
-                // Keyed by the track's own id rather than its position: a
-                // reload that reorders or replaces the list must carry each
-                // row's state (the current-track highlight, a swipe in
-                // progress) with the track, not leave it on row 3.
-                ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                    TrackRow(
-                        track: track,
-                        showArtwork: showArtworkInRows,
-                        onRemoveFromPlaylist: canRemoveFromPlaylist ? { removeFromPlaylist(track) } : nil
-                    ) {
-                        player.play(tracks, startAt: index)
-                    }
-                }
+                trackRows
             }
 
             if showsGenres {
@@ -90,6 +88,28 @@ struct TrackListDetail: View {
             }
         }
         .listStyle(.plain)
+        #if os(iOS)
+        // The reordering API's container: rows marked `.reorderable()` (the
+        // playlist's track rows) can be dragged — alone or, when selected,
+        // with the whole selection lifted together as the system's stacked
+        // drag previews. Albums have no reorderable rows, so this stays inert
+        // for them.
+        .reorderContainer(for: TrackEntry.self) { difference in
+            // The API declares this closure nonisolated, but a drop is a UI
+            // event on the main actor; assert that so the state changes
+            // inside are permitted under Swift 6 concurrency.
+            MainActor.assumeIsolated {
+                moveEntries(within: difference)
+            }
+        }
+        .dragContainerSelection(Array(selection))
+        #endif
+        .shiftArrowSelection($selection, ids: rowIds)
+        .onKeyPress(.escape) {
+            selection = []
+            return .handled
+        }
+        .focusable()
         .overlay {
             // Empty, failed and loading states sit centred over the list
             // rather than in a top row: a `ContentUnavailableView` in a List
@@ -111,8 +131,25 @@ struct TrackListDetail: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            #if os(iOS)
+            // Touch devices need edit mode to select and drag; iPad with a
+            // trackpad selects directly, macOS needs no edit mode at all.
+            if isEditablePlaylist {
+                ToolbarItem { EditButton() }
+            }
+            #endif
             ToolbarItem { FavouriteButton(item: headerItem) }
             ToolbarItem { DownloadButton(item: headerItem) }
+            if !selectedTracks.isEmpty {
+                ToolbarItem { TrackSelectionMenu(tracks: selectedTracks) }
+            }
+            if isEditablePlaylist && !selection.isEmpty {
+                ToolbarItem {
+                    Button(role: .destructive, action: removeSelectedTracks) {
+                        Label("Remove \(selection.count) from Playlist", systemImage: "minus.circle")
+                    }
+                }
+            }
         }
         .task(id: headerItem.id) { await reload() }
         .refreshable { await reload() }
@@ -120,6 +157,72 @@ struct TrackListDetail: View {
         #if os(iOS)
         .nowPlayingTabContentDock()
         #endif
+    }
+
+    // MARK: - Track rows
+
+    /// The track section's rows. Rows are ``TrackEntry``s — keyed by an id
+    /// unique within the list rather than by position, so a reload that
+    /// reorders or replaces the list carries each row's state (the
+    /// current-track highlight, a swipe in progress) with the track, not to
+    /// row 3 — and selection exists everywhere. Drag reordering only exists
+    /// where the user owns the order — a playlist: albums re-sort by disc
+    /// and track on every render, so a drag there would fight the sort and
+    /// snap straight back, and downloaded collections are offline copies
+    /// whose order no server call would change.
+    @ViewBuilder
+    private var trackRows: some View {
+        if isEditablePlaylist {
+            playlistRows
+        } else {
+            ForEach(Array(trackEntries.enumerated()), id: \.element.id) { index, entry in
+                row(entry.item, at: index, in: tracks)
+            }
+        }
+    }
+
+    /// A server-backed playlist's rows: reorderable, with the single tap
+    /// belonging to selection. iOS uses the reordering API — a drag carries
+    /// the whole checkmark selection and stacks the previews under the
+    /// finger — while macOS keeps `onMove`, where dragging any selected row
+    /// moves the whole selection together with AppKit's native multi-row
+    /// drag image.
+    @ViewBuilder
+    private var playlistRows: some View {
+        let items = trackEntries.map(\.item)
+        #if os(iOS)
+        ForEach(Array(trackEntries.enumerated()), id: \.element.id) { index, entry in
+            row(entry.item, at: index, in: items)
+        }
+        .reorderable()
+        #else
+        ForEach(Array(trackEntries.enumerated()), id: \.element.id) { index, entry in
+            row(entry.item, at: index, in: items)
+        }
+        .onMove(perform: move)
+        #endif
+    }
+
+    /// Every track as a row, keyed by an id unique within the list: the
+    /// playlist entry id in playlists (unique even when the same song is in
+    /// the playlist twice), the track id everywhere else. A List binds
+    /// selection by row id and Jellyfin's ids are optional, so rows carry a
+    /// non-optional id here — a String?-keyed row never matches a
+    /// `Set<String>` selection. `JellyfinService` rejects id-less payloads,
+    /// so the failable init never actually fails.
+    private var trackEntries: [TrackEntry] {
+        tracks.compactMap { TrackEntry(id: $0.playlistItemID ?? $0.id, item: $0) }
+    }
+
+    private func row(_ track: BaseItemDto, at index: Int, in items: [BaseItemDto]) -> some View {
+        TrackRow(
+            track: track,
+            showArtwork: showArtworkInRows,
+            selectedTracks: selectedTracks,
+            onRemoveFromPlaylist: isEditablePlaylist ? { removeFromPlaylist(track) } : nil
+        ) {
+            player.play(items, startAt: index)
+        }
     }
 
     // MARK: - Header
@@ -219,9 +322,12 @@ struct TrackListDetail: View {
 
     // MARK: - Loading
 
-    /// Removing makes no sense for downloaded collections (they're offline
-    /// copies, and the swipe must not mutate the server playlist).
-    private var canRemoveFromPlaylist: Bool {
+    /// Playlists are the only collection whose order the user owns — albums
+    /// are disc/track sorted, and downloaded collections are offline copies
+    /// whose order no server call would change. Only an editable,
+    /// server-backed playlist gets row selection, drag reordering and batch
+    /// removal.
+    private var isEditablePlaylist: Bool {
         headerItem.itemType == .playlist && !downloaded
     }
 
@@ -238,4 +344,234 @@ struct TrackListDetail: View {
     private func reload() async {
         await loader.load { try await session.library.tracks(for: headerItem) }
     }
+
+    /// The ids the track rows are keyed by, in list order — what
+    /// shift-arrow's range spans. Playlists key rows by playlist entry id;
+    /// every other collection by track id.
+    private var rowIds: [String] {
+        trackEntries.map(\.id)
+    }
+
+    /// The selected tracks in list order — what selection actions act on.
+    private var selectedTracks: [BaseItemDto] {
+        trackEntries.filter { selection.contains($0.id) }.map(\.item)
+    }
+
+    // MARK: - Playlist editing
+
+    /// Commits a reorder — a drag on macOS (`onMove`) or a drop on iOS (the
+    /// reordering API) — by applying it locally first, so the drag feels
+    /// instant, then replaying it on the server, which only understands one
+    /// entry move per request (``movePlan(from:to:)``).
+    private func commitReorder(to reordered: [BaseItemDto]) {
+        // A drag racing the previous drag's still-in-flight replay would
+        // interleave two POST sequences and corrupt the order, so drags that
+        // arrive before the server has settled are refused — their rows snap
+        // back to the settled arrangement.
+        guard !isReplayingMoves else { return }
+        isReplayingMoves = true
+        let before = tracks
+        loader.mutate { $0 = reordered }
+        let after = tracks
+        Task {
+            await replay(Self.movePlan(from: before, to: after))
+            // ponytail: the optimistic move is already on screen, so success
+            // and failure share one outcome — the reload shows the server's
+            // arrangement, which confirms the drag or snaps the list back if
+            // a move was rejected. No separate error UI for either.
+            await reload()
+            isReplayingMoves = false
+        }
+    }
+
+    #if os(macOS)
+    /// `onMove`'s drag. The offsets index the playlist's entries; a
+    /// multi-row drag arrives as one source set — dragging any selected row
+    /// drags the whole selection.
+    private func move(from source: IndexSet, to destination: Int) {
+        var entries = trackEntries
+        entries.move(fromOffsets: source, toOffset: destination)
+        commitReorder(to: entries.map(\.item))
+    }
+    #endif
+
+    #if os(iOS)
+    /// The reordering API's drop: the dragged entries land before an anchor
+    /// entry or at the end of the list.
+    private func moveEntries(within difference: ReorderDifference<String, ReorderableSingleCollectionIdentifier>) {
+        let position: PlaylistDropPosition
+        switch difference.destination.position {
+        case .before(let anchor): position = .before(anchor)
+        case .end: position = .end
+        }
+        commitReorder(to: Self.reordered(trackEntries, moving: difference.sources, to: position).map(\.item))
+    }
+    #endif
+
+    /// Performs the plan's moves in order, stopping at the first failure:
+    /// every move is issued against the arrangement the previous one left
+    /// behind, so nothing after a failure is meaningful.
+    private func replay(_ ops: [PlaylistMoveOp]) async {
+        for op in ops {
+            do {
+                try await session.library.moveInPlaylist(
+                    playlistId: headerItem.id,
+                    entryId: op.entryId,
+                    to: op.index
+                )
+            } catch {
+                return
+            }
+        }
+    }
+
+    /// Removes every selected entry in one request, then refreshes.
+    private func removeSelectedTracks() {
+        let entryIds = trackEntries
+            .filter { selection.contains($0.id) }
+            .compactMap(\.item.playlistItemID)
+        guard !entryIds.isEmpty else { return }
+        selection = []
+        Task {
+            // ponytail: failed removes surface as the tracks simply surviving
+            // the reload; no separate error UI.
+            try? await session.library.removeFromPlaylist(playlistId: headerItem.id, entryIds: entryIds)
+            await reload()
+        }
+    }
+
+    /// One single-entry move the server must perform to replay a drag.
+    struct PlaylistMoveOp: Equatable {
+        let entryId: String
+        let index: Int
+    }
+
+    /// The single-entry moves that turn `before` into `after`.
+    ///
+    /// A multi-row drag — possible whenever selection is active — cannot be
+    /// expressed as one Jellyfin request, so the general strategy walks target
+    /// positions front to back and moves the entry that belongs at each
+    /// position into place: every step leaves the positions before `target`
+    /// final, and inserting at `target` never disturbs them again. That is also
+    /// why indices can't be precomputed from `after` alone — each move is
+    /// issued against the arrangement the previous move left behind.
+    ///
+    /// A single-row drag (the overwhelmingly common case) is detected up front
+    /// and collapses to one request; without that, dragging a song from the
+    /// top of a long playlist to the bottom would issue a move for every row
+    /// it passed.
+    ///
+    /// Entries without a `playlistItemID` — servers predating playlist entries
+    /// — contribute no move; the next reload re-synchronizes those lists.
+    static func movePlan(from before: [BaseItemDto], to after: [BaseItemDto]) -> [PlaylistMoveOp] {
+        guard before.count == after.count, !before.isEmpty else { return [] }
+        if let single = Self.singleEntryMove(from: before, to: after) {
+            return [single]
+        }
+
+        var simulation = before
+        var ops: [PlaylistMoveOp] = []
+        for target in simulation.indices {
+            guard simulation[target].playlistEntryKey != after[target].playlistEntryKey,
+                  let current = simulation.firstIndex(where: { $0.playlistEntryKey == after[target].playlistEntryKey })
+            else { continue }
+            let entry = simulation.remove(at: current)
+            simulation.insert(entry, at: target)
+            if let entryId = entry.playlistItemID {
+                ops.append(PlaylistMoveOp(entryId: entryId, index: target))
+            }
+        }
+        return ops
+    }
+
+    /// The single move that turns `before` into `after`, when `after` is
+    /// exactly `before` with one row removed and reinserted; nil otherwise.
+    private static func singleEntryMove(from before: [BaseItemDto], to after: [BaseItemDto]) -> PlaylistMoveOp? {
+        // The moved row starts or ends inside the window where the two orders
+        // disagree, so only rows there can be candidates.
+        for index in before.indices where before[index].playlistEntryKey != after[index].playlistEntryKey {
+            let entry = before[index]
+            guard let target = after.firstIndex(where: { $0.playlistEntryKey == entry.playlistEntryKey }),
+                  let entryId = entry.playlistItemID
+            else { continue }
+            var candidate = before
+            candidate.remove(at: index)
+            candidate.insert(entry, at: target)
+            if candidate.map(\.playlistEntryKey) == after.map(\.playlistEntryKey) {
+                return PlaylistMoveOp(entryId: entryId, index: target)
+            }
+        }
+        return nil
+    }
+
+    /// Where a reorder drop lands, in the vocabulary of the entries list.
+    enum PlaylistDropPosition: Equatable {
+        /// Immediately before the entry with this id.
+        case before(String)
+        /// At the end of the list.
+        case end
+    }
+
+    /// The entry list after a reorder drop: the dragged entries leave their
+    /// positions and reinsert — in drag order — before the anchor entry, or
+    /// at the end. Every other entry keeps both its order and its position
+    /// relative to them.
+    static func reordered(
+        _ entries: [TrackEntry],
+        moving sources: [String],
+        to position: PlaylistDropPosition
+    ) -> [TrackEntry] {
+        // A repeated source id would otherwise duplicate the entry.
+        var seen = Set<String>()
+        let dragged = sources.filter { seen.insert($0).inserted }
+        let moving = Set(dragged)
+        let moved = dragged.compactMap { id in entries.first { $0.id == id } }
+        var result = entries.filter { !moving.contains($0.id) }
+        switch position {
+        case .end:
+            result.append(contentsOf: moved)
+        case .before(let anchor):
+            if let index = result.firstIndex(where: { $0.id == anchor }) {
+                result.insert(contentsOf: moved, at: index)
+            } else {
+                // The anchor is gone (a concurrent edit); keeping the dragged
+                // entries in the list matters more than where exactly.
+                result.append(contentsOf: moved)
+            }
+        }
+        return result
+    }
+}
+
+/// One row of a track list: the track plus the non-optional id the row is
+/// keyed by within its list — the Jellyfin playlist entry id in playlists,
+/// where ordering, selection, removal and the move endpoint all operate on
+/// entries (so the same song twice is two distinct rows), and the track id
+/// everywhere else. A List binds selection by row id, and Jellyfin's ids are
+/// optional, so track rows carry their id here: a String?-keyed row never
+/// matches a `Set<String>` selection.
+struct TrackEntry: Identifiable, Hashable {
+    let id: String
+    let item: BaseItemDto
+
+    init?(id: String?, item: BaseItemDto) {
+        guard let id else { return nil }
+        self.id = id
+        self.item = item
+    }
+
+    /// Tracks as rows keyed by track id, for lists that are not playlists.
+    static func rows(_ tracks: [BaseItemDto]) -> [TrackEntry] {
+        tracks.compactMap { TrackEntry(id: $0.id, item: $0) }
+    }
+
+    static func == (lhs: TrackEntry, rhs: TrackEntry) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+extension BaseItemDto {
+    /// A playlist row's identity: the playlist entry id when the item came
+    /// from a playlist (unique even when the same song is in the playlist
+    /// twice), otherwise the item id.
+    var playlistEntryKey: String? { playlistItemID ?? id }
 }

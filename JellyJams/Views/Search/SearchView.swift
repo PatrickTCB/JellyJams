@@ -41,7 +41,13 @@ struct SearchView: View {
             if !results.songs.isEmpty {
                 Section("Songs") {
                     ForEach(Array(results.songs.enumerated()), id: \.element.id) { index, song in
-                        TrackRow(track: song, showArtwork: true) {
+                        // Tap-to-play: this List is a navigation list for its
+                        // other sections, and a selection-bound List forces
+                        // double-clicks to navigate on macOS — so the songs
+                        // here keep whole-row taps rather than a selection
+                        // model that would break the genres/artists/albums
+                        // rows above them.
+                        TrackRow(track: song, showArtwork: true, tapBehavior: .play) {
                             player.play(results.songs, startAt: index)
                         }
                     }
