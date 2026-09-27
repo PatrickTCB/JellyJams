@@ -8,20 +8,25 @@ A native **SwiftUI** music client for [Jellyfin](https://jellyfin.org), running 
 **macOS:** download the latest [release](https://github.com/PatrickTCB/JellyJams/releases) —
 the app updates itself via [Sparkle](https://sparkle-project.org).
 
-**iOS:** for now you've gotta build it yourself and use Xcode to get it on your phone. Once
-it's on the App Store, I'll update this. I also aspire to have it on AltStore.
+**iOS:** Get it on the App Store. I also aspire to have it on AltStore.
+
+<a href="https://apps.apple.com/us/app/jelly-jams-music/id6804514014" target="_blank">
+    <img src="./AppStore.png"
+    alt="Get it on AppStore"
+    height="60"/>
+</a>
 
 All communication with Jellyfin is done using their official SDK [`jellyfin-sdk-swift`](https://github.com/jellyfin/jellyfin-sdk-swift). 
 I pinned the version to 3.1.0, but might change that as I work with the SDK and
 better understand what the change process is like.
 
-**Status:** early but usable. Playback, navigation, offline downloads, AirPlay controls, 
+**Status:** early but usable. Playback, navigation, offline downloads, CarPlay, AirPlay controls, 
 and playlist management (create, add/remove songs, delete) all work. Below is a list of stuff that's
 not done, that I think I will do but this is in no way a promise. The order will
 depend on what's most fun for me to work on.
 
 **Not implemented yet:** transcoding (direct play only), lyrics, ReplayGain,
-gapless/crossfade, sleep timer, CarPlay, widgets, Quick Connect, and AirPlay controls.
+gapless/crossfade, sleep timer, widgets, and Quick Connect.
 
 There's no planned public Test Flight beta or anything like that.
 
