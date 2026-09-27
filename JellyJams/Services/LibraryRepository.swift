@@ -103,6 +103,12 @@ struct LibraryRepository: Sendable {
         try await requireClient().removeFromPlaylist(playlistId: playlistId, entryIds: entryIds)
     }
 
+    /// Moves a playlist entry to a new position; the entry id comes from
+    /// `BaseItemDto.playlistItemID`, not the track id.
+    func moveInPlaylist(playlistId: String?, entryId: String, to index: Int) async throws {
+        try await requireClient().moveItemInPlaylist(playlistId: playlistId, entryId: entryId, to: index)
+    }
+
     struct ArtistOverview: Sendable, Equatable {
         var albums: [BaseItemDto] = []
         var appearsOn: [BaseItemDto] = []

@@ -17,6 +17,14 @@ struct DownloadsView: View {
     @EnvironmentObject private var player: PlayerController
     @State private var tab: Tab = .albums
     @State private var confirmingDeleteAll = false
+    /// The downloaded songs the user has selected (rows are keyed by track
+    /// id): click to select, double-click to play, shift-arrow to extend.
+    @State private var songSelection: Set<String> = []
+
+    /// The selected songs in list order — what selection actions act on.
+    private var selectedSongs: [BaseItemDto] {
+        TrackEntry.rows(songs).filter { songSelection.contains($0.id) }.map(\.item)
+    }
 
     private var songs: [BaseItemDto] { downloads.downloadedSongs() }
 
@@ -46,6 +54,9 @@ struct DownloadsView: View {
                 .disabled(downloads.batches.isEmpty == false
                           || (downloads.entries.isEmpty && downloads.collections.isEmpty))
             }
+            if tab == .songs, !selectedSongs.isEmpty {
+                ToolbarItem { TrackSelectionMenu(tracks: selectedSongs) }
+            }
         }
         .alert("Delete all downloaded music?", isPresented: $confirmingDeleteAll) {
             Button("Delete All Downloads", role: .destructive) { downloads.removeAll() }
@@ -54,11 +65,11 @@ struct DownloadsView: View {
     }
 
     private var songsList: some View {
-        List {
+        List(selection: $songSelection) {
             Section {
-                ForEach(songs) { song in
-                    TrackRow(track: song, showArtwork: true) {
-                        player.play(songs, startAt: songs.firstIndex { $0.id == song.id } ?? 0)
+                ForEach(TrackEntry.rows(songs)) { entry in
+                    TrackRow(track: entry.item, showArtwork: true, selectedTracks: selectedSongs) {
+                        player.play(songs, startAt: songs.firstIndex { $0.id == entry.item.id } ?? 0)
                     }
                 }
                 ForEach(downloads.batches) { batch in
@@ -71,6 +82,12 @@ struct DownloadsView: View {
             }
         }
         .listStyle(.plain)
+        .shiftArrowSelection($songSelection, ids: songs.compactMap(\.id))
+        .onKeyPress(.escape) {
+            songSelection = []
+            return .handled
+        }
+        .focusable()
         .overlay {
             if songs.isEmpty && downloads.batches.isEmpty {
                 ContentUnavailableView("No downloaded songs", systemImage: "music.note")

@@ -333,6 +333,17 @@ final class JellyfinService: Sendable {
         )
     }
 
+    /// Moves a playlist entry to a new position
+    /// (`POST /Playlists/{id}/Items/{entryId}/Move/{index}`). The identifier is
+    /// the entry's `PlaylistItemId` — the same one removal takes — not the
+    /// track id.
+    func moveItemInPlaylist(playlistId: String?, entryId: String, to index: Int) async throws {
+        guard let playlistId, !entryId.isEmpty else { throw JellyfinError.missingItemIdentifier }
+        _ = try await apiClient.send(
+            Paths.moveItem(playlistID: playlistId, itemID: entryId, newIndex: index)
+        )
+    }
+
     /// Creates a new audio playlist seeded with `itemIds` and returns its id.
     @discardableResult
     func createPlaylist(name: String, itemIds: [String]) async throws -> String {

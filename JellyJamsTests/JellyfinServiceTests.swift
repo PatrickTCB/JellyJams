@@ -490,6 +490,259 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - Playlist reordering
+
+    func testMoveItemInPlaylistPostsASingleMoveRequest() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 204), Data())
+        }
+
+        try await makeClient().moveItemInPlaylist(playlistId: "playlist-id", entryId: "entry-1", to: 2)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(recorder.all.count, 1)
+        XCTAssertEqual(request.path, "/jellyfin/Playlists/playlist-id/Items/entry-1/Move/2")
+        XCTAssertEqual(request.method, "POST")
+    }
+
+    func testMoveItemInPlaylistRejectsMissingIdentifiers() async {
+        do {
+            try await makeClient().moveItemInPlaylist(playlistId: nil, entryId: "entry-1", to: 2)
+            XCTFail("Expected a missing playlist id to be rejected")
+        } catch {
+            XCTAssertEqual(error as? JellyfinError, .missingItemIdentifier)
+        }
+        do {
+            try await makeClient().moveItemInPlaylist(playlistId: "playlist-id", entryId: "", to: 2)
+            XCTFail("Expected an empty entry id to be rejected")
+        } catch {
+            XCTAssertEqual(error as? JellyfinError, .missingItemIdentifier)
+        }
+    }
+
+    /// Playlist entries: distinct track ids (their row keys) carrying the
+    /// distinct entry ids the move endpoint takes.
+    private func playlistTracks(_ ids: [String]) -> [BaseItemDto] {
+        ids.map { id in
+            var item = TestFixtures.item(id: id)
+            item.playlistItemID = "entry-\(id)"
+            return item
+        }
+    }
+
+    func testDraggingOneTrackToTheEndIsASingleMove() {
+        let ops = TrackListDetail.movePlan(
+            from: playlistTracks(["A", "B", "C", "D"]),
+            to: playlistTracks(["B", "C", "D", "A"])
+        )
+
+        XCTAssertEqual(ops, [.init(entryId: "entry-A", index: 3)])
+    }
+
+    func testDraggingOneTrackToTheTopIsASingleMove() {
+        let ops = TrackListDetail.movePlan(
+            from: playlistTracks(["A", "B", "C", "D", "E"]),
+            to: playlistTracks(["E", "A", "B", "C", "D"])
+        )
+
+        XCTAssertEqual(ops, [.init(entryId: "entry-E", index: 0)])
+    }
+
+    func testABatchDragIsReplayedAsSequentialSingleMoves() {
+        // B and C dragged to the end — no single move expresses that.
+        let ops = TrackListDetail.movePlan(
+            from: playlistTracks(["A", "B", "C", "D", "E"]),
+            to: playlistTracks(["A", "D", "E", "B", "C"])
+        )
+
+        XCTAssertEqual(ops, [
+            .init(entryId: "entry-D", index: 1),
+            .init(entryId: "entry-E", index: 2),
+        ])
+    }
+
+    func testAnInterleavedDragMovesEachDisplacedEntryOnce() {
+        // A, C and E dragged to the end, leaving B, D, F in front.
+        let ops = TrackListDetail.movePlan(
+            from: playlistTracks(["A", "B", "C", "D", "E", "F"]),
+            to: playlistTracks(["B", "D", "F", "A", "C", "E"])
+        )
+
+        XCTAssertEqual(ops.map(\.entryId), ["entry-B", "entry-D", "entry-F"])
+        XCTAssertEqual(ops.map(\.index), [0, 1, 2])
+    }
+
+    func testAPlaylistContainingTheSameSongTwiceIsMovedByEntry() {
+        // Track ids are not unique in a playlist — the same song can sit in
+        // it twice — so a drag must be matched by the rows' distinct entry
+        // ids, or the plan can move the other instance of the song.
+        func entry(_ trackId: String, _ entryId: String) -> BaseItemDto {
+            var item = TestFixtures.item(id: trackId)
+            item.playlistItemID = entryId
+            return item
+        }
+        // The first instance of "A" is dragged to the end.
+        let before = [entry("A", "e1"), entry("B", "e2"), entry("A", "e3"), entry("C", "e4")]
+        let after = [entry("B", "e2"), entry("A", "e3"), entry("C", "e4"), entry("A", "e1")]
+
+        let ops = TrackListDetail.movePlan(from: before, to: after)
+
+        XCTAssertEqual(ops, [.init(entryId: "e1", index: 3)])
+    }
+
+    func testIdenticalOrdersNeedNoMoves() {
+        let order = playlistTracks(["A", "B", "C"])
+        XCTAssertTrue(TrackListDetail.movePlan(from: order, to: order).isEmpty)
+    }
+
+    func testMismatchedLengthsProduceNoMoves() {
+        let ops = TrackListDetail.movePlan(
+            from: playlistTracks(["A", "B", "C", "D"]),
+            to: playlistTracks(["A", "B", "C"])
+        )
+
+        XCTAssertTrue(ops.isEmpty)
+    }
+
+    /// Whatever the drag, replaying the plan must land on exactly the intended
+    /// order — each request is issued against the arrangement the previous one
+    /// left behind, so a plan that assumes any other sequence diverges.
+    func testEveryPlanConvergesOnTheIntendedOrder() {
+        let drags: [(before: [String], after: [String])] = [
+            (["A", "B", "C", "D"], ["B", "C", "D", "A"]),
+            (["A", "B", "C", "D", "E"], ["E", "A", "B", "C", "D"]),
+            (["A", "B", "C", "D", "E"], ["A", "D", "E", "B", "C"]),
+            (["A", "B", "C", "D", "E", "F"], ["B", "D", "F", "A", "C", "E"]),
+            (["A", "B", "C", "D", "E", "F"], ["F", "E", "A", "B", "C", "D"]),
+            (["A", "B", "C", "D", "E", "F", "G"], ["A", "B", "F", "E", "D", "C", "G"]),
+        ]
+
+        for drag in drags {
+            let before = playlistTracks(drag.before)
+            let after = playlistTracks(drag.after)
+
+            // Server semantics: a move removes the entry from wherever it sits
+            // and inserts it at the raw target index.
+            var simulation = before
+            for op in TrackListDetail.movePlan(from: before, to: after) {
+                guard let index = simulation.firstIndex(where: { $0.playlistItemID == op.entryId }) else {
+                    XCTFail("A move targets an entry that is not in the list: \(op.entryId)")
+                    return
+                }
+                let entry = simulation.remove(at: index)
+                simulation.insert(entry, at: op.index)
+            }
+
+            XCTAssertEqual(
+                simulation.map(\.playlistItemID),
+                after.map(\.playlistItemID),
+                "Replaying the plan for \(drag.before) → \(drag.after) diverged"
+            )
+        }
+    }
+
+    // MARK: - Reorder drops
+
+    /// Playlist entries for a drop test: entry ids matching their track ids.
+    private func playlistEntries(_ ids: [String]) -> [TrackEntry] {
+        ids.map { id in
+            var item = TestFixtures.item(id: id)
+            item.playlistItemID = id
+            return TrackEntry(id: id, item: item)!
+        }
+    }
+
+    func testADropToTheEndAppendsTheDraggedEntries() {
+        let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c"]), moving: ["a"], to: .end)
+        XCTAssertEqual(result.map(\.id), ["b", "c", "a"])
+    }
+
+    func testADropBeforeAnAnchorInsertsTheDraggedEntriesThere() {
+        let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c", "d"]), moving: ["d"], to: .before("a"))
+        XCTAssertEqual(result.map(\.id), ["d", "a", "b", "c"])
+    }
+
+    func testAMultiDragReinsertsInDragOrderNotListOrder() {
+        let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c", "d"]), moving: ["c", "a"], to: .end)
+        XCTAssertEqual(result.map(\.id), ["b", "d", "c", "a"])
+    }
+
+    func testAMultiDropInTheMiddleKeepsTheUndraggedEntriesAroundIt() {
+        let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c", "d", "e"]), moving: ["a", "e"], to: .before("c"))
+        XCTAssertEqual(result.map(\.id), ["b", "a", "e", "c", "d"])
+    }
+
+    func testADropWithAMissingAnchorAppendsInstead() {
+        let result = TrackListDetail.reordered(playlistEntries(["a", "b"]), moving: ["a"], to: .before("missing"))
+        XCTAssertEqual(result.map(\.id), ["b", "a"])
+    }
+
+    func testADropWithoutSourcesLeavesTheListUnchanged() {
+        let result = TrackListDetail.reordered(playlistEntries(["a", "b"]), moving: [], to: .end)
+        XCTAssertEqual(result.map(\.id), ["a", "b"])
+    }
+
+    /// A drop is applied locally through `reordered` and replayed on the
+    /// server through the move plan; the two must land on the same
+    /// arrangement or the reload after the replay would undo the drop.
+    func testADropReplayedOnTheServerConvergesOnTheLocalResult() {
+        let before = playlistEntries(["a", "b", "c", "d", "e"])
+        let after = TrackListDetail.reordered(before, moving: ["e", "a"], to: .before("c"))
+
+        var simulation = before
+        for op in TrackListDetail.movePlan(from: before.map(\.item), to: after.map(\.item)) {
+            guard let index = simulation.firstIndex(where: { $0.item.playlistItemID == op.entryId }) else {
+                XCTFail("A move targets an entry that is not in the list: \(op.entryId)")
+                return
+            }
+            let entry = simulation.remove(at: index)
+            simulation.insert(entry, at: op.index)
+        }
+
+        XCTAssertEqual(simulation.map(\.id), after.map(\.id))
+    }
+
+    // MARK: - Keyboard selection extension
+
+    func testShiftDownExtendsTheSelectionTowardTheEnd() {
+        let ids = ["a", "b", "c", "d", "e"]
+        let step = ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 1, step: 1)
+
+        XCTAssertEqual(step?.lead, 2)
+        XCTAssertEqual(step?.selection, Set(["b", "c"]))
+    }
+
+    func testShiftUpShrinksAnExtendedRangeInsteadOfGrowingASecondOne() {
+        // Extended down to "d" already; shift-up walks the lead back up.
+        let ids = ["a", "b", "c", "d", "e"]
+        let step = ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 3, step: -1)
+
+        XCTAssertEqual(step?.lead, 2)
+        XCTAssertEqual(step?.selection, Set(["b", "c"]))
+    }
+
+    func testShiftUpPastTheAnchorSpansUpward() {
+        let ids = ["a", "b", "c"]
+        let step = ShiftArrowSelection.extensionStep(ids: ids, anchor: 2, lead: 2, step: -1)
+
+        XCTAssertEqual(step?.lead, 1)
+        XCTAssertEqual(step?.selection, Set(["b", "c"]))
+    }
+
+    func testTheLeadClampsAtBothEndsOfTheList() {
+        let ids = ["a", "b", "c"]
+        XCTAssertEqual(ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 2, step: 1)?.lead, 2)
+        XCTAssertEqual(ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 0, step: -1)?.lead, 0)
+    }
+
+    func testExtensionRejectsPositionsThatDoNotNameRows() {
+        XCTAssertNil(ShiftArrowSelection.extensionStep(ids: [], anchor: 0, lead: 0, step: 1))
+        XCTAssertNil(ShiftArrowSelection.extensionStep(ids: ["a"], anchor: 1, lead: 0, step: 1))
+        XCTAssertNil(ShiftArrowSelection.extensionStep(ids: ["a"], anchor: 0, lead: 1, step: 1))
+    }
+
     private func queryValue(_ url: URL, _ name: String) -> String? {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?

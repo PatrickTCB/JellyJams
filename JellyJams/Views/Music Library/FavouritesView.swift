@@ -15,6 +15,14 @@ struct FavouritesView: View {
     @ObservedObject var artists: PagedItems
     @ObservedObject var playlists: PagedItems
     @State private var tab: Tab = .songs
+    /// The favourite songs the user has selected (rows are keyed by track
+    /// id): click to select, double-click to play, shift-arrow to extend.
+    @State private var songSelection: Set<String> = []
+
+    /// The selected songs in list order — what selection actions act on.
+    private var selectedSongs: [BaseItemDto] {
+        TrackEntry.rows(songs.items).filter { songSelection.contains($0.id) }.map(\.item)
+    }
 
     /// The model backing the selected tab. Each tab keeps its own sort and
     /// loaded pages, so switching back and forth doesn't refetch.
@@ -54,6 +62,9 @@ struct FavouritesView: View {
                     }
                     .disabled(songs.isEmpty)
                 }
+                if !selectedSongs.isEmpty {
+                    ToolbarItem { TrackSelectionMenu(tracks: selectedSongs) }
+                }
             case .albums:
                 ToolbarItem {
                     SortMenu(sortBy: $albums.sortBy, sortOrder: $albums.sortOrder, options: albums.sortOptions)
@@ -72,13 +83,13 @@ struct FavouritesView: View {
     }
 
     private var songsList: some View {
-        List {
+        List(selection: $songSelection) {
             Section {
-                ForEach(Array(songs.items.enumerated()), id: \.element.id) { index, track in
-                    TrackRow(track: track, showArtwork: true) {
+                ForEach(Array(TrackEntry.rows(songs.items).enumerated()), id: \.element.id) { index, entry in
+                    TrackRow(track: entry.item, showArtwork: true, selectedTracks: selectedSongs) {
                         player.play(songs.items, startAt: index)
                     }
-                    .task { await songs.loadMoreIfNeeded(track) }
+                    .task { await songs.loadMoreIfNeeded(entry.item) }
                 }
                 if songs.isLoading {
                     HStack { Spacer(); ProgressView(); Spacer() }
@@ -99,6 +110,12 @@ struct FavouritesView: View {
             }
         }
         .listStyle(.plain)
+        .shiftArrowSelection($songSelection, ids: songs.items.compactMap(\.id))
+        .onKeyPress(.escape) {
+            songSelection = []
+            return .handled
+        }
+        .focusable()
         .overlay {
             if let error = songs.errorMessage, songs.isEmpty {
                 LoadFailureView(title: "Couldn’t Load Favourites", message: error) { await songs.reload() }
