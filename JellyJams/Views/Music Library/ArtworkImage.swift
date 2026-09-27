@@ -24,8 +24,10 @@ enum ArtworkLoader {
 
 /// Displays remote artwork with a memory + disk cache and a placeholder.
 /// Falls back to a music-note glyph while loading or on failure.
+/// If `localURL` is provided and the file exists, it's loaded directly (for offline playback).
 struct ArtworkImage: View {
     let url: URL?
+    var localURL: URL? = nil
     var cornerRadius: CGFloat = 6
     var placeholderSystemImage: String = "music.note"
 
@@ -57,6 +59,19 @@ struct ArtworkImage: View {
 
     private func load() async {
         image = nil
+        // Try local file first (for offline playback of downloaded artwork).
+        if let localURL,
+           FileManager.default.fileExists(atPath: localURL.path) {
+            do {
+                let data = try Data(contentsOf: localURL)
+                if let decoded = PlatformImage(data: data) {
+                    image = decoded
+                    return
+                }
+            } catch {
+                // Fall through to network load
+            }
+        }
         guard let url else { return }
         if let cached = ImageCache.shared.image(for: url) {
             image = cached

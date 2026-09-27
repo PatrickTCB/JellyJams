@@ -4,6 +4,7 @@ import SwiftUI
 struct QueueView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var downloads: DownloadStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -15,7 +16,8 @@ struct QueueView: View {
                             player.play(atQueueIndex: index)
                         } label: {
                             HStack(spacing: 12) {
-                                ArtworkImage(url: session.library.artworkURL(for: entry.item, size: 96))
+                                let localArtworkURL = downloads.isDownloaded(entry.item) ? downloads.localArtworkURL(forImageTag: entry.item.primaryImageTag ?? entry.item.albumPrimaryImageTag ?? "") : nil
+                                ArtworkImage(url: session.library.artworkURL(for: entry.item, size: 96), localURL: localArtworkURL)
                                     .frame(width: 40, height: 40)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.item.displayName)

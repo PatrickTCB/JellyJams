@@ -23,12 +23,14 @@ struct NowPlayingBar: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var playerPresentation: PlayerPresentation
+    @EnvironmentObject private var downloads: DownloadStore
 
     private var isDocked: Bool { presentation == .docked }
     private var isInline: Bool { presentation == .accessoryInline }
 
     var body: some View {
         if let item = player.currentItem {
+            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
             VStack(spacing: 0) {
                 if isDocked { Divider() }
                 HStack(spacing: isInline ? 8 : 12) {
@@ -37,10 +39,10 @@ struct NowPlayingBar: View {
                     } label: {
                         HStack(spacing: isInline ? 8 : 12) {
                             #if os(macOS)
-                            ArtworkImage(url: session.library.artworkURL(for: item, size: 192))
+                            ArtworkImage(url: session.library.artworkURL(for: item, size: 192), localURL: localArtworkURL)
                                 .frame(width: 64, height: 64)
                             #else
-                            ArtworkImage(url: session.library.artworkURL(for: item, size: 96))
+                            ArtworkImage(url: session.library.artworkURL(for: item, size: 96), localURL: localArtworkURL)
                                 .frame(width: isInline ? 28 : 40, height: isInline ? 44 : 44)
                             #endif
                             VStack(alignment: .leading, spacing: 2) {

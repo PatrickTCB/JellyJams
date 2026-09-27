@@ -163,7 +163,13 @@ struct TrackRow: View {
 
     @ViewBuilder private var leading: some View {
         if showArtwork {
-            ArtworkImage(url: session.library.artworkURL(for: track, size: 96))
+            let localArtworkURL = downloads.isDownloaded(track)
+                ? downloads.localArtworkURL(forImageTag: track.primaryImageTag ?? track.albumPrimaryImageTag ?? "")
+                : nil
+            ArtworkImage(
+                url: session.library.artworkURL(for: track, size: 96),
+                localURL: localArtworkURL
+            )
                 .frame(width: 40, height: 40)
         } else if isCurrent {
             Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")

@@ -7,6 +7,7 @@ import AVKit
 struct PlayerView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var downloads: DownloadStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var isScrubbing = false
@@ -18,7 +19,9 @@ struct PlayerView: View {
             handle
             Spacer(minLength: 0)
 
-            ArtworkImage(url: player.currentItem.flatMap { session.library.artworkURL(for: $0, size: 800) }, cornerRadius: 12)
+            let currentItem = player.currentItem
+            let localArtworkURL = currentItem.flatMap { downloads.isDownloaded($0) ? downloads.localArtworkURL(forImageTag: $0.primaryImageTag ?? $0.albumPrimaryImageTag ?? "") : nil }
+            ArtworkImage(url: currentItem.flatMap { session.library.artworkURL(for: $0, size: 800) }, localURL: localArtworkURL, cornerRadius: 12)
                 .frame(maxWidth: 420, maxHeight: 420)
                 .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
                 .padding(.horizontal)

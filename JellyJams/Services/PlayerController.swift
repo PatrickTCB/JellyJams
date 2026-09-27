@@ -531,16 +531,30 @@ final class PlayerController: ObservableObject {
         let item = queue[index].item
         let nextPlaySessionId = UUID().uuidString
         let streamURL: URL
-        do {
-            // A downloaded copy wins: same bytes as streaming, no network.
-            streamURL = try downloads?.localURL(forItemId: item.id ?? "")
-                ?? client.streamURL(
+        let isDownloaded = downloads?.isDownloaded(item) == true
+        if isDownloaded, let localURL = downloads?.localURL(forItemId: item.id ?? "") {
+            streamURL = localURL
+        } else if !isDownloaded {
+            do {
+                streamURL = try client.streamURL(
                     itemId: item.id,
                     mediaSourceId: item.mediaSourceID,
                     playSessionId: nextPlaySessionId
                 )
-        } catch {
-            playbackLogger.error("Could not create audio stream URL: \(error.localizedDescription, privacy: .public)")
+            } catch {
+                playbackLogger.error("Could not create audio stream URL: \(error.localizedDescription, privacy: .public)")
+                if reportingPreviousItem {
+                    reportStopped()
+                }
+                player.replaceCurrentItem(with: nil)
+                currentIndex = index
+                currentTime = 0
+                duration = 0
+                failPlayback(reason: error.userFacingMessage)
+                return
+            }
+        } else {
+            // Track is marked as downloaded but local file is missing — data loss.
             if reportingPreviousItem {
                 reportStopped()
             }
@@ -548,7 +562,7 @@ final class PlayerController: ObservableObject {
             currentIndex = index
             currentTime = 0
             duration = 0
-            failPlayback(reason: error.userFacingMessage)
+            failPlayback(reason: "The downloaded file for this track is missing. Try re-downloading it.")
             return
         }
         if reportingPreviousItem {

@@ -242,8 +242,10 @@ struct TrackListDetail: View {
     }
 
     private var artwork: some View {
-        ArtworkImage(
+        let localArtworkURL = downloads.isDownloaded(headerItem) ? downloads.localArtworkURL(forImageTag: headerItem.primaryImageTag ?? headerItem.albumPrimaryImageTag ?? "") : nil
+        return ArtworkImage(
             url: session.library.artworkURL(for: headerItem, size: 500),
+            localURL: localArtworkURL,
             cornerRadius: 8,
             placeholderSystemImage: headerItem.itemType == .playlist ? "music.note.list" : "square.stack"
         )

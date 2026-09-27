@@ -7,6 +7,7 @@ struct ItemGridCell: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var favourites: FavouriteStore
+    @EnvironmentObject private var downloads: DownloadStore
 
     private var isArtist: Bool { item.itemType == .musicArtist }
 
@@ -27,8 +28,10 @@ struct ItemGridCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
             ArtworkImage(
                 url: session.library.artworkURL(for: item, size: 320),
+                localURL: localArtworkURL,
                 cornerRadius: isArtist ? 500 : 6,
                 placeholderSystemImage: isArtist ? "music.mic" : "record.circle.fill"
             )

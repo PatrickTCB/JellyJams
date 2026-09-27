@@ -9,11 +9,14 @@ struct ItemRow: View {
     var placeholderSystemImage = "square.stack"
 
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var downloads: DownloadStore
 
     var body: some View {
         HStack(spacing: 12) {
+            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
             ArtworkImage(
                 url: session.library.artworkURL(for: item, size: 96),
+                localURL: localArtworkURL,
                 cornerRadius: circular ? 500 : 6,
                 placeholderSystemImage: placeholderSystemImage
             )

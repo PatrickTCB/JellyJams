@@ -183,8 +183,10 @@ private struct DownloadedItemRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 12) {
+            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
             ArtworkImage(
                 url: session.client?.artworkURL(for: item, size: 96),
+                localURL: localArtworkURL,
                 cornerRadius: 6,
                 placeholderSystemImage: placeholder
             )

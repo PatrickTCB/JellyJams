@@ -15,6 +15,10 @@ import Foundation
 /// albums as a normal album download, and the Artists list is derived from
 /// the downloaded albums' `albumArtists` metadata.
 ///
+/// Album artwork is downloaded alongside tracks and deduplicated by its image
+/// tag — tracks from the same album share one artwork file. The artwork
+/// manifest uses the same reference counting scheme as tracks.
+///
 /// The manifest — including the track and collection metadata the downloads
 /// section browses — is rewritten after every change, so downloads survive
 /// relaunches. Track ids are server-unique, so it deliberately survives
@@ -28,6 +32,17 @@ final class DownloadStore: ObservableObject {
         /// Fetch order, preserved so collections list their tracks in the
         /// order the server returned them.
         var order: Int
+        var requiredBy: Set<String>
+    }
+
+    /// One downloaded artwork file, and the track ids that reference it.
+    /// Keyed by the image tag (e.g. the album's `primaryImageTag`), so all
+    /// tracks from the same album share one artwork file.
+    struct ArtworkEntry: Codable, Sendable, Equatable {
+        var filename: String
+        /// The image tag this artwork represents (e.g. "abc123" from primaryImageTag).
+        var imageTag: String
+        /// Track ids that require this artwork.
         var requiredBy: Set<String>
     }
 
@@ -48,27 +63,34 @@ final class DownloadStore: ObservableObject {
     @Published private(set) var batches: [Batch] = []
     @Published private(set) var errorMessage: String?
 
+    @Published private(set) var artworkEntries: [String: ArtworkEntry] = [:]
+
     private var client: JellyfinService?
     private let directory: URL
     private let session: URLSession
     private let manifestURL: URL
+    private let artworkDirectory: URL
 
     private struct Manifest: Codable, Sendable {
         var tracks: [String: Entry]
         var collections: [String: BaseItemDto]
+        var artwork: [String: ArtworkEntry]
     }
 
     init(directory: URL? = nil, session: URLSession = .shared) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = directory ?? support.appending(path: "Downloads", directoryHint: .isDirectory)
         self.directory = dir
+        self.artworkDirectory = dir.appending(path: "Artwork", directoryHint: .isDirectory)
         self.manifestURL = dir.appending(path: "manifest.json")
         self.session = session
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: artworkDirectory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: manifestURL),
            let manifest = try? JSONDecoder().decode(Manifest.self, from: data) {
             entries = manifest.tracks
             collections = manifest.collections
+            artworkEntries = manifest.artwork
         }
     }
 
@@ -77,8 +99,12 @@ final class DownloadStore: ObservableObject {
         for entry in entries.values {
             try? FileManager.default.removeItem(at: directory.appending(path: entry.filename))
         }
+        for artwork in artworkEntries.values {
+            try? FileManager.default.removeItem(at: artworkDirectory.appending(path: artwork.filename))
+        }
         entries = [:]
         collections = [:]
+        artworkEntries = [:]
         persist()
     }
 
@@ -115,7 +141,34 @@ final class DownloadStore: ObservableObject {
     func localURL(forItemId id: String) -> URL? {
         guard let filename = entries[id]?.filename else { return nil }
         let url = directory.appending(path: filename)
-        return FileManager.default.fileExists(atPath: url.path()) ? url : nil
+        #if os(macOS)
+        if #available(macOS 13.0, *) {
+            return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
+        }
+        #endif
+        #if os(iOS)
+        if #available(iOS 16.0, *) {
+            return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
+        }
+        #endif
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// The saved artwork file for `imageTag`, or `nil` when it has not been downloaded.
+    func localArtworkURL(forImageTag imageTag: String) -> URL? {
+        guard let filename = artworkEntries[imageTag]?.filename else { return nil }
+        let url = artworkDirectory.appending(path: filename)
+        #if os(macOS)
+        if #available(macOS 13.0, *) {
+            return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
+        }
+        #endif
+        #if os(iOS)
+        if #available(iOS 16.0, *) {
+            return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
+        }
+        #endif
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     /// Tracks saved for `referenceId`, in the order they were downloaded.
@@ -255,10 +308,14 @@ final class DownloadStore: ObservableObject {
     /// Removes the download for `item`. A track unreferences itself; an artist
     /// removes every album downloaded for it; any other collection unreferences
     /// every track it required. Tracks left requiring nothing are deleted from
-    /// disk in a second pass.
+    /// disk in a second pass. Artwork no longer referenced by any track is also removed.
     func remove(_ item: BaseItemDto) {
         guard let id = item.id else { return }
         if item.itemType == .audio {
+            // Unreference artwork for this track before potentially deleting it.
+            if let entry = entries[id] {
+                unreferencedArtwork(for: entry.track, trackId: id)
+            }
             entries[id]?.requiredBy.remove(id)
         } else if item.itemType == .musicArtist {
             for album in downloadedAlbums(forArtistId: id) {
@@ -266,6 +323,16 @@ final class DownloadStore: ObservableObject {
             }
             return
         } else {
+            // For collections, we need to find all tracks that were referenced by this collection
+            // and unreference their artwork.
+            let trackIdsToUnreference = entries.values
+                .filter { $0.requiredBy.contains(id) }
+                .compactMap { $0.track.id }
+            for trackId in trackIdsToUnreference {
+                if let entry = entries[trackId] {
+                    unreferencedArtwork(for: entry.track, trackId: trackId)
+                }
+            }
             for var entry in entries.values where entry.requiredBy.contains(id) {
                 entry.requiredBy.remove(id)
                 entries[entry.track.id ?? ""] = entry
@@ -274,6 +341,16 @@ final class DownloadStore: ObservableObject {
         }
         deleteUnreferenced()
         persist()
+    }
+
+    /// Removes a track reference from artwork entries. If an artwork entry has no more references, it will be cleaned up by deleteUnreferenced.
+    private func unreferencedArtwork(for track: BaseItemDto, trackId: String) {
+        let imageTag = track.primaryImageTag ?? track.albumPrimaryImageTag
+        guard let imageTag, !imageTag.isEmpty else { return }
+        if var artworkEntry = artworkEntries[imageTag] {
+            artworkEntry.requiredBy.remove(trackId)
+            artworkEntries[imageTag] = artworkEntry
+        }
     }
 
     func dismissError() {
@@ -296,6 +373,8 @@ final class DownloadStore: ObservableObject {
         if var entry = entries[id] {
             entry.requiredBy.insert(referenceId)
             entries[id] = entry
+            // Also reference the artwork if this track has one.
+            await referenceArtwork(for: track, trackId: id)
             persist()
             updateBatch(batchId) { $0.completed += 1 }
             return
@@ -324,6 +403,8 @@ final class DownloadStore: ObservableObject {
                 order: (entries.values.map(\.order).max() ?? 0) + 1,
                 requiredBy: [referenceId]
             )
+            // Download artwork for this track (deduplicated by image tag).
+            await downloadArtwork(for: track, trackId: id, via: client)
             persist()
             updateBatch(batchId) { $0.completed += 1 }
         } catch {
@@ -331,6 +412,70 @@ final class DownloadStore: ObservableObject {
                 playbackLogDownloadFailure(track, error)
             }
             updateBatch(batchId) { $0.failed += 1 }
+        }
+    }
+
+    /// Downloads and saves artwork for a track, deduplicated by image tag.
+    /// Uses the track's primaryImageTag, or falls back to albumPrimaryImageTag.
+    private func downloadArtwork(
+        for track: BaseItemDto,
+        trackId: String,
+        via client: JellyfinService
+    ) async {
+        // Determine the image tag to use for deduplication.
+        // Primary: track's own primaryImageTag (album artwork).
+        // Fallback: album's primaryImageTag via albumPrimaryImageTag.
+        let imageTag = track.primaryImageTag ?? track.albumPrimaryImageTag
+        guard let imageTag, !imageTag.isEmpty else { return }
+
+        // Already have this artwork: just add the track reference.
+        if var artworkEntry = artworkEntries[imageTag] {
+            artworkEntry.requiredBy.insert(trackId)
+            artworkEntries[imageTag] = artworkEntry
+            persist()
+            return
+        }
+
+        // Need to download the artwork.
+        // The artwork URL uses the item that owns the image (album for album art).
+        let artworkItemId = track.albumID ?? track.id
+        guard let artworkUrl = client.artworkURL(
+            itemId: artworkItemId,
+            tag: imageTag,
+            maxWidth: 500,
+            maxHeight: 500,
+            quality: 90,
+            type: .primary
+        ) else { return }
+
+        do {
+            let (tempFile, response) = try await session.download(from: artworkUrl)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                return // Silently ignore artwork download failures
+            }
+            // Save as JPG (the format we requested).
+            let filename = "\(imageTag).jpg"
+            let destination = artworkDirectory.appending(path: filename)
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: tempFile, to: destination)
+            artworkEntries[imageTag] = ArtworkEntry(
+                filename: filename,
+                imageTag: imageTag,
+                requiredBy: [trackId]
+            )
+            persist()
+        } catch {
+            // Silently ignore artwork download failures - audio is the priority.
+        }
+    }
+
+    /// Adds a track reference to existing artwork entry (when track was already downloaded).
+    private func referenceArtwork(for track: BaseItemDto, trackId: String) async {
+        let imageTag = track.primaryImageTag ?? track.albumPrimaryImageTag
+        guard let imageTag, !imageTag.isEmpty else { return }
+        if var artworkEntry = artworkEntries[imageTag] {
+            artworkEntry.requiredBy.insert(trackId)
+            artworkEntries[imageTag] = artworkEntry
         }
     }
 
@@ -354,16 +499,22 @@ final class DownloadStore: ObservableObject {
     }
 
     /// The second pass of a removal: delete the files (and entries) of tracks
-    /// that no collection or song download requires any more.
+    /// that no collection or song download requires any more. Also deletes artwork
+    /// files that are no longer referenced by any track.
     private func deleteUnreferenced() {
         for (id, entry) in entries where entry.requiredBy.isEmpty {
             try? FileManager.default.removeItem(at: directory.appending(path: entry.filename))
             entries[id] = nil
         }
+        // Clean up unreferenced artwork.
+        for (imageTag, artworkEntry) in artworkEntries where artworkEntry.requiredBy.isEmpty {
+            try? FileManager.default.removeItem(at: artworkDirectory.appending(path: artworkEntry.filename))
+            artworkEntries[imageTag] = nil
+        }
     }
 
     private func persist() {
-        let manifest = Manifest(tracks: entries, collections: collections)
+        let manifest = Manifest(tracks: entries, collections: collections, artwork: artworkEntries)
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: manifestURL, options: .atomic)
         }

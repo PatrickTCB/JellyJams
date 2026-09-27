@@ -11,6 +11,7 @@ struct CollectionHeader: View {
     var onShuffle: () -> Void
 
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var downloads: DownloadStore
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -27,8 +28,10 @@ struct CollectionHeader: View {
     }
 
     private var artwork: some View {
-        ArtworkImage(
+        let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
+        return ArtworkImage(
             url: session.library.artworkURL(for: item, size: 500),
+            localURL: localArtworkURL,
             cornerRadius: isCircular ? 500 : 8,
             placeholderSystemImage: isCircular ? "music.mic" : "guitars"
         )
