@@ -13,14 +13,18 @@ final class ItemPresentationTests: XCTestCase {
         XCTAssertEqual(BaseItemDto(id: "x", name: "").displayName, "Unknown")
     }
 
-    func testSubtitleArtistPrefersTheAlbumArtistThenJoinsTrackArtists() {
+    func testSubtitleArtistPrefersTheTrackArtistsThenFallsBackToTheAlbumArtist() {
         XCTAssertEqual(
             BaseItemDto(albumArtist: "Album Artist", artists: ["A", "B"]).subtitleArtist,
-            "Album Artist"
+              "A, B"
         )
         XCTAssertEqual(
             BaseItemDto(albumArtist: nil, artists: ["A", "B"]).subtitleArtist,
-            "A, B"
+              "A, B"
+        )
+        XCTAssertEqual(
+            BaseItemDto(albumArtist: "Album Artist", artists: []).subtitleArtist,
+              "Album Artist"
         )
         XCTAssertNil(BaseItemDto(albumArtist: "", artists: []).subtitleArtist)
         XCTAssertNil(BaseItemDto().subtitleArtist)
