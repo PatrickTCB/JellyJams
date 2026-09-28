@@ -16,6 +16,8 @@ struct SectionRootView: View {
             SongsView(model: libraryCache.items(for: .songs))
         case .playlists:
             PlaylistsView(model: libraryCache.items(for: .playlists))
+        case .aiRadio:
+            AIRadioView(model: libraryCache.items(for: .aiRadioPlaylists))
         case .downloads:
             DownloadsView()
         case .favorites:
@@ -40,9 +42,11 @@ struct SectionRootView: View {
 /// push, of an album or artist from the section below, gets reconciled against
 /// the section screen instead of landing on top of it.
 struct LibraryHubView: View {
+    @EnvironmentObject private var preferences: PreferencesStore
+
     var body: some View {
         List {
-            ForEach(LibrarySection.libraryGroup) { section in
+            ForEach(LibrarySection.libraryGroup(showingAIRadio: preferences.isAIRadioActive)) { section in
                 NavigationLink(value: section) {
                     Label(section.title, systemImage: section.systemImage)
                 }

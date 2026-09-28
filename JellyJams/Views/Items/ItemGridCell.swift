@@ -4,6 +4,10 @@ import SwiftUI
 /// used across the album/artist/playlist/genre grids.
 struct ItemGridCell: View {
     let item: BaseItemDto
+    /// Replaces the item's name under the artwork, for a grid that calls its
+    /// items something other than what the server named them — AI Radio
+    /// stations, shown without the ending that identifies them as generated.
+    var title: String?
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var favourites: FavouriteStore
@@ -39,7 +43,7 @@ struct ItemGridCell: View {
 
             HStack(spacing: 4) {
                 if isArtist { Spacer(minLength: 0) }
-                Text(item.displayName)
+                Text(title ?? item.displayName)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                     .multilineTextAlignment(.leading)

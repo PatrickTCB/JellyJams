@@ -73,6 +73,25 @@ struct SettingsView: View {
                 Text("Suggests similar music at the foot of album and artist screens. Turning this off skips the lookup rather than hiding its results, so your server is never asked.")
             }
 
+            Section {
+                Toggle("AudioMuse-AI Radio", isOn: $preferences.aiRadioEnabled)
+                if preferences.aiRadioEnabled {
+                    TextField(
+                        "Name ends with",
+                        text: $preferences.aiRadioSuffix,
+                        prompt: Text(PreferencesStore.defaultAIRadioSuffix)
+                    )
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    #endif
+                }
+            } header: {
+                Text("AI Radio")
+            } footer: {
+                Text("Gathers the playlists AudioMuse-AI generates into an AI Radio section, where a tap plays the station instead of opening it, and hides them from Playlists. They are recognised by this ending in their name.")
+            }
+
             Section("About") {
                 LabeledContent("Jelly Jams", value: appVersion)
             }

@@ -77,17 +77,52 @@ struct LibraryRepository: Sendable {
                 limit: limit
             )
         case .playlists:
-            return try await client.getItems(
-                includeItemTypes: [.playlist],
-                mediaTypes: [.audio],
-                recursive: true,
-                sortBy: query.sortBy,
-                sortOrder: query.sortOrder,
-                filters: filters,
-                startIndex: startIndex,
-                limit: limit
-            )
+            return try await playlistPage(query, startIndex: startIndex, limit: limit)
         }
+    }
+
+    /// A page of playlists, split by name when the query asks for one half of
+    /// the AudioMuse-AI partition.
+    ///
+    /// The split is applied here rather than by the server. Jellyfin's only
+    /// name query is `searchTerm`, which matches anywhere in a name and would
+    /// still need a local pass to insist on the ending; and trimming a page in
+    /// place would break ``PagedItems``, which advances its start index by the
+    /// number of items it was *handed* — so a filtered page would ask for the
+    /// same window again forever. A split list is therefore fetched whole and
+    /// returned as one complete page, with a total that counts what is actually
+    /// shown. An unsplit list pages exactly as before.
+    ///
+    /// Deliberately no cap on the whole-list fetch: unlike ``JellyfinService``'s
+    /// `getPlaylists()`, which feeds a menu that nobody scrolls past a few
+    /// hundred entries, this response *is* the screen's content, so a limit
+    /// would quietly leave stations out of a large library.
+    private func playlistPage(
+        _ query: LibraryQuery,
+        startIndex: Int,
+        limit: Int
+    ) async throws -> BaseItemDtoQueryResult {
+        let client = try requireClient()
+        let nameFilter = query.nameFilter
+
+        let result = try await client.getItems(
+            includeItemTypes: [.playlist],
+            mediaTypes: [.audio],
+            recursive: true,
+            sortBy: query.sortBy,
+            sortOrder: query.sortOrder,
+            filters: query.list.filters,
+            startIndex: nameFilter == nil ? startIndex : nil,
+            limit: nameFilter == nil ? limit : nil
+        )
+
+        guard let nameFilter else { return result }
+        let kept = (result.items ?? []).filter { nameFilter.matches($0.name ?? "") }
+        return BaseItemDtoQueryResult(
+            items: kept,
+            startIndex: startIndex,
+            totalRecordCount: kept.count
+        )
     }
 
     // MARK: - Detail screens

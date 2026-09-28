@@ -260,6 +260,22 @@ final class PagedItemsTests: XCTestCase {
         XCTAssertEqual(model.items.compactMap(\.id), ["a", "b"])
     }
 
+    /// Switching AI Radio on or off — or editing the ending it matches —
+    /// re-keys the query. The model has to treat that as a new question rather
+    /// than keep serving the playlists it already holds.
+    func testAChangedNameFilterRefetches() async {
+        let model = PagedItems(list: .playlists)
+        let counter = CallCounter()
+        let split = model.query(nameFilter: .notEndsWith("_automatic"))
+
+        await model.load(split, using: countingLoader(counter))
+        await model.load(split, using: countingLoader(counter))
+        XCTAssertEqual(counter.count, 1, "An unchanged split must not refetch")
+
+        await model.load(model.query, using: countingLoader(counter))
+        XCTAssertEqual(counter.count, 2)
+    }
+
     // MARK: - Sort state
 
     func testSortSeedsFromTheListAndTracksIntoTheQuery() {
@@ -298,6 +314,25 @@ final class PagedItemsTests: XCTestCase {
         XCTAssertEqual(request.values(for: "sortBy"), ["ProductionYear", "PremiereDate", "SortName"])
         XCTAssertEqual(request.value(for: "sortOrder"), "Descending")
         XCTAssertEqual(request.value(for: "limit"), "\(LibraryList.favouriteAlbums.pageSize)")
+        XCTAssertNil(model.errorMessage)
+    }
+
+    /// The name-split screens build their own query, so the model must fetch
+    /// that one rather than falling back to the unfiltered ``query`` — and a
+    /// split list arrives complete, so there is no next page to ask for.
+    func testLoadFromRepositorySendsTheNameFilteredQuery() async {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200),
+             playlistsPayload(ids: ["Chill_automatic", "Road Trip"]))
+        }
+
+        let model = PagedItems(list: .aiRadioPlaylists)
+        await model.load(model.query(nameFilter: .endsWith("_automatic")),
+                         from: TestFixtures.stubbedRepository())
+
+        XCTAssertEqual(model.items.compactMap(\.id), ["Chill_automatic"])
+        XCTAssertEqual(model.total, 1)
+        XCTAssertFalse(model.canLoadMore)
         XCTAssertNil(model.errorMessage)
     }
 

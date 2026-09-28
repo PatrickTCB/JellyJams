@@ -15,16 +15,29 @@ struct MainShellView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var playerPresentation: PlayerPresentation
     @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var preferences: PreferencesStore
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var settingsPresentation: SettingsPresentation
     #endif
+
+    /// The library sections the sidebar offers, AI Radio among them only while
+    /// the feature is switched on.
+    private var librarySections: [LibrarySection] {
+        LibrarySection.libraryGroup(showingAIRadio: preferences.isAIRadioActive)
+    }
 
     var body: some View {
         settingsHost
             .sheet(isPresented: $playerPresentation.isShowingPlayer) { PlayerView() }
             .onChange(of: session.serverReachable, initial: true) { _, reachable in
                 if !reachable { selection = .downloads }
+            }
+            // Turning AI Radio off removes its tab from under the selection;
+            // left alone the shell would be showing a destination that no
+            // longer exists.
+            .onChange(of: preferences.isAIRadioActive) { _, active in
+                if !active, selection == .aiRadio { selection = .albums }
             }
     }
 
@@ -101,7 +114,7 @@ struct MainShellView: View {
     private var sidebarLayout: some View {
         TabView(selection: $selection) {
             TabSection("Library") {
-                ForEach(LibrarySection.libraryGroup) { section in
+                ForEach(librarySections) { section in
                     Tab(section.title, systemImage: section.systemImage, value: section) {
                         sectionTab(section)
                     }

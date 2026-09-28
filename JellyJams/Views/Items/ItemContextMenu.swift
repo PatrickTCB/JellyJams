@@ -10,6 +10,7 @@ struct ItemContextMenu: ViewModifier {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var navigator: LibraryNavigator
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
@@ -115,6 +116,12 @@ struct ItemContextMenu: ViewModifier {
 
         if isPlaylist {
             Divider()
+            // Opening a playlist's contents. AI Radio stations play on a tap
+            // instead, so this is their only way in; ordinary playlists get it
+            // too, so the action lives in one place whatever the list.
+            Button { navigator.open(item) } label: {
+                Label("View", systemImage: "music.note.list")
+            }
             Button(role: .destructive) {
                 Task {
                     await Self.waitForPresentationDismissal()

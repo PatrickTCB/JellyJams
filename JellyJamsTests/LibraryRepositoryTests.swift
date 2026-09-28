@@ -95,6 +95,74 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(request.value(for: "sortOrder"), "Ascending")
     }
 
+    // MARK: - AI Radio playlist split
+
+    /// AudioMuse-AI's playlists are recognised by their name, which Jellyfin
+    /// cannot query for, so the split is applied to what the server returns.
+    func testAIRadioPlaylistsKeepOnlyTheGeneratedNames() async throws {
+        stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
+
+        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+
+        XCTAssertEqual(result.items?.compactMap(\.id), ["Chill_automatic", "Focus_AUTOMATIC"])
+    }
+
+    /// The ordinary playlist list is the other half of the same split: a
+    /// station shown in both places is a station the user cannot find.
+    func testPlaylistListGivesUpTheGeneratedNames() async throws {
+        stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
+
+        let result = try await splitPage(of: .playlists, .notEndsWith("_automatic"))
+
+        XCTAssertEqual(result.items?.compactMap(\.id), ["Road Trip"])
+    }
+
+    /// The total must count what is actually shown. `PagedItems` compares it
+    /// against the items it was handed to decide the list is finished, so a
+    /// server total for the unsplit library would have it paging forever.
+    func testASplitListReportsTheNumberOfPlaylistsItKept() async throws {
+        stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
+
+        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+
+        XCTAssertEqual(result.totalRecordCount, 2)
+        XCTAssertEqual(result.startIndex, 0)
+    }
+
+    /// A split with nothing to keep is an empty list, not the whole library.
+    func testASplitListWithNoMatchesIsEmpty() async throws {
+        stubPlaylists(["Road Trip", "Gym"])
+
+        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+
+        XCTAssertEqual(result.items, [])
+        XCTAssertEqual(result.totalRecordCount, 0)
+    }
+
+    /// The rule cannot be sent to the server, so a window would hide every
+    /// match beyond it: a split list is fetched whole, in one request.
+    func testASplitListIsFetchedWhole() async throws {
+        let request = try await recordPage(
+            for: LibraryQuery(list: .aiRadioPlaylists, nameFilter: .endsWith("_automatic")),
+            startIndex: 40,
+            limit: 20
+        )
+
+        XCTAssertNil(request.value(for: "limit"))
+        XCTAssertNil(request.value(for: "startIndex"))
+        XCTAssertEqual(request.values(for: "includeItemTypes"), ["Playlist"])
+        XCTAssertEqual(request.values(for: "mediaTypes"), ["Audio"])
+    }
+
+    /// Paging is untouched while the feature is off, which is every install
+    /// until somebody switches it on.
+    func testAnUnsplitPlaylistListStillAsksForItsWindow() async throws {
+        let request = try await recordPage(for: LibraryQuery(list: .playlists), startIndex: 40, limit: 20)
+
+        XCTAssertEqual(request.value(for: "startIndex"), "40")
+        XCTAssertEqual(request.value(for: "limit"), "20")
+    }
+
     // MARK: - Artist overview
 
     func testArtistOverviewFetchesAlbumsAndTracksForThatArtistOnly() async throws {
@@ -495,6 +563,25 @@ final class LibraryRepositoryTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Serves one page of playlists named after the given strings.
+    private func stubPlaylists(_ names: [String]) {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), playlistsPayload(ids: names))
+        }
+    }
+
+    /// Fetches the first page of a name-split playlist list.
+    private func splitPage(
+        of list: LibraryList,
+        _ nameFilter: PlaylistNameFilter
+    ) async throws -> BaseItemDtoQueryResult {
+        try await TestFixtures.stubbedRepository().page(
+            LibraryQuery(list: list, nameFilter: nameFilter),
+            startIndex: 0,
+            limit: 50
+        )
+    }
 
     /// Sends one page request for `query` and returns what reached the network.
     private func recordPage(

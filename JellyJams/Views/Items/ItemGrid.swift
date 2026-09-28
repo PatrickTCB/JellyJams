@@ -7,6 +7,12 @@ struct ItemGrid: View {
     var minCellWidth: CGFloat = 160
     var emptyMessage = "Nothing here yet"
     var emptySystemImage = "music.note"
+    /// Replaces navigation as the tap action, for a grid whose items are not
+    /// opened but acted on — the AI Radio stations, which start playing.
+    var onSelect: ((BaseItemDto) -> Void)?
+    /// Replaces each cell's title, for a grid that calls its items something
+    /// other than what the server named them. See ``ItemGridCell/title``.
+    var title: ((BaseItemDto) -> String)?
 
     var body: some View {
         ScrollView {
@@ -20,11 +26,9 @@ struct ItemGrid: View {
                         spacing: 20
                     ) {
                         ForEach(model.items) { item in
-                            NavigationLink(value: item) {
-                                ItemGridCell(item: item)
-                            }
-                            .buttonStyle(.plain)
-                            .task { await model.loadMoreIfNeeded(item) }
+                            cell(for: item)
+                                .buttonStyle(.plain)
+                                .task { await model.loadMoreIfNeeded(item) }
                         }
                     }
                     .padding()
@@ -54,5 +58,13 @@ struct ItemGrid: View {
             }
         }
         .gridRefreshAction { await model.reload() }
+    }
+
+    @ViewBuilder private func cell(for item: BaseItemDto) -> some View {
+        if let onSelect {
+            Button { onSelect(item) } label: { ItemGridCell(item: item, title: title?(item)) }
+        } else {
+            NavigationLink(value: item) { ItemGridCell(item: item, title: title?(item)) }
+        }
     }
 }
