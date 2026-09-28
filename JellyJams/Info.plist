@@ -22,9 +22,13 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>IntentsSupported</key>
+	<key>INIntentsSupported</key>
 	<array>
 		<string>INPlayMediaIntent</string>
+	</array>
+	<key>INSupportedMediaCategories</key>
+	<array>
+		<string>INMediaCategoryMusic</string>
 	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.music</string>

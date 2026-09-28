@@ -1,7 +1,6 @@
 #if os(iOS)
 import AppIntents
 import Foundation
-import MediaIntents
 
 /// A track in the Jellyfin library, in the form Siri understands.
 ///
@@ -126,12 +125,4 @@ extension SongQuery: EntityStringQuery {
     }
 }
 
-extension SongQuery: IntentValueQuery {
-    func values(for input: AudioSearch) async throws -> [SongEntity] {
-        try await AudioEntity.AudioSearchQuery.entities(for: input).compactMap { entity in
-            if case .song(let song) = entity { return song }
-            return nil
-        }
-    }
-}
 #endif

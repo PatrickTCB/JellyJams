@@ -1,7 +1,6 @@
 #if os(iOS)
 import AppIntents
 import Foundation
-import MediaIntents
 
 /// The owner of a playlist, as far as the audio schema describes one.
 /// Jellyfin does not expose playlist ownership to clients, so the value is
@@ -169,12 +168,4 @@ extension PlaylistQuery: EntityStringQuery {
     }
 }
 
-extension PlaylistQuery: IntentValueQuery {
-    func values(for input: AudioSearch) async throws -> [PlaylistEntity] {
-        try await AudioEntity.AudioSearchQuery.entities(for: input).compactMap { entity in
-            if case .playlist(let playlist) = entity { return playlist }
-            return nil
-        }
-    }
-}
 #endif
