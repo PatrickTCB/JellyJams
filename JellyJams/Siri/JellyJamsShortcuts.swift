@@ -9,8 +9,9 @@ import AppIntents
 /// generalise over the handful given here, so a few well-chosen examples
 /// cover far more than the words on the page. The "play some music" open
 /// case is deliberately parameterless and routes into the `.unspecified`
-/// branch of `AudioSearchQuery` (favourite songs) rather than trying to
-/// enumerate every phrasing a user might use.
+/// branch of `AudioSearchQuery` (the user's default playback setting,
+/// favourites shuffle when unset) rather than trying to enumerate every
+/// phrasing a user might use.
 ///
 /// ``PlayAudioIntent`` carries the schema-backed request; its `audioEntity`
 /// is a `@UnionValue`, which phrases cannot interpolate, so its phrases are
@@ -29,7 +30,7 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
 
          // Open / generic play: "Play (some) music in Jelly Jams" with no
          // named thing -- the `.unspecified` branch of `AudioSearchQuery`
-         // resolves it to the user's favourite songs.
+         // resolves it to the user's default playback setting.
         AppShortcut(
             intent: PlayAudioIntent(),
             phrases: [

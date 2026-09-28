@@ -9,22 +9,30 @@ enum SiriPlayback {
     /// Resolves the entity to tracks and starts them on `player`.
     ///
     /// Songs play alone, albums and playlists play from their first track,
-    /// and an artist shuffles their whole catalogue. A plain play request
-    /// replaces whatever is currently playing; `queueLocation` moves the
-    /// tracks elsewhere in the queue when the request said so.
+    /// and an artist shuffles their whole catalogue. The
+    /// ``DefaultPlaybackPlaylist`` sentinel expands to the user's configured
+    /// default, transport settings included. A plain play request replaces
+    /// whatever is currently playing; `queueLocation` moves the tracks
+    /// elsewhere in the queue when the request said so.
     ///
     /// Returns what is now playing, for the caller's dialog.
     @MainActor
     static func play(
         _ entity: AudioEntity,
         shuffleRequested: Bool,
+        repeatRequested: Bool = false,
         queueLocation: QueueInsertionLocation?,
         player: PlayerController,
         client: JellyfinService
     ) async throws -> String {
         let tracks: [BaseItemDto]
         var alwaysShuffle = false
+        // Repeat is only touched when something asked for it: an explicit
+        // "on repeat", or the default-playback setting. Otherwise the
+        // player's current mode is left alone.
+        var repeatOverride: RepeatMode?
         var nowPlaying: String
+        if repeatRequested { repeatOverride = .repeatAll }
         switch entity {
         case .song(let song):
             guard let item = try await client.item(byId: song.id) else {
@@ -48,7 +56,15 @@ enum SiriPlayback {
             alwaysShuffle = true
             nowPlaying = artist.name
         case .playlist(let playlist):
-            if playlist.id == FavouriteSongsPlaylist.id {
+            if playlist.id == DefaultPlaybackPlaylist.id {
+                let setting = AppServices.shared.preferences.defaultPlayback
+                let resolved = try await DefaultPlaybackResolver.resolve(setting: setting, client: client)
+                tracks = resolved.tracks
+                alwaysShuffle = resolved.shuffled
+                // The setting supplies repeat only when the request didn't
+                // ask for its own.
+                if !repeatRequested { repeatOverride = resolved.repeatMode }
+            } else if playlist.id == FavouriteSongsPlaylist.id {
                 tracks = try await PlayerController.fallbackQueue(client: client)
             } else {
                 guard let item = try await client.item(byId: playlist.id) else {
@@ -62,6 +78,7 @@ enum SiriPlayback {
             throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
         }
 
+        if let repeatOverride { player.repeatMode = repeatOverride }
         let shuffled = alwaysShuffle || shuffleRequested
         switch queueLocation {
         case .none:

@@ -50,6 +50,7 @@ struct PlayAudioIntent: AudioPlaybackIntent {
         _ = try await SiriPlayback.play(
             audioEntity,
             shuffleRequested: playbackAttributes.contains(.shuffle),
+            repeatRequested: playbackAttributes.contains(.repeat),
             queueLocation: queueLocation,
             player: services.player,
             client: client

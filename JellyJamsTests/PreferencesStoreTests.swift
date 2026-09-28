@@ -117,4 +117,62 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .aiRadioPlaylists))
         XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .playlists))
     }
+
+    // MARK: - Default playback
+
+    /// Unset must mean the built-in favourites shuffle: a fresh install (or a
+    /// stored blob from a version that didn't write it) has to read as nil,
+    /// not as some defaulted item.
+    func testDefaultPlaybackIsUnsetBeforeTheUserHasChosen() {
+        XCTAssertNil(PreferencesStore(defaults: defaults).defaultPlayback)
+    }
+
+    func testDefaultPlaybackSurvivesRelaunch() {
+        let store = PreferencesStore(defaults: defaults)
+        store.defaultPlayback = DefaultPlaybackSetting(
+            kind: .album,
+            itemId: "album-1",
+            title: "For All Kings",
+            shuffle: true,
+            repeatMode: .repeatAll
+        )
+
+        XCTAssertEqual(PreferencesStore(defaults: defaults).defaultPlayback, store.defaultPlayback)
+    }
+
+    /// Editing the transport settings of a chosen item must persist too —
+    /// they are part of the same blob the resolver reads at play time.
+    func testEditingDefaultPlaybackTransportSettingsSurvivesRelaunch() {
+        let store = PreferencesStore(defaults: defaults)
+        store.defaultPlayback = DefaultPlaybackSetting(
+            kind: .playlist,
+            itemId: "playlist-1",
+            title: "Top 40",
+            shuffle: false,
+            repeatMode: .repeatNone
+        )
+        store.defaultPlayback?.shuffle = true
+        store.defaultPlayback?.repeatMode = .repeatOne
+
+        let reloaded = PreferencesStore(defaults: defaults).defaultPlayback
+        XCTAssertEqual(reloaded?.shuffle, true)
+        XCTAssertEqual(reloaded?.repeatMode, .repeatOne)
+    }
+
+    /// Clearing the choice has to remove the stored blob, so the next launch
+    /// reads nil rather than resurrecting the old item.
+    func testClearingDefaultPlaybackSurvivesRelaunch() {
+        let store = PreferencesStore(defaults: defaults)
+        store.defaultPlayback = DefaultPlaybackSetting(
+            kind: .artist,
+            itemId: "artist-1",
+            title: "Architects",
+            shuffle: true,
+            repeatMode: .repeatNone
+        )
+        store.defaultPlayback = nil
+
+        XCTAssertNil(PreferencesStore(defaults: defaults).defaultPlayback)
+        XCTAssertNil(defaults.data(forKey: "defaultPlayback"))
+    }
 }

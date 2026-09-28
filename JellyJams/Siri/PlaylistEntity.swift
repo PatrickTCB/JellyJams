@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppIntents
 import Foundation
+import MediaIntents
 
 /// The owner of a playlist, as far as the audio schema describes one.
 /// Jellyfin does not expose playlist ownership to clients, so the value is
@@ -23,6 +24,7 @@ struct PlaylistEntity {
 
     @ComputedProperty
     var title: String {
+        if let titleOverride { return titleOverride }
         if let item { return item.displayName }
         return id == FavouriteSongsPlaylist.id ? FavouriteSongsPlaylist.title : "Unknown Playlist"
     }
@@ -44,6 +46,8 @@ struct PlaylistEntity {
     var item: BaseItemDto?
     /// Artwork for Siri's result cards.
     var artworkURL: URL?
+    /// The name of a synthetic playlist that has no item to take one from.
+    var titleOverride: String?
 
     init(item: BaseItemDto, artworkURL: URL?) {
         id = item.id ?? item.displayName
@@ -52,11 +56,12 @@ struct PlaylistEntity {
     }
 
     /// Builds a playlist entity that has no server-side counterpart, such as
-    /// ``FavouriteSongsPlaylist``.
-    init(id: String) {
+    /// ``FavouriteSongsPlaylist`` and ``DefaultPlaybackPlaylist``.
+    init(id: String, title: String? = nil) {
         self.id = id
         item = nil
         artworkURL = nil
+        titleOverride = title
     }
 
     var displayRepresentation: DisplayRepresentation {
@@ -84,13 +89,15 @@ extension PlaylistEntity: Hashable {
 
 // MARK: - Favourite songs pseudo-playlist
 
-/// The playlist handed to Siri for open-ended "play something" requests.
+/// The favourites shuffle, as a playlist Siri and Shortcuts can pick.
 ///
-/// It has no server-side counterpart: ``PlayAudioIntent`` recognises the id
-/// and plays a shuffle of the user's favourite songs (all songs when nothing
-/// is favourited). Encoding this as a real entity means the behaviour
-/// survives the system's identifier-based rehydration, which would strip any
-/// in-memory marker.
+/// It has no server-side counterpart: ``SiriPlayback`` recognises the id and
+/// plays a shuffle of the user's favourite songs (all songs when nothing is
+/// favourited). Encoding this as a real entity means the behaviour survives
+/// the system's identifier-based rehydration, which would strip any in-memory
+/// marker. Open-ended requests now resolve through
+/// ``DefaultPlaybackPlaylist`` instead; this remains the fallback when no
+/// default is configured, and an explicit choice in the Shortcuts pickers.
 enum FavouriteSongsPlaylist {
     static let id = "jellyjams.favourite-songs"
     static let title = "Favourite Songs"
@@ -112,6 +119,11 @@ extension PlaylistQuery: EntityQuery {
         var entities: [PlaylistEntity] = []
         let client = await AppServices.shared.session.client
         for id in identifiers {
+            if id == DefaultPlaybackPlaylist.id {
+                let setting = await AppServices.shared.preferences.defaultPlayback
+                entities.append(DefaultPlaybackPlaylist.entity(setting: setting))
+                continue
+            }
             if id == FavouriteSongsPlaylist.id {
                 entities.append(FavouriteSongsPlaylist.entity())
                 continue
@@ -154,6 +166,15 @@ extension PlaylistQuery: EntityStringQuery {
             PlaylistEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600))
         })
         return entities
+    }
+}
+
+extension PlaylistQuery: IntentValueQuery {
+    func values(for input: AudioSearch) async throws -> [PlaylistEntity] {
+        try await AudioEntity.AudioSearchQuery.entities(for: input).compactMap { entity in
+            if case .playlist(let playlist) = entity { return playlist }
+            return nil
+        }
     }
 }
 #endif

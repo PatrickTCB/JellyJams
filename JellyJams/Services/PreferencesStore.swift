@@ -1,5 +1,35 @@
 import Foundation
 
+/// The item an open-ended play request starts, with its transport settings.
+///
+/// Chosen in Settings and consulted wherever "play something" arrives with
+/// nothing named — Siri's default-playback sentinel and the system play
+/// button. Explicit requests never look at it. `nil` in
+/// ``PreferencesStore/defaultPlayback`` means the built-in behaviour: a
+/// favourites shuffle.
+struct DefaultPlaybackSetting: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case song, album, artist, playlist
+
+        var label: String {
+            switch self {
+            case .song: "Song"
+            case .album: "Album"
+            case .artist: "Artist"
+            case .playlist: "Playlist"
+            }
+        }
+    }
+
+    let kind: Kind
+    let itemId: String
+    /// The item's name when it was chosen, so settings rows and Siri's
+    /// confirmation can show it without a server round-trip.
+    let title: String
+    var shuffle: Bool
+    var repeatMode: RepeatMode
+}
+
 /// Settings the user controls that outlive a session, persisted to
 /// `UserDefaults`.
 ///
@@ -12,6 +42,7 @@ final class PreferencesStore: ObservableObject {
         static let showsSimilarItems = "showsSimilarItems"
         static let aiRadioEnabled = "aiRadioEnabled"
         static let aiRadioSuffix = "aiRadioSuffix"
+        static let defaultPlayback = "defaultPlayback"
     }
 
     /// The playlist-name ending AudioMuse-AI appends to what it generates, and
@@ -44,6 +75,20 @@ final class PreferencesStore: ObservableObject {
         didSet { defaults.set(aiRadioSuffix, forKey: Key.aiRadioSuffix) }
     }
 
+    /// What "play some music" starts. `nil` is the built-in favourites
+    /// shuffle; a value names the item and transport settings the user chose.
+    @Published var defaultPlayback: DefaultPlaybackSetting? {
+        didSet {
+            guard let defaultPlayback,
+                  let data = try? JSONEncoder().encode(defaultPlayback)
+            else {
+                defaults.removeObject(forKey: Key.defaultPlayback)
+                return
+            }
+            defaults.set(data, forKey: Key.defaultPlayback)
+        }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -53,6 +98,9 @@ final class PreferencesStore: ObservableObject {
         showsSimilarItems = defaults.object(forKey: Key.showsSimilarItems) as? Bool ?? true
         aiRadioEnabled = defaults.object(forKey: Key.aiRadioEnabled) as? Bool ?? false
         aiRadioSuffix = defaults.string(forKey: Key.aiRadioSuffix) ?? Self.defaultAIRadioSuffix
+        defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {
+            try? JSONDecoder().decode(DefaultPlaybackSetting.self, from: $0)
+        }
     }
 
     /// The ending to match, or nil when there is nothing to match with.

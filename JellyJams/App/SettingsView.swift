@@ -13,6 +13,7 @@ struct SettingsView: View {
     #if os(iOS)
     @Environment(\.dismiss) private var dismiss
     #endif
+    @State private var isChoosingDefaultPlayback = false
 
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -92,10 +93,35 @@ struct SettingsView: View {
                 Text("Gathers the playlists AudioMuse-AI generates into an AI Radio section, where a tap plays the station instead of opening it, and hides them from Playlists. They are recognised by this ending in their name.")
             }
 
+            Section {
+                Button {
+                    isChoosingDefaultPlayback = true
+                } label: {
+                    LabeledContent("Default Playback", value: defaultPlaybackSummary)
+                }
+            } footer: {
+                Text("What Siri starts for \"play some music\" requests, and what the play button starts when nothing is queued.")
+            }
+
             Section("About") {
                 LabeledContent("Jelly Jams", value: appVersion)
             }
         }
+        .sheet(isPresented: $isChoosingDefaultPlayback) {
+            DefaultPlaybackSettingsView()
+        }
+    }
+
+    private var defaultPlaybackSummary: String {
+        guard let setting = preferences.defaultPlayback else { return "Favourite Songs" }
+        var summary = "\(setting.title) (\(setting.kind.label))"
+        if setting.shuffle { summary += ", shuffled" }
+        switch setting.repeatMode {
+        case .repeatAll: summary += ", repeat all"
+        case .repeatOne: summary += ", repeat one"
+        case .repeatNone: break
+        }
+        return summary
     }
 
     /// Signing out swaps the app shell for onboarding. On iOS the sheet is

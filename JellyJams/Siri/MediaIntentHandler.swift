@@ -120,9 +120,10 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
             if let artist {
                 return try await ArtistQuery().entities(matching: artist).map(AudioEntity.artist)
             }
-            // "Play some music" with nothing named: the synthetic favourites
-            // playlist, matching the audio schema's unspecified request.
-            return [.playlist(FavouriteSongsPlaylist.entity())]
+            // "Play some music" with nothing named: the default-playback
+            // sentinel, matching the audio schema's unspecified request.
+            let setting = AppServices.shared.preferences.defaultPlayback
+            return [.playlist(DefaultPlaybackPlaylist.entity(setting: setting))]
         }
     }
 
@@ -177,11 +178,16 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
 
     /// Turns the resolved media item's identifier back into a full
     /// ``AudioEntity``, rehydrating from the server so playback sees a fresh
-    /// item. A missing or unresolvable identifier falls back to the
-    /// favourites shuffle, which covers open-ended requests that skip
-    /// resolution entirely.
+    /// item. The default-playback sentinel passes through untouched —
+    /// ``SiriPlayback`` applies the user's setting when it sees the id. A
+    /// missing or unresolvable identifier falls back to the favourites
+    /// shuffle, which covers open-ended requests that skip resolution
+    /// entirely.
     @MainActor
     private static func entity(identifier: String?, client: JellyfinService) async throws -> AudioEntity {
+        if identifier == DefaultPlaybackPlaylist.id {
+            return .playlist(DefaultPlaybackPlaylist.entity(setting: AppServices.shared.preferences.defaultPlayback))
+        }
         guard let identifier,
               identifier != FavouriteSongsPlaylist.id,
               let item = try await client.item(byId: identifier)

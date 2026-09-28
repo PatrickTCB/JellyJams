@@ -57,6 +57,7 @@ final class PlayerController: ObservableObject {
     private let player = AVPlayer()
     private var client: JellyfinService?
     private weak var downloads: DownloadStore?
+    private weak var preferences: PreferencesStore?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var originalQueue: [QueueEntry]?
@@ -125,6 +126,10 @@ final class PlayerController: ObservableObject {
 
     func configure(downloads: DownloadStore?) {
         self.downloads = downloads
+    }
+
+    func configure(preferences: PreferencesStore?) {
+        self.preferences = preferences
     }
 
     // MARK: - State Persistence
@@ -299,9 +304,10 @@ final class PlayerController: ObservableObject {
     }
 
     /// Play/resume for the system transport ("Hey Siri, play", the Control
-    /// Centre play button): resumes when a track is loaded, and starts a
-    /// favourites shuffle (all songs when nothing is favourited) when the
-    /// queue is empty, so a play command with nothing queued does something
+    /// Centre play button): resumes when a track is loaded, and when the
+    /// queue is empty starts the user's default playback — their configured
+    /// item, or a favourites shuffle (all songs when nothing is favourited)
+    /// when unset — so a play command with nothing queued does something
     /// useful instead of nothing.
     func playOrResume() {
         guard currentItem == nil else {
@@ -309,13 +315,15 @@ final class PlayerController: ObservableObject {
             return
         }
         guard let client else { return }
+        let setting = preferences?.defaultPlayback
         Task {
             do {
-                let tracks = try await Self.fallbackQueue(client: client)
-                guard !tracks.isEmpty else { return }
-                play(tracks)
+                let resolved = try await DefaultPlaybackResolver.resolve(setting: setting, client: client)
+                guard !resolved.tracks.isEmpty else { return }
+                if let mode = resolved.repeatMode { repeatMode = mode }
+                play(resolved.tracks, shuffled: resolved.shuffled)
             } catch {
-                playbackLogger.error("Could not start shuffle from the play command: \\(error.localizedDescription, privacy: .public)")
+                playbackLogger.error("Could not start default playback from the play command: \\(error.localizedDescription, privacy: .public)")
             }
         }
     }

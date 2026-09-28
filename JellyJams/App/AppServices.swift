@@ -57,6 +57,7 @@ final class AppServices {
         lastWiredSignedIn = signedIn
 
         player.configure(downloads: downloads)
+        player.configure(preferences: preferences)
         #if os(iOS)
         CarPlayController.shared.configure(session: session, player: player, downloads: downloads)
         #endif

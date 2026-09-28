@@ -1,6 +1,7 @@
 #if os(iOS)
 import AppIntents
 import Foundation
+import MediaIntents
 
 /// An artist in the Jellyfin library, in the form Siri understands.
 ///
@@ -102,6 +103,15 @@ extension ArtistQuery: EntityStringQuery {
         let result = try await client.getAlbumArtists(searchTerm: string, limit: 10)
         return (result.items ?? []).map {
             ArtistEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600))
+        }
+    }
+}
+
+extension ArtistQuery: IntentValueQuery {
+    func values(for input: AudioSearch) async throws -> [ArtistEntity] {
+        try await AudioEntity.AudioSearchQuery.entities(for: input).compactMap { entity in
+            if case .artist(let artist) = entity { return artist }
+            return nil
         }
     }
 }
