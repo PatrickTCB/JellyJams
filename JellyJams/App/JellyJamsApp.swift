@@ -115,6 +115,7 @@ struct JellyJamsApp: App {
             SettingsView()
                 .environmentObject(session)
                 .environmentObject(preferences)
+                .environmentObject(downloads)
         }
         // A settings scene is fixed to its content's size by default, which
         // leaves no way to widen the window when a long server address or a
