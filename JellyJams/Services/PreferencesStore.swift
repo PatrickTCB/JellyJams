@@ -137,4 +137,24 @@ final class PreferencesStore: ObservableObject {
             return nil
         }
     }
+
+    /// Whether an item is one of AudioMuse-AI's playlists, judged by the same
+    /// name rule that splits the two playlist lists. False for every other
+    /// kind of item, and for everything while the feature is off.
+    func isAIRadioStation(_ item: BaseItemDto) -> Bool {
+        guard item.itemType == .playlist,
+              let filter = playlistNameFilter(for: .aiRadioPlaylists)
+        else { return false }
+        return filter.matches(item.name ?? "")
+    }
+
+    /// A station's name with the generator's ending taken off, for showing it
+    /// the way the AI Radio screen does. Names without the ending — or every
+    /// name, while the feature is off — come back untouched.
+    func aiRadioStationName(for item: BaseItemDto) -> String {
+        guard let filter = playlistNameFilter(for: .aiRadioPlaylists) else {
+            return item.displayName
+        }
+        return filter.trimmingMatchedEnding(from: item.displayName)
+    }
 }

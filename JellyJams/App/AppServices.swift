@@ -22,6 +22,7 @@ final class AppServices {
     let settingsPresentation = SettingsPresentation()
     let preferences = PreferencesStore()
     let downloads = DownloadStore()
+    let pinnedItems = PinnedItemsStore()
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -67,6 +68,7 @@ final class AppServices {
             downloads.configure(client: session.client)
             playlistStore.configure(client: session.client)
             favourites.configure(client: session.client)
+            pinnedItems.configure(accountKey: session.currentUser.map(Self.accountKey(for:)))
             Task {
                 await session.checkServerReachability()
                 player.restorePlaybackState()
@@ -77,7 +79,14 @@ final class AppServices {
             downloads.configure(client: nil)
             playlistStore.configure(client: nil)
             favourites.configure(client: nil)
+            pinnedItems.configure(accountKey: nil)
             libraryCache.clear()
         }
+    }
+
+    /// The key a set of pins is stored under: item ids belong to one server,
+    /// so pins are kept apart per account rather than shared across sign-ins.
+    private static func accountKey(for user: SessionStore.StoredUser) -> String {
+        "\(user.serverURL.absoluteString)#\(user.id)"
     }
 }

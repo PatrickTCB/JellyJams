@@ -11,7 +11,7 @@ import SwiftUI
 /// where available, docked inside each tab's content on earlier iOS, and docked
 /// below the tab view on macOS.
 struct MainShellView: View {
-    @State private var selection: LibrarySection = .albums
+    @State private var selection: LibrarySection = .home
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var playerPresentation: PlayerPresentation
     @EnvironmentObject private var downloads: DownloadStore
@@ -77,6 +77,13 @@ struct MainShellView: View {
     /// iOS 26.1+ the tab bar hosts it as a bottom accessory instead.
     private var tabLayout: some View {
         TabView(selection: $selection) {
+            Tab(LibrarySection.home.title, systemImage: LibrarySection.home.systemImage, value: LibrarySection.home) {
+                LibraryNavigationStack {
+                    HomeView()
+                        .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
+                }
+            }
+
             Tab("Library", systemImage: "square.stack", value: LibrarySection.albums) {
                 LibraryNavigationStack {
                     LibraryHubView()
@@ -113,6 +120,9 @@ struct MainShellView: View {
 
     private var sidebarLayout: some View {
         TabView(selection: $selection) {
+            Tab(LibrarySection.home.title, systemImage: LibrarySection.home.systemImage, value: LibrarySection.home) {
+                sectionTab(.home)
+            }
             TabSection("Library") {
                 ForEach(librarySections) { section in
                     Tab(section.title, systemImage: section.systemImage, value: section) {

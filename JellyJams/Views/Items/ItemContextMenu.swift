@@ -14,6 +14,7 @@ struct ItemContextMenu: ViewModifier {
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var pinnedItems: PinnedItemsStore
     @Environment(\.gridRefreshAction) private var gridRefreshAction
 
     @State private var isPresentingNewPlaylist = false
@@ -99,6 +100,27 @@ struct ItemContextMenu: ViewModifier {
             )
         }
         .disabled(favourites.isBusy(item))
+
+        if let pinKind = pinnedItems.kind(for: item) {
+            if pinnedItems.contains(item) {
+                Button { pinnedItems.unpin(item) } label: {
+                    Label("Unpin from Home", systemImage: "pin.slash")
+                }
+            } else {
+                // The limit is stated in the label because a disabled menu
+                // item cannot explain itself otherwise.
+                Button { pinnedItems.pin(item, kind: pinKind) } label: {
+                    Label(
+                        pinnedItems.isFull
+                            ? "Pin to Home (\(PinnedItemsStore.maxPins) max)"
+                            : "Pin to Home",
+                        systemImage: "pin"
+                    )
+                }
+                .disabled(pinnedItems.isFull)
+            }
+        }
+
         Divider()
         Button {
             if downloads.isDownloaded(item) {

@@ -125,6 +125,57 @@ struct LibraryRepository: Sendable {
         )
     }
 
+    // MARK: - Home
+
+    /// Which of Jellyfin's "latest" streams a home row wants. Albums and
+    /// artists are requested separately because the endpoint filters by item
+    /// type, and a mixed request would let one kind crowd out the other.
+    enum LatestKind: Sendable, Equatable {
+        case albums
+        case artists
+
+        var itemType: ItemType {
+            switch self {
+            case .albums: .musicAlbum
+            case .artists: .musicArtist
+            }
+        }
+    }
+
+    /// The newest music of one kind, newest first.
+    func latestItems(_ kind: LatestKind, limit: Int) async throws -> [BaseItemDto] {
+        let client = try requireClient()
+        guard limit > 0 else { return [] }
+        return try await client.getLatestMedia(includeItemTypes: [kind.itemType], limit: limit)
+    }
+
+    /// Resolves specific item ids, in whatever order the server answers.
+    ///
+    /// Ids the server no longer knows are simply absent from the result, which
+    /// is how the caller tells a deleted item from a failed request: a failure
+    /// throws, an answer is authoritative.
+    func items(withIds ids: [String]) async throws -> [BaseItemDto] {
+        let client = try requireClient()
+        guard !ids.isEmpty else { return [] }
+        let result = try await client.getItems(recursive: true, ids: ids, limit: ids.count)
+        return result.items ?? []
+    }
+
+    /// The first `limit` AudioMuse-AI stations, by name.
+    ///
+    /// Reuses the same whole-list fetch and name split as the AI Radio screen:
+    /// Jellyfin cannot filter by name ending, so a window applied server-side
+    /// could hide matches beyond it.
+    func aiRadioStations(nameFilter: PlaylistNameFilter, limit: Int) async throws -> [BaseItemDto] {
+        guard limit > 0 else { return [] }
+        let result = try await page(
+            LibraryQuery(list: .aiRadioPlaylists, nameFilter: nameFilter),
+            startIndex: 0,
+            limit: limit
+        )
+        return Array((result.items ?? []).prefix(limit))
+    }
+
     // MARK: - Detail screens
 
     /// Every audio track belonging to a collection item, in playback order.

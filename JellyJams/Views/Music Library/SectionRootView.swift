@@ -8,6 +8,8 @@ struct SectionRootView: View {
 
     var body: some View {
         switch section {
+        case .home:
+            HomeView()
         case .albums:
             AlbumsView(model: libraryCache.items(for: .albums))
         case .artists:

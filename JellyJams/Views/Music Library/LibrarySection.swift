@@ -3,6 +3,10 @@ import SwiftUI
 /// Top-level navigation destinations, shared between the macOS/iPadOS sidebar
 /// and the iPhone tab bar.
 enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
+    /// The app's landing screen: pinned items, recent music and AI Radio
+    /// quick links. Not part of ``libraryGroup`` — it is the shell's own
+    /// destination rather than one of the library's browsing sections.
+    case home
     case albums
     case artists
     case songs
@@ -19,6 +23,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
+        case .home: return "Home"
         case .albums: return "Albums"
         case .artists: return "Artists"
         case .songs: return "Songs"
@@ -32,6 +37,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
 
     var systemImage: String {
         switch self {
+        case .home: return "house"
         case .albums: return "record.circle.fill"
         case .artists: return "music.mic"
         case .songs: return "music.note"
