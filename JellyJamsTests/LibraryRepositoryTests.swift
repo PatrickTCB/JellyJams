@@ -521,6 +521,64 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(similar.compactMap(\.id), ["album-1", "album-2"])
     }
 
+    // MARK: - Home
+
+    func testLatestItemsAsksTheLatestEndpointForTheRightKind() async throws {
+        let albums = try await recordLatest(.albums)
+        XCTAssertEqual(albums.path, "/jellyfin/Items/Latest")
+        XCTAssertEqual(albums.values(for: "includeItemTypes"), ["MusicAlbum"])
+        XCTAssertEqual(albums.value(for: "limit"), "10")
+
+        let artists = try await recordLatest(.artists)
+        XCTAssertEqual(artists.values(for: "includeItemTypes"), ["MusicArtist"])
+    }
+
+    func testIdLookupForwardsEveryId() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                itemsPayload([("album-2", "MusicAlbum"), ("album-1", "MusicAlbum")])
+            )
+        }
+
+        let items = try await TestFixtures.stubbedRepository().items(withIds: ["album-1", "album-2"])
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.path, "/jellyfin/Items")
+        XCTAssertEqual(request.values(for: "ids"), ["album-1", "album-2"])
+        XCTAssertEqual(
+            items.compactMap(\.id),
+            ["album-2", "album-1"],
+            "The server's order is kept; whoever resolves pins reorders them"
+        )
+    }
+
+    func testIdLookupWithNoIdsNeverReachesTheNetwork() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let items = try await TestFixtures.stubbedRepository().items(withIds: [])
+
+        XCTAssertTrue(items.isEmpty)
+        XCTAssertTrue(recorder.all.isEmpty)
+    }
+
+    func testAIRadioStationsKeepOnlyStationsAndStopAtTheLimit() async throws {
+        stubPlaylists(["Chill_automatic", "Road Trip", "Focus_automatic", "Workout_automatic"])
+
+        let stations = try await TestFixtures.stubbedRepository().aiRadioStations(
+            nameFilter: .endsWith("_automatic"),
+            limit: 3
+        )
+
+        XCTAssertEqual(stations.compactMap(\.id), ["Chill_automatic", "Focus_automatic", "Workout_automatic"])
+    }
+
     // MARK: - Signed out
 
     /// Every read must fail loudly when signed out. Returning empty results
@@ -549,6 +607,15 @@ final class LibraryRepositoryTests: XCTestCase {
                 to: TestFixtures.item(id: "album-id", type: .musicAlbum),
                 limit: 5
             )
+        }
+        await assertNotAuthenticated {
+            _ = try await repository.latestItems(.albums, limit: 10)
+        }
+        await assertNotAuthenticated {
+            _ = try await repository.items(withIds: ["album-id"])
+        }
+        await assertNotAuthenticated {
+            _ = try await repository.aiRadioStations(nameFilter: .endsWith("_automatic"), limit: 3)
         }
     }
 
@@ -597,6 +664,19 @@ final class LibraryRepositoryTests: XCTestCase {
 
         _ = try await TestFixtures.stubbedRepository()
             .page(query, startIndex: startIndex, limit: limit)
+
+        return try XCTUnwrap(recorder.all.first)
+    }
+
+    /// Sends one latest-media request and returns what reached the network.
+    private func recordLatest(_ kind: LibraryRepository.LatestKind) async throws -> RecordedRequest {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), Data("[]".utf8))
+        }
+
+        _ = try await TestFixtures.stubbedRepository().latestItems(kind, limit: 10)
 
         return try XCTUnwrap(recorder.all.first)
     }

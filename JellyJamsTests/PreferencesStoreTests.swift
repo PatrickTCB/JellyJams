@@ -175,4 +175,38 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertNil(PreferencesStore(defaults: defaults).defaultPlayback)
         XCTAssertNil(defaults.data(forKey: "defaultPlayback"))
     }
+
+    // MARK: - Station recognition
+
+    func testOnlyPlaylistsEndingWithTheSuffixAreStations() {
+        let store = PreferencesStore(defaults: defaults)
+        store.aiRadioEnabled = true
+
+        let station = TestFixtures.item(id: "station", name: "Chill_automatic", type: .playlist)
+        let playlist = TestFixtures.item(id: "playlist", name: "Road Trip", type: .playlist)
+        let album = TestFixtures.item(id: "album", name: "Chill_automatic", type: .musicAlbum)
+
+        let off = PreferencesStore(defaults: defaults)
+        off.aiRadioEnabled = false
+
+        XCTAssertTrue(store.isAIRadioStation(station))
+        XCTAssertFalse(store.isAIRadioStation(playlist))
+        XCTAssertFalse(store.isAIRadioStation(album), "Only playlists can be stations")
+        XCTAssertFalse(off.isAIRadioStation(station), "With the feature off nothing is a station")
+    }
+
+    func testStationNamesDropTheMatchedEnding() {
+        let store = PreferencesStore(defaults: defaults)
+        store.aiRadioEnabled = true
+        let off = PreferencesStore(defaults: defaults)
+        off.aiRadioEnabled = false
+        let station = TestFixtures.item(id: "station", name: "Chill_automatic", type: .playlist)
+
+        XCTAssertEqual(store.aiRadioStationName(for: station), "Chill")
+        XCTAssertEqual(
+            off.aiRadioStationName(for: station),
+            "Chill_automatic",
+            "With the feature off the name is shown as the server has it"
+        )
+    }
 }

@@ -67,6 +67,72 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - Latest media & id lookups
+
+    func testLatestMediaRequestsTheLatestEndpointForOneItemType() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            let data = Data(#"[{"Id":"album-1","Name":"album-1","Type":"MusicAlbum"}]"#.utf8)
+            return (response, data)
+        }
+
+        let items = try await makeClient().getLatestMedia(includeItemTypes: [.musicAlbum], limit: 10)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.path, "/jellyfin/Items/Latest")
+        XCTAssertEqual(request.values(for: "includeItemTypes"), ["MusicAlbum"])
+        XCTAssertEqual(request.value(for: "limit"), "10")
+        XCTAssertEqual(items.compactMap(\.id), ["album-1"])
+    }
+
+    /// `/Items/Latest` answers with a bare array rather than a query result,
+    /// so it must validate its own identifiers.
+    func testLatestMediaRejectsItemsWithoutIdentifiers() async {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"[{"Name":"Missing ID","Type":"MusicAlbum"}]"#.utf8))
+        }
+
+        do {
+            _ = try await makeClient().getLatestMedia(includeItemTypes: [.musicAlbum], limit: 10)
+            XCTFail("Expected an incomplete SDK item to be rejected")
+        } catch JellyfinError.missingItemIdentifier {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testItemLookupByIdsSendsTheIdsFilter() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        _ = try await makeClient().getItems(recursive: true, ids: ["album-1", "album-2"])
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.path, "/jellyfin/Items")
+        XCTAssertEqual(request.values(for: "ids"), ["album-1", "album-2"])
+    }
+
     func testStreamURLIncludesPlaybackSessionAndCredentials() throws {
         let url = try makeClient().streamURL(
             itemId: "track-id",
@@ -532,7 +598,7 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
-    func testDraggingOneTrackToTheEndIsASingleMove() {
+    @MainActor func testDraggingOneTrackToTheEndIsASingleMove() {
         let ops = TrackListDetail.movePlan(
             from: playlistTracks(["A", "B", "C", "D"]),
             to: playlistTracks(["B", "C", "D", "A"])
@@ -541,7 +607,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(ops, [.init(entryId: "entry-A", index: 3)])
     }
 
-    func testDraggingOneTrackToTheTopIsASingleMove() {
+    @MainActor func testDraggingOneTrackToTheTopIsASingleMove() {
         let ops = TrackListDetail.movePlan(
             from: playlistTracks(["A", "B", "C", "D", "E"]),
             to: playlistTracks(["E", "A", "B", "C", "D"])
@@ -550,7 +616,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(ops, [.init(entryId: "entry-E", index: 0)])
     }
 
-    func testABatchDragIsReplayedAsSequentialSingleMoves() {
+    @MainActor func testABatchDragIsReplayedAsSequentialSingleMoves() {
         // B and C dragged to the end — no single move expresses that.
         let ops = TrackListDetail.movePlan(
             from: playlistTracks(["A", "B", "C", "D", "E"]),
@@ -563,7 +629,7 @@ final class JellyfinServiceTests: XCTestCase {
         ])
     }
 
-    func testAnInterleavedDragMovesEachDisplacedEntryOnce() {
+    @MainActor func testAnInterleavedDragMovesEachDisplacedEntryOnce() {
         // A, C and E dragged to the end, leaving B, D, F in front.
         let ops = TrackListDetail.movePlan(
             from: playlistTracks(["A", "B", "C", "D", "E", "F"]),
@@ -574,7 +640,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(ops.map(\.index), [0, 1, 2])
     }
 
-    func testAPlaylistContainingTheSameSongTwiceIsMovedByEntry() {
+    @MainActor func testAPlaylistContainingTheSameSongTwiceIsMovedByEntry() {
         // Track ids are not unique in a playlist — the same song can sit in
         // it twice — so a drag must be matched by the rows' distinct entry
         // ids, or the plan can move the other instance of the song.
@@ -597,7 +663,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertTrue(TrackListDetail.movePlan(from: order, to: order).isEmpty)
     }
 
-    func testMismatchedLengthsProduceNoMoves() {
+    @MainActor func testMismatchedLengthsProduceNoMoves() {
         let ops = TrackListDetail.movePlan(
             from: playlistTracks(["A", "B", "C", "D"]),
             to: playlistTracks(["A", "B", "C"])
@@ -609,7 +675,7 @@ final class JellyfinServiceTests: XCTestCase {
     /// Whatever the drag, replaying the plan must land on exactly the intended
     /// order — each request is issued against the arrangement the previous one
     /// left behind, so a plan that assumes any other sequence diverges.
-    func testEveryPlanConvergesOnTheIntendedOrder() {
+    @MainActor func testEveryPlanConvergesOnTheIntendedOrder() {
         let drags: [(before: [String], after: [String])] = [
             (["A", "B", "C", "D"], ["B", "C", "D", "A"]),
             (["A", "B", "C", "D", "E"], ["E", "A", "B", "C", "D"]),
@@ -654,32 +720,32 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
-    func testADropToTheEndAppendsTheDraggedEntries() {
+    @MainActor func testADropToTheEndAppendsTheDraggedEntries() {
         let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c"]), moving: ["a"], to: .end)
         XCTAssertEqual(result.map(\.id), ["b", "c", "a"])
     }
 
-    func testADropBeforeAnAnchorInsertsTheDraggedEntriesThere() {
+    @MainActor func testADropBeforeAnAnchorInsertsTheDraggedEntriesThere() {
         let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c", "d"]), moving: ["d"], to: .before("a"))
         XCTAssertEqual(result.map(\.id), ["d", "a", "b", "c"])
     }
 
-    func testAMultiDragReinsertsInDragOrderNotListOrder() {
+    @MainActor func testAMultiDragReinsertsInDragOrderNotListOrder() {
         let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c", "d"]), moving: ["c", "a"], to: .end)
         XCTAssertEqual(result.map(\.id), ["b", "d", "c", "a"])
     }
 
-    func testAMultiDropInTheMiddleKeepsTheUndraggedEntriesAroundIt() {
+    @MainActor func testAMultiDropInTheMiddleKeepsTheUndraggedEntriesAroundIt() {
         let result = TrackListDetail.reordered(playlistEntries(["a", "b", "c", "d", "e"]), moving: ["a", "e"], to: .before("c"))
         XCTAssertEqual(result.map(\.id), ["b", "a", "e", "c", "d"])
     }
 
-    func testADropWithAMissingAnchorAppendsInstead() {
+    @MainActor func testADropWithAMissingAnchorAppendsInstead() {
         let result = TrackListDetail.reordered(playlistEntries(["a", "b"]), moving: ["a"], to: .before("missing"))
         XCTAssertEqual(result.map(\.id), ["b", "a"])
     }
 
-    func testADropWithoutSourcesLeavesTheListUnchanged() {
+    @MainActor func testADropWithoutSourcesLeavesTheListUnchanged() {
         let result = TrackListDetail.reordered(playlistEntries(["a", "b"]), moving: [], to: .end)
         XCTAssertEqual(result.map(\.id), ["a", "b"])
     }
@@ -687,7 +753,7 @@ final class JellyfinServiceTests: XCTestCase {
     /// A drop is applied locally through `reordered` and replayed on the
     /// server through the move plan; the two must land on the same
     /// arrangement or the reload after the replay would undo the drop.
-    func testADropReplayedOnTheServerConvergesOnTheLocalResult() {
+    @MainActor func testADropReplayedOnTheServerConvergesOnTheLocalResult() {
         let before = playlistEntries(["a", "b", "c", "d", "e"])
         let after = TrackListDetail.reordered(before, moving: ["e", "a"], to: .before("c"))
 
@@ -706,7 +772,7 @@ final class JellyfinServiceTests: XCTestCase {
 
     // MARK: - Keyboard selection extension
 
-    func testShiftDownExtendsTheSelectionTowardTheEnd() {
+    @MainActor func testShiftDownExtendsTheSelectionTowardTheEnd() {
         let ids = ["a", "b", "c", "d", "e"]
         let step = ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 1, step: 1)
 
@@ -714,7 +780,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(step?.selection, Set(["b", "c"]))
     }
 
-    func testShiftUpShrinksAnExtendedRangeInsteadOfGrowingASecondOne() {
+    @MainActor func testShiftUpShrinksAnExtendedRangeInsteadOfGrowingASecondOne() {
         // Extended down to "d" already; shift-up walks the lead back up.
         let ids = ["a", "b", "c", "d", "e"]
         let step = ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 3, step: -1)
@@ -723,7 +789,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(step?.selection, Set(["b", "c"]))
     }
 
-    func testShiftUpPastTheAnchorSpansUpward() {
+    @MainActor func testShiftUpPastTheAnchorSpansUpward() {
         let ids = ["a", "b", "c"]
         let step = ShiftArrowSelection.extensionStep(ids: ids, anchor: 2, lead: 2, step: -1)
 
