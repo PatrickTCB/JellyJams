@@ -10,10 +10,15 @@ struct ItemRow: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var downloads: DownloadStore
+    
+    private var localArtworkURL: URL? {
+        guard session.serverReachable == false else { return nil }
+        guard downloads.isDownloaded(item) else { return nil }
+        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
             ArtworkImage(
                 url: session.library.artworkURL(for: item, size: 96),
                 localURL: localArtworkURL,

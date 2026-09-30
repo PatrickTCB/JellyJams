@@ -27,10 +27,15 @@ struct NowPlayingBar: View {
 
     private var isDocked: Bool { presentation == .docked }
     private var isInline: Bool { presentation == .accessoryInline }
+    
 
     var body: some View {
         if let item = player.currentItem {
-            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
+            var localArtworkURL: URL? {
+                guard session.serverReachable == false else { return nil }
+                guard downloads.isDownloaded(item) else { return nil }
+                return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
+            }
             VStack(spacing: 0) {
                 if isDocked { Divider() }
                 HStack(spacing: isInline ? 8 : 12) {
