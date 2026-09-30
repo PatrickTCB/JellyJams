@@ -119,7 +119,7 @@ struct ArtworkImage: View {
 
     var body: some View {
         GeometryReader { geo in
-            let bucket = pixelBucket(for: geo.size)
+            let bucket = Self.pixelBucket(for: geo.size, scale: displayScale)
             ZStack {
                 if let image {
                     Image(platformImage: image)
@@ -144,12 +144,16 @@ struct ArtworkImage: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
-    /// The decode resolution for artwork displayed at `size`: its longest side
-    /// in pixels, snapped up to a power of two so views of slightly different
-    /// sizes share one decoded copy, bounded to cover row thumbnails through
-    /// full-screen player artwork.
-    private func pixelBucket(for size: CGSize) -> Int {
-        let displayedPixels = max(size.width, size.height) * max(displayScale, 1)
+    /// The decode resolution for artwork displayed at `size` on a screen with
+    /// `scale` backing pixels per point: the longest side in pixels, snapped
+    /// up to a power of two so views of slightly different sizes share one
+    /// decoded copy, bounded to cover row thumbnails through full-screen
+    /// player artwork.
+    ///
+    /// The scale is passed in rather than read from the environment — a pure
+    /// function of its inputs — so the bucketing rule is directly testable.
+    nonisolated static func pixelBucket(for size: CGSize, scale: CGFloat) -> Int {
+        let displayedPixels = max(size.width, size.height) * max(scale, 1)
         var bucket: CGFloat = 128
         while bucket < displayedPixels && bucket < 2048 {
             bucket *= 2
