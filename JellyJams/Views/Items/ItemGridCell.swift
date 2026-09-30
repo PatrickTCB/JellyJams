@@ -14,6 +14,11 @@ struct ItemGridCell: View {
     @EnvironmentObject private var downloads: DownloadStore
 
     private var isArtist: Bool { item.itemType == .musicArtist }
+    private var localArtworkURL: URL? {
+        guard session.serverReachable == false else { return nil }
+        guard downloads.isDownloaded(item) else { return nil }
+        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
+    }
 
     private var subtitle: String? {
         switch item.itemType {
@@ -32,7 +37,6 @@ struct ItemGridCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
             ArtworkImage(
                 url: session.library.artworkURL(for: item, size: 320),
                 localURL: localArtworkURL,
