@@ -658,7 +658,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(ops, [.init(entryId: "e1", index: 3)])
     }
 
-    func testIdenticalOrdersNeedNoMoves() {
+    @MainActor func testIdenticalOrdersNeedNoMoves() {
         let order = playlistTracks(["A", "B", "C"])
         XCTAssertTrue(TrackListDetail.movePlan(from: order, to: order).isEmpty)
     }
@@ -797,13 +797,13 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(step?.selection, Set(["b", "c"]))
     }
 
-    func testTheLeadClampsAtBothEndsOfTheList() {
+    @MainActor func testTheLeadClampsAtBothEndsOfTheList() {
         let ids = ["a", "b", "c"]
         XCTAssertEqual(ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 2, step: 1)?.lead, 2)
         XCTAssertEqual(ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 0, step: -1)?.lead, 0)
     }
 
-    func testExtensionRejectsPositionsThatDoNotNameRows() {
+    @MainActor func testExtensionRejectsPositionsThatDoNotNameRows() {
         XCTAssertNil(ShiftArrowSelection.extensionStep(ids: [], anchor: 0, lead: 0, step: 1))
         XCTAssertNil(ShiftArrowSelection.extensionStep(ids: ["a"], anchor: 1, lead: 0, step: 1))
         XCTAssertNil(ShiftArrowSelection.extensionStep(ids: ["a"], anchor: 0, lead: 1, step: 1))
