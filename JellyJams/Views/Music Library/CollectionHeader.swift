@@ -12,6 +12,12 @@ struct CollectionHeader: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var downloads: DownloadStore
+    
+    private var localArtworkURL: URL? {
+        guard session.serverReachable == false else { return nil }
+        guard downloads.isDownloaded(item) else { return nil }
+        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
+    }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -28,7 +34,6 @@ struct CollectionHeader: View {
     }
 
     private var artwork: some View {
-        let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
         return ArtworkImage(
             url: session.library.artworkURL(for: item, size: 500),
             localURL: localArtworkURL,

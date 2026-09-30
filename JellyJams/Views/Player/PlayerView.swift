@@ -20,7 +20,11 @@ struct PlayerView: View {
             Spacer(minLength: 0)
 
             let currentItem = player.currentItem
-            let localArtworkURL = currentItem.flatMap { downloads.isDownloaded($0) ? downloads.localArtworkURL(forImageTag: $0.primaryImageTag ?? $0.albumPrimaryImageTag ?? "") : nil }
+            let localArtworkURL = currentItem.flatMap { (item: BaseItemDto) -> URL? in
+                guard session.serverReachable == false else { return nil }
+                guard downloads.isDownloaded(item) else { return nil }
+                return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
+            }
             ArtworkImage(url: currentItem.flatMap { session.library.artworkURL(for: $0, size: 800) }, localURL: localArtworkURL, cornerRadius: 12)
                 .frame(maxWidth: 420, maxHeight: 420)
                 .shadow(color: .black.opacity(0.25), radius: 16, y: 8)

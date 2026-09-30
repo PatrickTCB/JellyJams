@@ -242,7 +242,11 @@ struct TrackListDetail: View {
     }
 
     private var artwork: some View {
-        let localArtworkURL = downloads.isDownloaded(headerItem) ? downloads.localArtworkURL(forImageTag: headerItem.primaryImageTag ?? headerItem.albumPrimaryImageTag ?? "") : nil
+        var localArtworkURL: URL? {
+            guard session.serverReachable == false else { return nil }
+            guard downloads.isDownloaded(headerItem) else { return nil }
+            return downloads.localArtworkURL(forImageTag: headerItem.primaryImageTag ?? headerItem.albumPrimaryImageTag ?? "")
+        }
         return ArtworkImage(
             url: session.library.artworkURL(for: headerItem, size: 500),
             localURL: localArtworkURL,

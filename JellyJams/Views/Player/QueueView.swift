@@ -16,7 +16,11 @@ struct QueueView: View {
                             player.play(atQueueIndex: index)
                         } label: {
                             HStack(spacing: 12) {
-                                let localArtworkURL = downloads.isDownloaded(entry.item) ? downloads.localArtworkURL(forImageTag: entry.item.primaryImageTag ?? entry.item.albumPrimaryImageTag ?? "") : nil
+                                var localArtworkURL: URL? {
+                                    guard session.serverReachable == false else { return nil }
+                                    guard downloads.isDownloaded(entry.item) else { return nil }
+                                    return downloads.localArtworkURL(forImageTag: entry.item.primaryImageTag ?? entry.item.albumPrimaryImageTag ?? "")
+                                }
                                 ArtworkImage(url: session.library.artworkURL(for: entry.item, size: 96), localURL: localArtworkURL)
                                     .frame(width: 40, height: 40)
                                 VStack(alignment: .leading, spacing: 2) {

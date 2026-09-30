@@ -154,6 +154,12 @@ private struct DownloadedItemRow: View {
     let item: BaseItemDto
     let placeholder: String
     var subtitle: Subtitle = .songs
+    
+    private var localArtworkURL: URL? {
+        guard session.serverReachable == false else { return nil }
+        guard downloads.isDownloaded(item) else { return nil }
+        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
+    }
 
     private var subtitleText: String {
         switch subtitle {
@@ -183,7 +189,6 @@ private struct DownloadedItemRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 12) {
-            let localArtworkURL = downloads.isDownloaded(item) ? downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "") : nil
             ArtworkImage(
                 url: session.client?.artworkURL(for: item, size: 96),
                 localURL: localArtworkURL,

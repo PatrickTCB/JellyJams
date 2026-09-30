@@ -46,6 +46,12 @@ struct TrackRow: View {
 
     @State private var isPresentingNewPlaylist = false
     @State private var newPlaylistName = ""
+    
+    private var localArtworkURL: URL? {
+        guard session.serverReachable == false else { return nil }
+        guard downloads.isDownloaded(track) else { return nil }
+        return downloads.localArtworkURL(forImageTag: track.primaryImageTag ?? track.albumPrimaryImageTag ?? "")
+    }
 
     #if os(iOS)
     /// Active while an enclosing list is in edit mode — playlist detail's
@@ -163,9 +169,6 @@ struct TrackRow: View {
 
     @ViewBuilder private var leading: some View {
         if showArtwork {
-            let localArtworkURL = downloads.isDownloaded(track)
-                ? downloads.localArtworkURL(forImageTag: track.primaryImageTag ?? track.albumPrimaryImageTag ?? "")
-                : nil
             ArtworkImage(
                 url: session.library.artworkURL(for: track, size: 96),
                 localURL: localArtworkURL
