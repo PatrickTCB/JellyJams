@@ -772,6 +772,7 @@ final class JellyfinServiceTests: XCTestCase {
 
     // MARK: - Keyboard selection extension
 
+    #if os(macOS)
     @MainActor func testShiftDownExtendsTheSelectionTowardTheEnd() {
         let ids = ["a", "b", "c", "d", "e"]
         let step = ShiftArrowSelection.extensionStep(ids: ids, anchor: 1, lead: 1, step: 1)
@@ -808,6 +809,7 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertNil(ShiftArrowSelection.extensionStep(ids: ["a"], anchor: 1, lead: 0, step: 1))
         XCTAssertNil(ShiftArrowSelection.extensionStep(ids: ["a"], anchor: 0, lead: 1, step: 1))
     }
+    #endif
 
     private func queryValue(_ url: URL, _ name: String) -> String? {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?

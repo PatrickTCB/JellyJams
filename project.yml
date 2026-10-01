@@ -65,9 +65,10 @@ targets:
 
   JellyJamsTests:
     type: bundle.unit-test
-    supportedDestinations: [macOS]
+    supportedDestinations: [macOS, iOS]
     deploymentTarget:
       macOS: "15.0"
+      iOS: "27.0"
     sources:
       - path: JellyJamsTests
     dependencies:
@@ -77,6 +78,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: net.aseriesoftubes.JellyJamsTests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/JellyJams.app/Contents/MacOS/JellyJams"
+        "TEST_HOST[sdk=iphone*]": "$(BUILT_PRODUCTS_DIR)/JellyJams.app/JellyJams"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
 schemes:
