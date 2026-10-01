@@ -23,6 +23,7 @@ final class AppServices {
     let preferences = PreferencesStore()
     let downloads = DownloadStore()
     let pinnedItems = PinnedItemsStore()
+    let networkStatus = NetworkStatus()
 
     private var cancellables: Set<AnyCancellable> = []
 

@@ -54,6 +54,7 @@ struct JellyJamsApp: App {
     @StateObject private var preferences: PreferencesStore
     @StateObject private var downloads: DownloadStore
     @StateObject private var pinnedItems: PinnedItemsStore
+    @StateObject private var networkStatus: NetworkStatus
     #if os(macOS)
     private let updaterController: SPUStandardUpdaterController
     #endif
@@ -73,6 +74,7 @@ struct JellyJamsApp: App {
         _preferences = StateObject(wrappedValue: services.preferences)
         _downloads = StateObject(wrappedValue: services.downloads)
         _pinnedItems = StateObject(wrappedValue: services.pinnedItems)
+        _networkStatus = StateObject(wrappedValue: services.networkStatus)
         #if os(macOS)
         // If you want to start the updater manually, pass false to startingUpdater and call .startUpdater() later
         // This is where you can also pass an updater delegate if you need one
@@ -95,6 +97,7 @@ struct JellyJamsApp: App {
                 .environmentObject(preferences)
                 .environmentObject(downloads)
                 .environmentObject(pinnedItems)
+                .environmentObject(networkStatus)
                 .frame(minWidth: 400, minHeight: 300)
         }
         .commands {
