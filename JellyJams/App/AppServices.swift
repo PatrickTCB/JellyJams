@@ -1,4 +1,5 @@
 import Combine
+import Dispatch
 
 /// Owns the process-wide service graph.
 ///
@@ -41,6 +42,22 @@ final class AppServices {
             .removeDuplicates()
             .sink { [weak self] signedIn in
                 self?.wire(signedIn: signedIn)
+            }
+            .store(in: &cancellables)
+
+        // Server reachability follows the network: a LAN-only server appears
+        // and disappears as the device's connectivity changes, so every path
+        // update re-pings — including transitions that keep the device
+        // online, like moving from home Wi-Fi to cellular. (The
+        // subscription's synchronous initial value is skipped — `wire`
+        // already checked once at process start — and the burst of updates a
+        // transition emits is coalesced into a single ping.)
+        networkStatus.$isOnline
+            .dropFirst()
+            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, session.isSignedIn else { return }
+                Task { await session.checkServerReachability() }
             }
             .store(in: &cancellables)
 

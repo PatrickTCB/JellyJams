@@ -1,20 +1,21 @@
 import Foundation
 import Network
 
-/// Reports changes to the active network path (Wi-Fi, cellular, offline).
-/// Fires immediately with the current path when the process starts, then on
-/// every interface change.
+/// Reports changes to the device's connectivity: whether any network
+/// interface is up. The monitor fires immediately with the current path
+/// when the process starts, then on every path change. Whether the *server*
+/// is reachable is a separate question, answered by pinging it.
 @MainActor
 final class NetworkStatus: ObservableObject {
-    @Published private(set) var isOnCellular = false
+    @Published private(set) var isOnline = true
 
     private let monitor = NWPathMonitor()
 
     init() {
         monitor.pathUpdateHandler = { [weak self] path in
-            let isCellular = path.usesInterfaceType(.cellular)
+            let isOnline = path.status == .satisfied
             Task { @MainActor in
-                self?.isOnCellular = isCellular
+                self?.isOnline = isOnline
             }
         }
         monitor.start(queue: DispatchQueue(label: "net.aseriesoftubes.JellyJams.connectivity"))
