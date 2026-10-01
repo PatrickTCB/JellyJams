@@ -145,6 +145,12 @@ func itemsPayload(_ items: [(id: String, type: String, artist: String)]) -> Data
     return Data(#"{"Items":[\#(encoded)],"TotalRecordCount":\#(items.count),"StartIndex":0}"#.utf8)
 }
 
+/// A single item payload, as returned by the item-by-id lookup endpoint
+/// (which responds with a bare `BaseItemDto`, not an `Items` wrapper).
+func singleItemPayload(id: String, type: String) -> Data {
+    Data(#"{"Id":"\#(id)","Name":"\#(id)","Type":"\#(type)"}"#.utf8)
+}
+
 /// Builds an items payload containing one playlist per supplied identifier.
 func playlistsPayload(ids: [String]) -> Data {
     let items = ids
