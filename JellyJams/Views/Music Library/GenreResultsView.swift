@@ -47,7 +47,10 @@ struct GenreResultsView: View {
 
     @ViewBuilder private var overlay: some View {
         if let errorMessage = loader.errorMessage, contents.isEmpty {
-            LoadFailureView(title: "Couldn’t Load Genre", message: errorMessage) { await load() }
+            LoadFailureOverlay(title: "Couldn’t Load Genre", message: errorMessage) {
+                await load()
+                return loader.errorMessage == nil
+            }
         } else if contents.isEmpty, loader.isPending {
             ProgressView()
         } else if contents.isEmpty {

@@ -47,7 +47,10 @@ struct SongsView: View {
         .navigationTitle("Songs")
         .overlay {
             if let error = model.errorMessage, model.isEmpty {
-                LoadFailureView(title: "Couldn’t Load Songs", message: error) { await model.reload() }
+                LoadFailureOverlay(title: "Couldn’t Load Songs", message: error) {
+                    await model.reload()
+                    return model.errorMessage == nil
+                }
             } else if model.hasLoadedOnce, model.isEmpty, !model.isLoading {
                 ContentUnavailableView("No songs", systemImage: "music.note")
             }

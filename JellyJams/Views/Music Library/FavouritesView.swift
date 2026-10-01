@@ -118,7 +118,10 @@ struct FavouritesView: View {
         .focusable()
         .overlay {
             if let error = songs.errorMessage, songs.isEmpty {
-                LoadFailureView(title: "Couldn’t Load Favourites", message: error) { await songs.reload() }
+                LoadFailureOverlay(title: "Couldn’t Load Favourites", message: error) {
+                    await songs.reload()
+                    return songs.errorMessage == nil
+                }
             } else if songs.hasLoadedOnce, songs.isEmpty, !songs.isLoading {
                 ContentUnavailableView("No favourite songs", systemImage: "heart")
             }

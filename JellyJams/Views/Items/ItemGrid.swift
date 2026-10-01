@@ -17,8 +17,11 @@ struct ItemGrid: View {
     var body: some View {
         ScrollView {
             if let error = model.errorMessage, model.isEmpty {
-                LoadFailureView(message: error) { await model.reload() }
-                    .padding(.top, 60)
+                LoadFailureOverlay(message: error) {
+                    await model.reload()
+                    return model.errorMessage == nil
+                }
+                .padding(.top, 60)
             } else {
                 Section {
                     LazyVGrid(

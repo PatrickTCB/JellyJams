@@ -33,8 +33,9 @@ struct ArtistDetailView: View {
                           overview.albums.isEmpty,
                           overview.appearsOn.isEmpty,
                           overview.topTracks.isEmpty {
-                    LoadFailureView(title: "Couldn’t Load Artist", message: errorMessage) {
+                    LoadFailureOverlay(title: "Couldn’t Load Artist", message: errorMessage) {
                         await load()
+                        return loader.errorMessage == nil
                     }
                 } else {
                     albumSection(title: "Albums", albums: overview.albums)

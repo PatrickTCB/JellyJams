@@ -66,7 +66,10 @@ struct SearchView: View {
         if trimmed.isEmpty {
             ContentUnavailableView("Search your library", systemImage: "magnifyingglass")
         } else if let errorMessage = loader.errorMessage {
-            LoadFailureView(title: "Couldn’t Search", message: errorMessage) { await runSearch() }
+            LoadFailureOverlay(title: "Couldn’t Search", message: errorMessage) {
+                await runSearch()
+                return loader.errorMessage == nil
+            }
         } else if loader.isPending, results.isEmpty {
             ProgressView()
         } else if results.isEmpty {

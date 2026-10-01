@@ -20,3 +20,24 @@ struct LoadFailureView: View {
         }
     }
 }
+
+/// Picks between ``OfflineView`` and ``LoadFailureView`` for a failed load,
+/// depending on whether the signed-in server is currently reachable: a
+/// connectivity drop reads as "you're offline" rather than a generic failure.
+struct LoadFailureOverlay: View {
+    var title: String = "Couldn’t load"
+    let message: String
+    /// Re-runs the failed load and reports whether it succeeded, so the
+    /// offline case can decide whether to re-check server reachability.
+    let retry: () async -> Bool
+
+    @EnvironmentObject private var session: SessionStore
+
+    var body: some View {
+        if session.serverReachable {
+            LoadFailureView(title: title, message: message) { _ = await retry() }
+        } else {
+            OfflineView(retry: retry)
+        }
+    }
+}

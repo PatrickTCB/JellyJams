@@ -115,7 +115,10 @@ struct TrackListDetail: View {
             // rather than in a top row: a `ContentUnavailableView` in a List
             // cell hugs the row's top-left instead of the window's centre.
             if let errorMessage = loader.errorMessage, tracks.isEmpty {
-                LoadFailureView(message: errorMessage) { await reload() }
+                LoadFailureOverlay(message: errorMessage) {
+                    await reload()
+                    return loader.errorMessage == nil
+                }
             } else if loader.isPending, tracks.isEmpty {
                 ProgressView()
             } else if loader.hasLoadedOnce, tracks.isEmpty {
