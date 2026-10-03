@@ -7,6 +7,7 @@ import AVKit
 struct PlayerView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var clock: PlaybackClock
     @EnvironmentObject private var downloads: DownloadStore
     @Environment(\.dismiss) private var dismiss
 
@@ -75,14 +76,14 @@ struct PlayerView: View {
         VStack(spacing: 4) {
             Slider(
                 value: Binding(
-                    get: { isScrubbing ? scrubTime : player.currentTime },
+                    get: { isScrubbing ? scrubTime : clock.currentTime },
                     set: { scrubTime = $0 }
                 ),
-                in: 0...max(player.duration, 0.1),
+                in: 0...max(clock.duration, 0.1),
                 onEditingChanged: { editing in
                     if editing {
                         isScrubbing = true
-                        scrubTime = player.currentTime
+                        scrubTime = clock.currentTime
                     } else {
                         player.seek(to: scrubTime)
                         isScrubbing = false
@@ -90,9 +91,9 @@ struct PlayerView: View {
                 }
             )
             HStack {
-                Text(Format.duration(isScrubbing ? scrubTime : player.currentTime))
+                Text(Format.duration(isScrubbing ? scrubTime : clock.currentTime))
                 Spacer()
-                Text(Format.duration(player.duration))
+                Text(Format.duration(clock.duration))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)

@@ -10,37 +10,16 @@ struct QueueView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
+                let entries = player.queue
                 List {
-                    ForEach(Array(player.queue.enumerated()), id: \.element.id) { index, entry in
-                        Button {
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                        QueueRow(
+                            item: entry.item,
+                            isCurrent: index == player.currentIndex,
+                            isPlaying: player.isPlaying
+                        ) {
                             player.play(atQueueIndex: index)
-                        } label: {
-                            HStack(spacing: 12) {
-                                var localArtworkURL: URL? {
-                                    guard session.serverReachable == false else { return nil }
-                                    guard downloads.isDownloaded(entry.item) else { return nil }
-                                    return downloads.localArtworkURL(forImageTag: entry.item.primaryImageTag ?? entry.item.albumPrimaryImageTag ?? "")
-                                }
-                                ArtworkImage(url: session.library.artworkURL(for: entry.item, size: 96), localURL: localArtworkURL)
-                                    .frame(width: 40, height: 40)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.item.displayName)
-                                        .lineLimit(1)
-                                        .foregroundStyle(index == player.currentIndex ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-                                    if let artist = entry.item.subtitleArtist {
-                                        Text(artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                                if index == player.currentIndex {
-                                    Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-                                        .font(.caption)
-                                        .foregroundStyle(.tint)
-                                }
-                            }
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
                     }
                     .onDelete { player.removeFromQueue(atOffsets: $0) }
                     .onMove { player.moveQueue(fromOffsets: $0, toOffset: $1) }
@@ -85,5 +64,49 @@ struct QueueView: View {
             try? await Task.sleep(for: .milliseconds(50))
             proxy.scrollTo(currentID, anchor: .center)
         }
+    }
+}
+
+/// One queue row. Its inputs are plain values, so the row only re-renders
+/// when its own highlight changes — not when the player publishes state it
+/// never reads.
+private struct QueueRow: View {
+    let item: BaseItemDto
+    let isCurrent: Bool
+    let isPlaying: Bool
+    let onPlay: () -> Void
+
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var downloads: DownloadStore
+
+    private var localArtworkURL: URL? {
+        guard session.serverReachable == false else { return nil }
+        guard downloads.isDownloaded(item) else { return nil }
+        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
+    }
+
+    var body: some View {
+        Button(action: onPlay) {
+            HStack(spacing: 12) {
+                ArtworkImage(url: session.library.artworkURL(for: item, size: 96), localURL: localArtworkURL)
+                    .frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayName)
+                        .lineLimit(1)
+                        .foregroundStyle(isCurrent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    if let artist = item.subtitleArtist {
+                        Text(artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if isCurrent {
+                    Image(systemName: isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

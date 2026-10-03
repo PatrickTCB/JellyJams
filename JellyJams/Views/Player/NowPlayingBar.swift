@@ -22,6 +22,7 @@ struct NowPlayingBar: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var clock: PlaybackClock
     @EnvironmentObject private var playerPresentation: PlayerPresentation
     @EnvironmentObject private var downloads: DownloadStore
 
@@ -90,8 +91,8 @@ struct NowPlayingBar: View {
 
     private var progressLine: some View {
         GeometryReader { geo in
-            let fillPercentage = player.duration > 0
-                ? min(max(player.currentTime / player.duration, 0), 1)
+            let fillPercentage = clock.duration > 0
+                ? min(max(clock.currentTime / clock.duration, 0), 1)
                 : 0
             ZStack(alignment: .leading) {
                 // Background
