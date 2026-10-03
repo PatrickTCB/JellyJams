@@ -38,6 +38,8 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
             phrases: [
                  "Play music in \(AppShortcutPhraseToken.applicationName)",
                  "Play some music in \(AppShortcutPhraseToken.applicationName)",
+                 "Rock some jams in \(AppShortcutPhraseToken.applicationName)",
+                 "Play some tunes using \(AppShortcutPhraseToken.applicationName)",
              ],
             shortTitle: "Play Music",
             systemImageName: "play.circle.fill"
@@ -50,6 +52,7 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
             phrases: [
                  "Play \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
                  "Play song \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play the song \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
              ],
             shortTitle: "Play Song",
             systemImageName: "music.note"
@@ -79,6 +82,7 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
             intent: PlayPlaylistIntent(),
             phrases: [
                  "Play my playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play my \(\.$playlist) playlist in \(AppShortcutPhraseToken.applicationName)",
                  "Play playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
              ],
             shortTitle: "Play Playlist",
