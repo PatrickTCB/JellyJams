@@ -25,7 +25,7 @@ I am officially not embarassed at the thought of people who know me in real life
 
 ## Roadmap / ToDo List
 No guarantee I'll do any of these things in the next version, but these are all features that 
-seem kind of fun and so will do them at some point.
+seem kind of fun and so I will do them at some point.
 
 * transcoding
 * lyrics
