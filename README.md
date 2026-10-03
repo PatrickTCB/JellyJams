@@ -20,36 +20,54 @@ All communication with Jellyfin is done using their official SDK [`jellyfin-sdk-
 I pinned the version to 3.1.0, but might change that as I work with the SDK and
 better understand what the change process is like.
 
-**Status:** early but usable. Playback, navigation, offline downloads, CarPlay, AirPlay controls, 
-and playlist management (create, add/remove songs, delete) all work. Below is a list of stuff that's
-not done, that I think I will do but this is in no way a promise. The order will
-depend on what's most fun for me to work on.
+As of v1.5, I think this generally usable. It's been my only music player for 3 months now and 
+I am officially not embarassed at the thought of people who know me in real life using it.
 
-**Not implemented yet:** transcoding (direct play only), lyrics, ReplayGain,
-gapless/crossfade, sleep timer, widgets, and Quick Connect.
+## Roadmap / ToDo List
+No guarantee I'll do any of these things in the next version, but these are all features that 
+seem kind of fun and so will do them at some point.
 
-There's no planned public Test Flight beta or anything like that.
+* transcoding
+* lyrics
+* Audio normalization
+* gapless/crossfade
+* sleep timer
+* widgets
+* Quick Connect.
 
-**What's in the app**
+There's no planned public Test Flight beta or anything like that. The cutting edge is and will 
+always be the Mac version released here, with the App Store version being a little more stable. 
+So if you want stability on the Mac, you should be able to run the iPad version from the App 
+Store without issue.
 
-- Albums, artists, songs, and playlists, with sorting and genre filtering
-- Favourites view (songs, albums, artists, and favourite playlists)
-- Offline downloads — tracks, albums, or a whole artist's albums — with a Downloads
-  tab, progress badges, and automatic fallback to downloads when the server is
-  unreachable
-- Full-screen player with queue, shuffle, and repeat
-- Search across the whole library
+## What's in the app
 
-**Platform integration**
+It's a music player. You've got all the basics for library navigation, downloads, etc all work. 
+This list below is basically the special list of features I think are the most fun.
 
-- Context menus everywhere: right-click on macOS, long-press on iOS and iPadOS — play,
-  shuffle, play next, add to queue, add to playlist, download, toggle favourite
-- Swipe actions on tracks on iOS
-- Lock screen, Control Center, and media-key control via `MPRemoteCommandCenter`, with
-  artwork in the system Now Playing panel
-- Background audio on iOS
-- Native macOS **Controls** menu with keyboard shortcuts, and a Settings window showing
-  the signed-in user, server, and app version
+### Real Siri integration with or without Apple Intelligence
+Once you give Siri permission to use your Jelly Jams data you can say "Hey Siri play the song 
+Night is Calling by Dominum" and it should work.
+You can ask for artists, albums, songs, or playlists. 
+
+You can also set a default action for when you say "Hey Siri, play some music using Jelly Jams".
+
+### Context menus everywhere
+Right-click on macOS, long-press on iOS and iPadOS — play, shuffle, play next, add
+to queue, add to playlist, and more!
+
+### Swipe actions on iOS
+You can swipe songs in basically any list where you see them on iOS in order to access 
+likely quick actions.
+
+### Lock screen, Control Center, and media-key control via `MPRemoteCommandCenter`
+This helps with the Siri integration and allowing you do stuff like control speaker usage. 
+So if you're listening on your homepode in you dungeon and want to also here the music in 
+the atrium you can say "Hey Siri, play the music in the atrium too" and it should work.
+
+### Native macOS **Controls** menu with keyboard shortcuts
+I'm a huge keyboard shortcut guy. So these are on top of normal media key controls and 
+meant to make browsing your library with the keyboard a breeze.
 
 | Shortcut | Action |
 | --- | --- |
@@ -63,11 +81,11 @@ There's no planned public Test Flight beta or anything like that.
 
 ## Requirements
 
-- **macOS** with **Xcode 16 or later**
-- **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — `brew install xcodegen`
-- A **Jellyfin server**. The pinned SDK is generated from the **Jellyfin 12** API, so a
+* **macOS** with **Xcode 16 or later**
+* **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — `brew install xcodegen`
+* A **Jellyfin server**. The pinned SDK is generated from the **Jellyfin 12** API, so a
   Jellyfin 12 server is expected.
-- Deployment targets are **macOS 15** and **iOS/iPadOS 27**
+* Deployment targets are **macOS 15** and **iOS/iPadOS 27**
 
 ## Building
 
@@ -87,7 +105,8 @@ once it's generated.
 
 ### 2. Set your signing team
 
-The project uses an environment variable for the Apple Developer Team ID to keep it portable. Before generating the project, set your team ID in your shell (e.g., in `~/.zshrc`):
+The project uses an environment variable for the Apple Developer Team ID to keep 
+it portable. Before generating the project, set your team ID in your shell (e.g., in `~/.zshrc`):
 
 ```bash
 export DEVELOPMENT_TEAM=YOUR_TEAM_ID
@@ -107,7 +126,7 @@ Then just use the standard Xcode tools to build test versions of the app.
 
 ## Testing
 
-I had Claude write me a huge number of tests. You can run them with ⌘U and while
+I had different LLMs write me a huge number of tests. You can run them with ⌘U and while
 not perfect, they're reliable enough to catch mistakes that I make or have made.
 
 ## License
@@ -116,7 +135,7 @@ Mozilla Public License 2.0 — see [LICENSE](LICENSE).
 
 ## Finamp
 
-JellyJams isn't a direct fork or clone of the [Finamp](https://github.com/finamp-app/finamp) 
+Jelly Jams is obviously not a fork or clone of the [Finamp](https://github.com/finamp-app/finamp) 
 but I have poured over their code extensively. It's a great app that I have consulted countless
 times to see real world examples of somebody working with the Jellyfin API as well as inspiration
 for layout and design.
