@@ -64,12 +64,18 @@ struct DownloadsView: View {
         }
     }
 
+    @ViewBuilder
     private var songsList: some View {
+        // Resolved once; `songs` re-derives the downloaded list and
+        // `selectedSongs` filters it, so naming them inside the `ForEach`
+        // would redo that work per row.
+        let tracks = songs
+        let selected = selectedSongs
         List(selection: $songSelection) {
             Section {
-                ForEach(TrackEntry.rows(songs)) { entry in
-                    TrackRow(track: entry.item, showArtwork: true, selectedTracks: selectedSongs) {
-                        player.play(songs, startAt: songs.firstIndex { $0.id == entry.item.id } ?? 0)
+                ForEach(TrackEntry.rows(tracks)) { entry in
+                    TrackRow(track: entry.item, showArtwork: true, selectedTracks: songSelection.contains(entry.id) ? selected : []) {
+                        player.play(tracks, startAt: tracks.firstIndex { $0.id == entry.item.id } ?? 0)
                     }
                 }
                 ForEach(downloads.batches) { batch in

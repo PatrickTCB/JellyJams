@@ -173,13 +173,22 @@ struct TrackListDetail: View {
     /// and track on every render, so a drag there would fight the sort and
     /// snap straight back, and downloaded collections are offline copies
     /// whose order no server call would change.
+    ///
+    /// `entries`, `items` and `selected` are resolved once here and passed
+    /// down: `tracks` and `selectedTracks` are computed properties, and a
+    /// `row(...)` call that names them re-evaluates — and for albums
+    /// re-sorts — the whole list once *per row*, which is what made a
+    /// 100-track album stutter.
     @ViewBuilder
     private var trackRows: some View {
+        let entries = trackEntries
+        let items = entries.map(\.item)
+        let selected = selectedTracks
         if isEditablePlaylist {
-            playlistRows
+            playlistRows(entries: entries, items: items, selected: selected)
         } else {
-            ForEach(Array(trackEntries.enumerated()), id: \.element.id) { index, entry in
-                row(entry.item, at: index, in: tracks)
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                row(entry.item, at: index, in: items, selected: selection.contains(entry.id) ? selected : [])
             }
         }
     }
@@ -191,16 +200,15 @@ struct TrackListDetail: View {
     /// moves the whole selection together with AppKit's native multi-row
     /// drag image.
     @ViewBuilder
-    private var playlistRows: some View {
-        let items = trackEntries.map(\.item)
+    private func playlistRows(entries: [TrackEntry], items: [BaseItemDto], selected: [BaseItemDto]) -> some View {
         #if os(iOS)
-        ForEach(Array(trackEntries.enumerated()), id: \.element.id) { index, entry in
-            row(entry.item, at: index, in: items)
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            row(entry.item, at: index, in: items, selected: selection.contains(entry.id) ? selected : [])
         }
         .reorderable()
         #else
-        ForEach(Array(trackEntries.enumerated()), id: \.element.id) { index, entry in
-            row(entry.item, at: index, in: items)
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            row(entry.item, at: index, in: items, selected: selection.contains(entry.id) ? selected : [])
         }
         .onMove(perform: move)
         #endif
@@ -217,11 +225,15 @@ struct TrackListDetail: View {
         tracks.compactMap { TrackEntry(id: $0.playlistItemID ?? $0.id, item: $0) }
     }
 
-    private func row(_ track: BaseItemDto, at index: Int, in items: [BaseItemDto]) -> some View {
+    /// One track row. `items` and `selected` come in precomputed from the
+    /// rows' builder — never re-derived here. `selected` arrives only for
+    /// rows that are part of the selection, so a selection change leaves the
+    /// other rows' inputs untouched and the List skips them.
+    private func row(_ track: BaseItemDto, at index: Int, in items: [BaseItemDto], selected: [BaseItemDto]) -> some View {
         TrackRow(
             track: track,
             showArtwork: showArtworkInRows,
-            selectedTracks: selectedTracks,
+            selectedTracks: selected,
             onRemoveFromPlaylist: isEditablePlaylist ? { removeFromPlaylist(track) } : nil
         ) {
             player.play(items, startAt: index)

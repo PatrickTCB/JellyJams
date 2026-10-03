@@ -82,12 +82,18 @@ struct FavouritesView: View {
         .refreshable { await current.reload() }
     }
 
+    @ViewBuilder
     private var songsList: some View {
+        // Resolved once; naming the computed properties inside the `ForEach`
+        // would re-derive them per row.
+        let entries = TrackEntry.rows(songs.items)
+        let items = songs.items
+        let selected = selectedSongs
         List(selection: $songSelection) {
             Section {
-                ForEach(Array(TrackEntry.rows(songs.items).enumerated()), id: \.element.id) { index, entry in
-                    TrackRow(track: entry.item, showArtwork: true, selectedTracks: selectedSongs) {
-                        player.play(songs.items, startAt: index)
+                ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                    TrackRow(track: entry.item, showArtwork: true, selectedTracks: songSelection.contains(entry.id) ? selected : []) {
+                        player.play(items, startAt: index)
                     }
                     .task { await songs.loadMoreIfNeeded(entry.item) }
                 }

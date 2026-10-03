@@ -38,12 +38,17 @@ struct DownloadedCollectionDetail: View {
             var selectedTracks: [BaseItemDto] {
                 TrackEntry.rows(tracks).filter { selection.contains($0.id) }.map(\.item)
             }
-            
+            // Resolved once; naming the computed properties inside the
+            // `ForEach` would re-derive them per row.
+            let items = tracks
+            let entries = TrackEntry.rows(items)
+            let selected = selectedTracks
+
             List(selection: $selection) {
                 Section {
-                    ForEach(Array(TrackEntry.rows(tracks).enumerated()), id: \.element.id) { index, entry in
-                        TrackRow(track: entry.item, selectedTracks: selectedTracks) {
-                            player.play(tracks, startAt: index)
+                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                        TrackRow(track: entry.item, selectedTracks: selection.contains(entry.id) ? selected : []) {
+                            player.play(items, startAt: index)
                         }
                     }
                 }

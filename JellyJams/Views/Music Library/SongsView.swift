@@ -14,13 +14,19 @@ struct SongsView: View {
     }
 
     var body: some View {
+        // Resolved once: `TrackEntry.rows` and `selectedTracks` re-derive the
+        // whole list, and a `TrackRow` call naming them inside the `ForEach`
+        // would do that work once per row.
+        let entries = TrackEntry.rows(model.items)
+        let items = model.items
+        let selected = selectedTracks
         List(selection: $selection) {
             // Rows keyed by a non-optional id matching the selection type:
             // Jellyfin's ids are optional, and a String?-keyed row never
             // matches a Set<String> selection.
-            ForEach(Array(TrackEntry.rows(model.items).enumerated()), id: \.element.id) { index, entry in
-                TrackRow(track: entry.item, showArtwork: true, selectedTracks: selectedTracks) {
-                    player.play(model.items, startAt: index)
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                TrackRow(track: entry.item, showArtwork: true, selectedTracks: selection.contains(entry.id) ? selected : []) {
+                    player.play(items, startAt: index)
                 }
                 .task { await model.loadMoreIfNeeded(entry.item) }
             }
