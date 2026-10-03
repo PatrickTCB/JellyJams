@@ -89,6 +89,7 @@ struct JellyJamsApp: App {
             RootContainerView()
                 .environmentObject(session)
                 .environmentObject(player)
+                .environmentObject(player.clock)
                 .environmentObject(playerPresentation)
                 .environmentObject(playlistStore)
                 .environmentObject(libraryCache)

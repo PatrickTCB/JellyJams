@@ -37,15 +37,30 @@ private struct PlaybackState: Codable, Sendable {
     let playSessionId: String
 }
 
+/// The ticking transport position: playback time and total length.
+///
+/// Deliberately its own observable object, separate from ``PlayerController``:
+/// these values change every half second while playing, and `ObservableObject`
+/// invalidation is whole-object — publishing them on the controller re-renders
+/// every view that merely observes the queue, like album, playlist and queue
+/// lists. Only the scrubber and now-playing UI observe the clock.
+/// Writes belong to ``PlayerController``.
+@MainActor
+final class PlaybackClock: ObservableObject {
+    @Published var currentTime: Double = 0
+    @Published var duration: Double = 0
+}
+
 /// Owns audio playback: the queue, the `AVPlayer`, transport controls, shuffle
 /// and repeat, system Now Playing integration, and server playback reporting.
 @MainActor
 final class PlayerController: ObservableObject {
+    /// The transport position, published on its own so 0.5s time ticks don't
+    /// invalidate every view that observes the player for queue state.
+    let clock = PlaybackClock()
     @Published private(set) var queue: [QueueEntry] = []
     @Published private(set) var currentIndex: Int?
     @Published private(set) var isPlaying = false
-    @Published private(set) var currentTime: Double = 0
-    @Published private(set) var duration: Double = 0
     @Published private(set) var isShuffled = false
     /// A user-facing message set when a track fails to load or play. Views
     /// observe this to present an alert offering Retry / Skip.
@@ -151,7 +166,7 @@ final class PlayerController: ObservableObject {
         let state = PlaybackState(
             queue: persistedQueue,
             currentIndex: currentIndex,
-            currentTime: currentTime,
+            currentTime: clock.currentTime,
             isShuffled: isShuffled,
             repeatMode: repeatMode,
             playSessionId: playSessionId
@@ -210,7 +225,7 @@ final class PlayerController: ObservableObject {
 
         if let index = state.currentIndex, queue.indices.contains(index) {
             currentIndex = index
-            currentTime = state.currentTime
+            clock.currentTime = state.currentTime
             startPlayback(at: index, reportingPreviousItem: false, resuming: false)
             if state.currentTime > 0 {
                 seek(to: state.currentTime)
@@ -392,7 +407,7 @@ final class PlayerController: ObservableObject {
 
     func previous() {
         guard let index = currentIndex else { return }
-        if currentTime > 3 {
+        if clock.currentTime > 3 {
             seek(to: 0)
         } else if index > 0 {
             startPlayback(at: index - 1)
@@ -419,9 +434,10 @@ final class PlayerController: ObservableObject {
 
     func seek(to seconds: Double) {
         guard seconds.isFinite else { return }
-        let clamped = max(0, min(seconds, duration > 0 ? duration : seconds))
+        let total = clock.duration
+        let clamped = max(0, min(seconds, total > 0 ? total : seconds))
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600))
-        currentTime = clamped
+        clock.currentTime = clamped
         updateNowPlaying()
         reportProgress(force: true)
     }
@@ -447,8 +463,8 @@ final class PlayerController: ObservableObject {
         isPlaybackRequested = false
         isPlaying = false
         isShuffled = false
-        currentTime = 0
-        duration = 0
+        clock.currentTime = 0
+        clock.duration = 0
         errorMessage = nil
         NowPlayingCenter.shared.clear()
         // A full stop, unlike a pause, is the point at which whatever we
@@ -556,8 +572,8 @@ final class PlayerController: ObservableObject {
                 }
                 player.replaceCurrentItem(with: nil)
                 currentIndex = index
-                currentTime = 0
-                duration = 0
+                clock.currentTime = 0
+                clock.duration = 0
                 failPlayback(reason: error.userFacingMessage)
                 return
             }
@@ -568,8 +584,8 @@ final class PlayerController: ObservableObject {
             }
             player.replaceCurrentItem(with: nil)
             currentIndex = index
-            currentTime = 0
-            duration = 0
+            clock.currentTime = 0
+            clock.duration = 0
             failPlayback(reason: "The downloaded file for this track is missing. Try re-downloading it.")
             return
         }
@@ -583,8 +599,8 @@ final class PlayerController: ObservableObject {
         let playerItem = AVPlayerItem(asset: asset)
         observeStatus(of: playerItem)
         player.replaceCurrentItem(with: playerItem)
-        currentTime = 0
-        duration = item.runtimeSeconds ?? 0
+        clock.currentTime = 0
+        clock.duration = item.runtimeSeconds ?? 0
         if resuming {
             startPlayer()
             isPlaying = true
@@ -620,16 +636,23 @@ final class PlayerController: ObservableObject {
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.currentTime = time.seconds.isFinite ? time.seconds : 0
+                self.clock.currentTime = time.seconds.isFinite ? time.seconds : 0
                 if let itemDuration = self.player.currentItem?.duration.seconds,
                    itemDuration.isFinite, itemDuration > 0 {
-                    self.duration = itemDuration
+                    self.clock.duration = itemDuration
                 }
                 // `.waitingToPlayAtSpecifiedRate` means buffering or stalling,
                 // which is still "playing" to the user and to the transport.
                 // Treating only `.playing` as playing flipped the button back
                 // to Play mid-stream and undid what `resume()` had just set.
-                self.isPlaying = self.player.timeControlStatus != .paused
+                // Assigned only when it actually changes: `@Published` fires
+                // on every assignment, and this runs twice a second — a blind
+                // write here would re-render every view observing the player,
+                // which is the whole reason the clock lives in its own object.
+                let playing = self.player.timeControlStatus != .paused
+                if self.isPlaying != playing {
+                    self.isPlaying = playing
+                }
                 self.updateNowPlaying()
                 self.reportProgress(force: false)
             }
@@ -955,8 +978,8 @@ final class PlayerController: ObservableObject {
         NowPlayingCenter.shared.update(
             item: currentItem,
             isPlaying: isPlaying,
-            currentTime: currentTime,
-            duration: duration,
+            currentTime: clock.currentTime,
+            duration: clock.duration,
             artworkURL: currentItem.flatMap { client?.artworkURL(for: $0, size: 600) },
             canGoNext: canGoNext,
             canGoPrevious: canGoPrevious
@@ -976,7 +999,7 @@ final class PlayerController: ObservableObject {
             playMethod: .directPlay,
             playSessionID: playSessionId,
             playlistItemID: item.playlistItemID,
-            positionTicks: Ticks.ticks(fromSeconds: currentTime),
+            positionTicks: Ticks.ticks(fromSeconds: clock.currentTime),
             repeatMode: repeatMode
         )
     }
@@ -989,7 +1012,7 @@ final class PlayerController: ObservableObject {
             mediaSourceID: item.mediaSourceID,
             playSessionID: playSessionId,
             playlistItemID: item.playlistItemID,
-            positionTicks: Ticks.ticks(fromSeconds: currentTime)
+            positionTicks: Ticks.ticks(fromSeconds: clock.currentTime)
         )
     }
 
