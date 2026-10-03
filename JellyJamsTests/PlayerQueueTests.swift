@@ -357,8 +357,8 @@ final class PlayerQueueTests: XCTestCase {
         XCTAssertNil(player.currentItem)
         XCTAssertFalse(player.isPlaying)
         XCTAssertFalse(player.isShuffled)
-        XCTAssertEqual(player.currentTime, 0)
-        XCTAssertEqual(player.duration, 0)
+        XCTAssertEqual(player.clock.currentTime, 0)
+        XCTAssertEqual(player.clock.duration, 0)
         XCTAssertNil(player.errorMessage)
         XCTAssertFalse(player.hasQueue)
     }
