@@ -19,6 +19,10 @@ struct LibraryRepository: Sendable {
     private static let artistAlbumLimit = 200
     /// Sample of an artist's tracks backing the header's Play/Shuffle buttons.
     private static let artistTrackLimit = 200
+    /// Cap on an artist's songs from albums they don't headline. Guest
+    /// appearances rarely run this long; the cap is headroom, not a routine
+    /// cutoff.
+    private static let artistFeatureTrackLimit = 500
 
     private static let searchGenreLimit = 10
     private static let searchArtistLimit = 12
@@ -198,14 +202,29 @@ struct LibraryRepository: Sendable {
     struct ArtistOverview: Sendable, Equatable {
         var albums: [BaseItemDto] = []
         var appearsOn: [BaseItemDto] = []
-        var topTracks: [BaseItemDto] = []
-        /// Total tracks the artist appears on. `topTracks` is a capped random
-        /// sample, so its count is not this.
+        /// The artist's songs on albums they don't headline, grouped per
+        /// album and ordered like `appearsOn`.
+        var featuredAlbums: [FeaturedAlbum] = []
+        /// Capped random sample of the artist's tracks, backing the header's
+        /// Play/Shuffle buttons.
+        var playbackSample: [BaseItemDto] = []
+        /// Total tracks the artist appears on. `playbackSample` is capped,
+        /// so its count is not this.
         var songCount: Int = 0
+
+        /// One "appears on" album and the artist's songs that appear on it.
+        struct FeaturedAlbum: Sendable, Equatable, Identifiable {
+            let album: BaseItemDto
+            let tracks: [BaseItemDto]
+
+            var id: String { album.id ?? album.displayName }
+        }
     }
 
-    /// An artist's albums (newest first), albums they only appear on, plus a
-    /// random sample of their tracks, fetched concurrently.
+    /// An artist's albums (newest first), albums they only appear on, their
+    /// songs on those albums, plus a random sample of their tracks. The
+    /// first three are fetched concurrently where possible; the featured
+    /// songs need the appears-on ids, so they cost a second round trip.
     func artistOverview(for artist: BaseItemDto) async throws -> ArtistOverview {
         let client = try requireClient()
         // Without an id the underlying queries would drop the artist filter and
@@ -230,6 +249,8 @@ struct LibraryRepository: Sendable {
             contributingArtistIds: [artistId],
             limit: Self.artistAlbumLimit
         )
+        // The header's Play/Shuffle buttons need a sample of the artist's
+        // own songs; the sample's total doubles as the page's song count.
         async let tracksResult = client.getItems(
             includeItemTypes: [.audio],
             recursive: true,
@@ -247,12 +268,60 @@ struct LibraryRepository: Sendable {
             guard let id = item.id else { return false }
             return !ownIds.contains(id)
         }
+
+        // The artist's songs on those albums can only be asked for once the
+        // album ids exist, so this is a deliberate second round trip — and
+        // it is skipped entirely for artists with nothing to appear on.
+        var featuredAlbums: [ArtistOverview.FeaturedAlbum] = []
+        let appearsOnIds = appearsOn.compactMap(\.id)
+        if !appearsOnIds.isEmpty {
+            let featuredResult = try await client.getItems(
+                includeItemTypes: [.audio],
+                recursive: true,
+                // Disc then track order. The numbers run per album, so
+                // albums arrive interleaved; the grouping re-collects them,
+                // and each album keeps that disc/track order.
+                sortBy: .discAndTrack,
+                artistIds: [artistId],
+                albumIds: appearsOnIds,
+                limit: Self.artistFeatureTrackLimit
+            )
+            featuredAlbums = Self.featuredAlbums(
+                grouping: featuredResult.items ?? [],
+                in: appearsOn
+            )
+        }
+
         return ArtistOverview(
             albums: albums,
             appearsOn: appearsOn,
-            topTracks: results.2.items ?? [],
+            featuredAlbums: featuredAlbums,
+            playbackSample: results.2.items ?? [],
             songCount: results.2.totalRecordCount ?? results.2.items?.count ?? 0
         )
+    }
+
+    /// Groups guest songs by the album they appear on, ordered like the
+    /// "Appears On" grid they sit beneath, keeping each album's server-
+    /// supplied disc/track order. Songs whose album is not in `albums` — a
+    /// server that ignored the `albumIds` filter, or an item missing its
+    /// album id — are dropped rather than shown under a heading nobody can
+    /// trace back to the grid.
+    private static func featuredAlbums(
+        grouping tracks: [BaseItemDto],
+        in albums: [BaseItemDto]
+    ) -> [ArtistOverview.FeaturedAlbum] {
+        var byAlbumId: [String: [BaseItemDto]] = [:]
+        for track in tracks {
+            guard let albumId = track.albumID else { continue }
+            byAlbumId[albumId, default: []].append(track)
+        }
+        return albums.compactMap { album in
+            guard let id = album.id, let albumTracks = byAlbumId[id], !albumTracks.isEmpty else {
+                return nil
+            }
+            return ArtistOverview.FeaturedAlbum(album: album, tracks: albumTracks)
+        }
     }
 
     // MARK: - Similar items

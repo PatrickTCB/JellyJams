@@ -193,6 +193,10 @@ final class LibraryRepositoryTests: XCTestCase {
 
         let tracks = try XCTUnwrap(requests.first { $0.values(for: "includeItemTypes") == ["Audio"] })
         XCTAssertEqual(tracks.values(for: "artistIds"), ["artist-id"])
+        XCTAssertTrue(
+            requests.allSatisfy { $0.values(for: "albumIds").isEmpty },
+            "An artist with nothing to appear on asks no guest-song question"
+        )
     }
 
     /// An artist with no id would otherwise have its filter dropped from the
@@ -225,7 +229,7 @@ final class LibraryRepositoryTests: XCTestCase {
             } else {
                 id = "track-1"; type = "Audio"
             }
-            // The track sample is capped, so its total must come from
+            // The sample is capped, so its total must come from
             // TotalRecordCount, not the returned item count.
             let total = type == "Audio" ? 42 : 1
             let payload = Data(#"{"Items":[{"Id":"\#(id)","Name":"\#(id)","Type":"\#(type)"}],"TotalRecordCount":\#(total),"StartIndex":0}"#.utf8)
@@ -237,8 +241,65 @@ final class LibraryRepositoryTests: XCTestCase {
 
         XCTAssertEqual(overview.albums.compactMap(\.id), ["album-1"])
         XCTAssertEqual(overview.appearsOn.compactMap(\.id), ["appears-1"])
-        XCTAssertEqual(overview.topTracks.compactMap(\.id), ["track-1"])
+        XCTAssertEqual(overview.playbackSample.compactMap(\.id), ["track-1"])
         XCTAssertEqual(overview.songCount, 42)
+        XCTAssertTrue(
+            overview.featuredAlbums.isEmpty,
+            "A guest song from an album outside the appears-on list has no heading to join"
+        )
+    }
+
+    /// The artist's songs on albums they don't headline, asked for by album
+    /// id once those albums are known, and regrouped under them — a second
+    /// round trip, in the grid's own order.
+    func testArtistOverviewGroupsGuestSongsUnderTheirAppearsOnAlbums() async throws {
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            let recorded = RecordedRequest(request)
+            let payload: Data
+            if !recorded.values(for: "albumIds").isEmpty {
+                // Interleaved disc/track order across two albums, as the
+                // sort sends them; one song carries no album id at all.
+                payload = Data(#"""
+                {"Items":[
+                  {"Id":"new-1","Type":"Audio","AlbumId":"appears-2","ParentIndexNumber":1,"IndexNumber":1},
+                  {"Id":"old-1","Type":"Audio","AlbumId":"appears-1","ParentIndexNumber":1,"IndexNumber":1},
+                  {"Id":"new-2","Type":"Audio","AlbumId":"appears-2","ParentIndexNumber":1,"IndexNumber":2},
+                  {"Id":"old-2","Type":"Audio","AlbumId":"appears-1","ParentIndexNumber":1,"IndexNumber":2},
+                  {"Id":"orphan","Type":"Audio"}
+                ],"TotalRecordCount":5,"StartIndex":0}
+                """#.utf8)
+            } else if !recorded.values(for: "contributingArtistIds").isEmpty {
+                payload = itemsPayload([("appears-2", "MusicAlbum"), ("appears-1", "MusicAlbum")])
+            } else if !recorded.values(for: "albumArtistIds").isEmpty {
+                payload = itemsPayload([("album-1", "MusicAlbum")])
+            } else {
+                payload = emptyItemsPayload
+            }
+            return (try emptyResponse(for: request, statusCode: 200), payload)
+        }
+
+        let overview = try await TestFixtures.stubbedRepository()
+            .artistOverview(for: TestFixtures.item(id: "artist-id", type: .musicArtist))
+
+        let featured = try XCTUnwrap(recorder.all.first { !$0.values(for: "albumIds").isEmpty })
+        XCTAssertEqual(featured.values(for: "includeItemTypes"), ["Audio"])
+        XCTAssertEqual(featured.values(for: "albumIds"), ["appears-2", "appears-1"])
+        XCTAssertEqual(
+            featured.values(for: "artistIds"),
+            ["artist-id"],
+            "Without the artist filter the request would return the album's every track"
+        )
+        XCTAssertEqual(
+            featured.values(for: "sortBy"),
+            ["ParentIndexNumber", "IndexNumber", "SortName"]
+        )
+
+        // Groups follow the appears-on grid (newest first), and each album's
+        // songs keep their disc/track order despite arriving interleaved.
+        XCTAssertEqual(overview.featuredAlbums.map(\.id), ["appears-2", "appears-1"])
+        XCTAssertEqual(overview.featuredAlbums[0].tracks.compactMap(\.id), ["new-1", "new-2"])
+        XCTAssertEqual(overview.featuredAlbums[1].tracks.compactMap(\.id), ["old-1", "old-2"])
     }
 
     /// Servers differ on whether a contributing-artist query also returns

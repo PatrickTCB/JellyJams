@@ -22,9 +22,9 @@ struct ArtistDetailView: View {
                     item: artist,
                     subtitle: Format.albumAndSongCount(overview.albums.count, overview.songCount),
                     isCircular: true,
-                    canPlay: !overview.topTracks.isEmpty,
-                    onPlay: { player.play(overview.topTracks) },
-                    onShuffle: { player.play(overview.topTracks, shuffled: true) }
+                    canPlay: !overview.playbackSample.isEmpty,
+                    onPlay: { player.play(overview.playbackSample) },
+                    onShuffle: { player.play(overview.playbackSample, shuffled: true) }
                 )
 
                 if overview.albums.isEmpty, overview.appearsOn.isEmpty, loader.isPending {
@@ -32,7 +32,7 @@ struct ArtistDetailView: View {
                 } else if let errorMessage = loader.errorMessage,
                           overview.albums.isEmpty,
                           overview.appearsOn.isEmpty,
-                          overview.topTracks.isEmpty {
+                          overview.playbackSample.isEmpty {
                     LoadFailureOverlay(title: "Couldn’t Load Artist", message: errorMessage) {
                         await load()
                         return loader.errorMessage == nil
@@ -40,6 +40,7 @@ struct ArtistDetailView: View {
                 } else {
                     albumSection(title: "Albums", albums: overview.albums)
                     albumSection(title: "Appears On", albums: overview.appearsOn)
+                    featuredSection
                 }
 
                 GenreChips(genres: genres)
@@ -91,5 +92,31 @@ struct ArtistDetailView: View {
                 }
             }
         }
+    }
+
+    /// The artist's songs on albums they don't headline — the same albums as
+    /// the "Appears On" grid above, listed by track instead. No artwork and
+    /// no section heading: the grid has already shown each cover, and every
+    /// group titles itself with the album and its artist.
+    @ViewBuilder
+    private var featuredSection: some View {
+        ForEach(overview.featuredAlbums) { group in
+            VStack(alignment: .leading, spacing: 8) {
+                Text(featuredTitle(for: group.album))
+                    .font(.title2.bold())
+                ForEach(Array(group.tracks.enumerated()), id: \.element.id) { index, track in
+                    TrackRow(track: track, tapBehavior: .play) {
+                        player.play(group.tracks, startAt: index)
+                    }
+                }
+            }
+        }
+    }
+
+    /// "Album Name - Album Artist" for a featured-songs group. Falls back to
+    /// the album name alone when the server left the album artist off.
+    private func featuredTitle(for album: BaseItemDto) -> String {
+        guard let artist = album.subtitleAlbumArtist else { return album.displayName }
+        return "\(album.displayName) - \(artist)"
     }
 }
