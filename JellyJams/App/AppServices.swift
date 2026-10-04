@@ -37,11 +37,16 @@ final class AppServices {
         // sign-in and sign-out that happen with no UI on screen. The closure
         // inherits this init's MainActor isolation, and every emission arrives
         // on the main thread because SessionStore only mutates on MainActor.
+        //
+        // `wire` receives the session values from the publisher rather than
+        // reading them back off `session`: `@Published` publishes from
+        // `willSet`, so inside this sink a property read can still return the
+        // old value — and reading `session.currentUser` during the emission
+        // that announces it returns nil, which wired `PinnedItemsStore` to no
+        // account: persisted pins never loaded, and new ones never saved.
         Publishers.CombineLatest(session.$client, session.$currentUser)
-            .map { client, user in client != nil && user != nil }
-            .removeDuplicates()
-            .sink { [weak self] signedIn in
-                self?.wire(signedIn: signedIn)
+            .sink { [weak self] client, user in
+                self?.wire(client: client, user: user)
             }
             .store(in: &cancellables)
 
@@ -67,11 +72,15 @@ final class AppServices {
         // The subscription above has already wired for this state when restore
         // signed someone in; this call guarantees the graph is ready the
         // moment `shared` exists even when it didn't.
-        wire(signedIn: session.isSignedIn)
+        wire(client: session.client, user: session.currentUser)
     }
 
-    /// Connects the session to every service that depends on it.
-    private func wire(signedIn: Bool) {
+    /// Connects the session to every service that depends on it. Takes the
+    /// values to wire for rather than reading them off `session`, which during
+    /// a `@Published` emission still holds the old value; the signed-in state
+    /// is just that both halves are present.
+    private func wire(client: JellyfinService?, user: SessionStore.StoredUser?) {
+        let signedIn = client != nil && user != nil
         guard lastWiredSignedIn != signedIn else { return }
         lastWiredSignedIn = signedIn
 
@@ -82,11 +91,11 @@ final class AppServices {
         #endif
 
         if signedIn {
-            player.configure(client: session.client)
-            downloads.configure(client: session.client)
-            playlistStore.configure(client: session.client)
-            favourites.configure(client: session.client)
-            pinnedItems.configure(accountKey: session.currentUser.map(Self.accountKey(for:)))
+            player.configure(client: client)
+            downloads.configure(client: client)
+            playlistStore.configure(client: client)
+            favourites.configure(client: client)
+            pinnedItems.configure(accountKey: user.map(Self.accountKey(for:)))
             Task {
                 await session.checkServerReachability()
                 player.restorePlaybackState()
