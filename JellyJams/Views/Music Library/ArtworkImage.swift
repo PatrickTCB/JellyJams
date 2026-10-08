@@ -40,6 +40,7 @@ enum ArtworkLoader {
         let config = URLSessionConfiguration.default
         config.urlCache = URLCache(memoryCapacity: 32 * 1024 * 1024, diskCapacity: 512 * 1024 * 1024)
         config.requestCachePolicy = .returnCacheDataElseLoad
+        JellyfinService.registerAuditProtocol(in: config)
         return URLSession(configuration: config)
     }()
 }
@@ -96,11 +97,14 @@ enum ArtworkDecoder {
     }
 }
 
-/// Displays remote artwork with a memory + disk cache and a placeholder.
-/// Falls back to a music-note glyph while loading or on failure.
-/// If `localURL` is provided and the file exists, it's loaded directly (for
-/// offline playback). Reading and decoding happen off the main actor, at the
-/// size the view is displayed at.
+/// Displays artwork with a memory + disk cache and a placeholder. Falls back to
+/// a music-note glyph while loading or on failure.
+///
+/// `localURL` is authoritative: a downloaded item's artwork is read from disk
+/// and never requested from the server, so passing a saved file ends the lookup
+/// there. Views pass one whenever ``DownloadStore`` has a file for the item,
+/// regardless of whether the server is reachable. Reading and decoding happen
+/// off the main actor, at the size the view is displayed at.
 struct ArtworkImage: View {
     let url: URL?
     var localURL: URL? = nil
@@ -110,10 +114,11 @@ struct ArtworkImage: View {
     @State private var image: PlatformImage?
     @Environment(\.displayScale) private var displayScale
 
-    /// What restarts the load: a different image, or the same image at a
-    /// different decode resolution.
+    /// What restarts the load: a different image, a different source (server or
+    /// saved file), or the same image at a different decode resolution.
     private struct TaskKey: Equatable {
         var url: URL?
+        var localURL: URL?
         var bucket: Int
     }
 
@@ -136,7 +141,7 @@ struct ArtworkImage: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
-            .task(id: TaskKey(url: url, bucket: bucket)) {
+            .task(id: TaskKey(url: url, localURL: localURL, bucket: bucket)) {
                 await load(bucket: bucket)
             }
         }
@@ -163,7 +168,9 @@ struct ArtworkImage: View {
 
     private func load(bucket: Int) async {
         image = nil
-        // Local file first (for offline playback of downloaded artwork).
+        // A saved file is authoritative. Downloaded artwork comes from disk and
+        // never from the server, so having one ends the lookup here — even when
+        // it cannot be decoded, where the placeholder is the honest answer.
         if let localURL {
             if let cached = ImageCache.shared.image(for: localURL, bucket: bucket) {
                 image = cached
@@ -172,9 +179,8 @@ struct ArtworkImage: View {
             if let decoded = await ArtworkDecoder.decode(fileAt: localURL, maxPixelSize: bucket) {
                 ImageCache.shared.set(decoded, for: localURL, bucket: bucket)
                 image = decoded
-                return
             }
-            // Fall through to network load
+            return
         }
         guard let url else { return }
         if let cached = ImageCache.shared.image(for: url, bucket: bucket) {

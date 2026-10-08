@@ -12,12 +12,12 @@ struct CollectionHeader: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var downloads: DownloadStore
-    
-    private var localArtworkURL: URL? {
-        guard session.serverReachable == false else { return nil }
-        guard downloads.isDownloaded(item) else { return nil }
-        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
-    }
+    /// Downloaded content never builds a server artwork request.
+    @Environment(\.offlineBrowsing) private var offlineBrowsing
+
+    /// Downloaded artwork comes from disk and is never re-requested; see
+    /// ``ArtworkImage`` and ``DownloadStore/localArtworkURL(for:)``.
+    private var localArtworkURL: URL? { downloads.localArtworkURL(for: item) }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -35,7 +35,7 @@ struct CollectionHeader: View {
 
     private var artwork: some View {
         return ArtworkImage(
-            url: session.library.artworkURL(for: item, size: 500),
+            url: offlineBrowsing ? nil : session.library.artworkURL(for: item, size: 500),
             localURL: localArtworkURL,
             cornerRadius: isCircular ? 500 : 8,
             placeholderSystemImage: isCircular ? "music.mic" : "guitars"

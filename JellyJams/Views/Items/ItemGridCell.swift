@@ -12,13 +12,12 @@ struct ItemGridCell: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
+    @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     private var isArtist: Bool { item.itemType == .musicArtist }
-    private var localArtworkURL: URL? {
-        guard session.serverReachable == false else { return nil }
-        guard downloads.isDownloaded(item) else { return nil }
-        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
-    }
+    /// Downloaded artwork comes from disk and is never re-requested; see
+    /// ``ArtworkImage`` and ``DownloadStore/localArtworkURL(for:)``.
+    private var localArtworkURL: URL? { downloads.localArtworkURL(for: item) }
 
     private var subtitle: String? {
         switch item.itemType {
@@ -38,7 +37,7 @@ struct ItemGridCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ArtworkImage(
-                url: session.library.artworkURL(for: item, size: 320),
+                url: offlineBrowsing ? nil : session.library.artworkURL(for: item, size: 320),
                 localURL: localArtworkURL,
                 cornerRadius: isArtist ? 500 : 6,
                 placeholderSystemImage: isArtist ? "music.mic" : "record.circle.fill"

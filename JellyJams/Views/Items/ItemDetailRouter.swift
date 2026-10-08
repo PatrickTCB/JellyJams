@@ -71,30 +71,34 @@ extension View {
         .navigationDestination(for: LibrarySection.self) {
             SectionRootView(section: $0).environmentObject(navigator)
         }
-        .navigationDestination(for: DownloadedCollectionRef.self) { ref in
-            DownloadedCollectionDestination(ref: ref)
+        .navigationDestination(for: DownloadedGroupRef.self) { ref in
+            DownloadedGroupDestination(ref: ref)
         }
     }
 }
 
-/// Resolves a downloaded-collection push through the store, which is the
-/// source of truth for what was downloaded; the ref only identifies it.
-private struct DownloadedCollectionDestination: View {
-    let ref: DownloadedCollectionRef
+/// Resolves a downloaded-group push through the store, which is the source of
+/// truth for what is on disk; the ref only identifies it. A group whose last
+/// song has been removed resolves to nothing, so the screen says so rather than
+/// opening an empty offline detail.
+private struct DownloadedGroupDestination: View {
+    let ref: DownloadedGroupRef
 
     @EnvironmentObject private var downloads: DownloadStore
 
     var body: some View {
-        if ref.isArtist {
-            DownloadedArtistDetail(
-                artist: downloads.collection(id: ref.id)
-                    ?? BaseItemDto(id: ref.id, name: ref.name, type: .musicArtist)
-            )
+        if let group = downloads.group(id: ref.id, kind: ref.kind) {
+            if group.kind == .artist {
+                DownloadedArtistDetail(artist: group)
+            } else {
+                DownloadedCollectionDetail(group: group)
+            }
         } else {
-            DownloadedCollectionDetail(
-                collection: downloads.collection(id: ref.id)
-                    ?? BaseItemDto(id: ref.id, name: ref.name)
-            )
+            ContentUnavailableView {
+                Label("No Longer Downloaded", systemImage: "arrow.down.circle")
+            } description: {
+                Text("“\(ref.title)” has no downloaded songs any more.")
+            }
         }
     }
 }

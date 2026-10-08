@@ -39,4 +39,21 @@ extension View {
     func refreshToolbarItem(isAvailable: Bool = true, _ refresh: @escaping () async -> Void) -> some View {
         modifier(RefreshToolbarModifier(isAvailable: isAvailable, refresh: refresh))
     }
+
+    /// Adds pull-to-refresh only where a reload is possible.
+    ///
+    /// `.refreshable` cannot be switched off from inside its own closure: the
+    /// gesture and its spinner still appear. Content that has nothing to reload
+    /// — a downloaded collection, read entirely from the manifest — gets no
+    /// gesture at all instead of one that lies.
+    @ViewBuilder func refreshableWhenAvailable(
+        _ available: Bool,
+        operation: @escaping @Sendable () async -> Void
+    ) -> some View {
+        if available {
+            refreshable(action: operation)
+        } else {
+            self
+        }
+    }
 }

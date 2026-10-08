@@ -16,6 +16,7 @@ struct ItemContextMenu: ViewModifier {
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var pinnedItems: PinnedItemsStore
     @Environment(\.gridRefreshAction) private var gridRefreshAction
+    @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     @State private var isPresentingNewPlaylist = false
     @State private var isConfirmingDeletePlaylist = false
@@ -42,7 +43,7 @@ struct ItemContextMenu: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contextMenu { menuItems }
-            .onAppear { playlistStore.refreshIfNeeded() }
+            .onAppear { if !offlineBrowsing { playlistStore.refreshIfNeeded() } }
             .alert("New Playlist", isPresented: $isPresentingNewPlaylist) {
                 TextField("Name", text: $newPlaylistName)
                 Button("Cancel", role: .cancel) { newPlaylistName = "" }

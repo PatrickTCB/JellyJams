@@ -79,11 +79,8 @@ private struct QueueRow: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var downloads: DownloadStore
 
-    private var localArtworkURL: URL? {
-        guard session.serverReachable == false else { return nil }
-        guard downloads.isDownloaded(item) else { return nil }
-        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
-    }
+    /// A downloaded track's cover comes from disk, never from the server.
+    private var localArtworkURL: URL? { downloads.localArtworkURL(for: item) }
 
     var body: some View {
         Button(action: onPlay) {

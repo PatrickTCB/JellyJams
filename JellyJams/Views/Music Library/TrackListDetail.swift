@@ -39,7 +39,7 @@ struct TrackListDetail: View {
     
     private var tracks: [BaseItemDto] {
         let raw = downloaded
-            ? downloads.tracks(forItemId: headerItem.id ?? "")
+            ? downloads.tracks(for: headerItem)
             : loader.value
         // Download order is a global save counter, so a track first saved by
         // another collection keeps that position here. Albums re-sort by disc
@@ -121,7 +121,9 @@ struct TrackListDetail: View {
                 }
             } else if loader.isPending, tracks.isEmpty {
                 ProgressView()
-            } else if loader.hasLoadedOnce, tracks.isEmpty {
+            } else if tracks.isEmpty, downloaded || loader.hasLoadedOnce {
+                // A downloaded collection never loads, so "loaded once" can't
+                // be the condition for its empty state.
                 ContentUnavailableView(
                     "No songs",
                     systemImage: headerItem.itemType == .playlist ? "music.note.list" : "square.stack"
@@ -143,6 +145,26 @@ struct TrackListDetail: View {
             #endif
             ToolbarItem { FavouriteButton(item: headerItem) }
             ToolbarItem { DownloadButton(item: headerItem) }
+            if downloaded && headerItem.itemType == .playlist {
+                // A membership snapshot ages. Refreshing is the only way it
+                // changes, and it is a deliberate, online-only action — never
+                // something browsing downloads does by itself.
+                ToolbarItem {
+                    Button {
+                        downloads.refreshPlaylist(headerItem.id ?? "")
+                    } label: {
+                        if downloads.isBusy(headerItem) {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(session.client == nil || downloads.isBusy(headerItem))
+                    .help(session.client == nil
+                        ? "Sign in to check this playlist for new songs"
+                        : "Check this playlist for new songs")
+                }
+            }
             if !selectedTracks.isEmpty {
                 ToolbarItem { TrackSelectionMenu(tracks: selectedTracks) }
             }
@@ -155,7 +177,7 @@ struct TrackListDetail: View {
             }
         }
         .task(id: headerItem.id) { await reload() }
-        .refreshable { await reload() }
+        .refreshableWhenAvailable(!downloaded) { await reload() }
         .refreshToolbarItem(isAvailable: !downloaded) { await reload() }
         #if os(iOS)
         .nowPlayingTabContentDock()
@@ -257,13 +279,11 @@ struct TrackListDetail: View {
     }
 
     private var artwork: some View {
-        var localArtworkURL: URL? {
-            guard session.serverReachable == false else { return nil }
-            guard downloads.isDownloaded(headerItem) else { return nil }
-            return downloads.localArtworkURL(forImageTag: headerItem.primaryImageTag ?? headerItem.albumPrimaryImageTag ?? "")
-        }
+        /// Downloaded collections show the cover saved alongside their songs;
+        /// the server is never asked for it.
+        var localArtworkURL: URL? { downloads.localArtworkURL(for: headerItem) }
         return ArtworkImage(
-            url: session.library.artworkURL(for: headerItem, size: 500),
+            url: downloaded ? nil : session.library.artworkURL(for: headerItem, size: 500),
             localURL: localArtworkURL,
             cornerRadius: 8,
             placeholderSystemImage: headerItem.itemType == .playlist ? "music.note.list" : "square.stack"
@@ -363,6 +383,10 @@ struct TrackListDetail: View {
     }
 
     private func reload() async {
+        // A downloaded collection reads the manifest. There is nothing to fetch,
+        // and fetching is exactly what made a downloaded playlist unloadable
+        // offline.
+        guard !downloaded else { return }
         await loader.load { try await session.library.tracks(for: headerItem) }
     }
 

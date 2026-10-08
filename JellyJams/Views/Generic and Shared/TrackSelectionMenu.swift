@@ -14,6 +14,7 @@ struct TrackSelectionMenu: View {
 
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var playlistStore: PlaylistStore
+    @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     @State private var isPresentingNewPlaylist = false
     @State private var newPlaylistName = ""
@@ -46,7 +47,7 @@ struct TrackSelectionMenu: View {
         } label: {
             Label("\(tracks.count) Selected", systemImage: "checkmark.circle")
         }
-        .onAppear { playlistStore.refreshIfNeeded() }
+        .onAppear { if !offlineBrowsing { playlistStore.refreshIfNeeded() } }
         .alert("New Playlist", isPresented: $isPresentingNewPlaylist) {
             TextField("Name", text: $newPlaylistName)
             Button("Cancel", role: .cancel) { newPlaylistName = "" }
