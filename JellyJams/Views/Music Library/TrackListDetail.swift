@@ -46,10 +46,7 @@ struct TrackListDetail: View {
         // then track (missing numbers sink to the end); playlists keep their
         // user-assembled order.
         guard headerItem.itemType == .musicAlbum else { return raw }
-        return raw.sorted {
-            ($0.parentIndexNumber ?? .max, $0.indexNumber ?? .max, $0.sortName ?? "")
-                < ($1.parentIndexNumber ?? .max, $1.indexNumber ?? .max, $1.sortName ?? "")
-        }
+        return raw.inAlbumOrder()
     }
 
     var body: some View {
@@ -619,4 +616,17 @@ extension BaseItemDto {
     /// from a playlist (unique even when the same song is in the playlist
     /// twice), otherwise the item id.
     var playlistEntryKey: String? { playlistItemID ?? id }
+}
+
+extension Array where Element == BaseItemDto {
+    /// Tracks in the order an album lists them: disc, then track number, then
+    /// name, with missing numbers sinking to the end. Shared between the album
+    /// detail's rows and the downloaded-album queue menu, so what gets queued
+    /// plays in the order the screen showed.
+    func inAlbumOrder() -> [BaseItemDto] {
+        sorted {
+            ($0.parentIndexNumber ?? .max, $0.indexNumber ?? .max, $0.sortName ?? "")
+                < ($1.parentIndexNumber ?? .max, $1.indexNumber ?? .max, $1.sortName ?? "")
+        }
+    }
 }

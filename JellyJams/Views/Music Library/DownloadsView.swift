@@ -217,6 +217,7 @@ struct DownloadedItemRow: View {
         NavigationLink(value: DownloadedGroupRef(group)) {
             rowContent
         }
+        .modifier(DownloadedAlbumContextMenu(group: group))
         .swipeActions(edge: .trailing) {
             // Only a group that was itself downloaded has anything to remove:
             // a borrowed album's songs are required by whatever else brought
@@ -270,6 +271,50 @@ struct DownloadedItemRow: View {
             return "\(Format.songCount(group.downloadedSongs)) of \(total)"
         }
         return Format.songCount(group.downloadedSongs)
+    }
+}
+
+/// Right-click (macOS) and long-press (iOS / iPadOS) actions for a downloaded
+/// album: queue its songs as they are on disk, in the order the album detail
+/// lists them. Like every other browse path here the queueing asks the server
+/// for nothing — the manifest holds the songs — and playback resolves each
+/// queued track to its saved file. An album that isn't complete also gets a
+/// fill-in action: the one deliberate, signed-in exception, mirroring the
+/// offline playlist detail's refresh button. Artists and playlists get no
+/// menu: an artist row is a view over albums, and both actions are
+/// album-shaped.
+private struct DownloadedAlbumContextMenu: ViewModifier {
+    let group: DownloadStore.DownloadGroup
+
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var player: PlayerController
+
+    func body(content: Content) -> some View {
+        if group.kind == .album {
+            content.contextMenu {
+                Button { player.playNext(tracks) } label: { Label("Play Next", systemImage: "text.insert") }
+                Button { player.addToQueue(tracks) } label: { Label("Add to Queue", systemImage: "text.append") }
+
+                if !group.isFullyDownloaded, session.client != nil {
+                    Divider()
+                    // Songs already on disk just gain the album's reference,
+                    // so downloading the album fetches exactly what is missing.
+                    Button { downloads.download(group.item) } label: {
+                        Label("Download Missing Songs", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(downloads.isBusy(group.item))
+                }
+            }
+        } else {
+            content
+        }
+    }
+
+    /// Resolved when an action is chosen, not on every render: a long album
+    /// list costs nothing until a menu is used.
+    private var tracks: [BaseItemDto] {
+        downloads.tracks(for: group.item).inAlbumOrder()
     }
 }
 
