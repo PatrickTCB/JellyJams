@@ -6,6 +6,7 @@ import XCTest
 final class DownloadStoreTests: XCTestCase {
     override func tearDown() {
         URLProtocolStub.handler = nil
+        URLProtocolStub.responseDelay = nil
         super.tearDown()
     }
 
@@ -752,6 +753,147 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.playlists["pl1"]?.coverTag, "cover-legacy")
         let migratedSong = try XCTUnwrap(store.entries["t1"]?.track)
         XCTAssertNotNil(store.localArtworkURL(for: migratedSong), "A tag-only artwork entry still resolves")
+    }
+
+    // MARK: - Download progress
+
+    /// The bar's counts: present from the moment a download starts, and gone
+    /// once it finishes.
+    func testActiveProgressReportsWhileABatchRunsAndDisappearsAfter() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data("audio-a".utf8))
+        }
+        URLProtocolStub.responseDelay = { _ in 0.2 }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(TestFixtures.item(id: "a"))
+
+        var seen: DownloadStore.DownloadProgress?
+        for _ in 0 ..< 200 {
+            if let progress = store.activeDownloadProgress { seen = progress; break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(seen?.total, 1, "The batch expects its one song")
+        XCTAssertEqual(seen?.completed, 0, "The song has not resolved yet")
+        XCTAssertEqual(seen?.fraction, 0)
+
+        try await waitForBatch(store, id: "a")
+        XCTAssertNil(store.activeDownloadProgress)
+    }
+
+    /// With more than one download running the counts aggregate.
+    func testActiveProgressAggregatesAcrossBatches() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data("audio".utf8))
+        }
+        URLProtocolStub.responseDelay = { _ in 0.2 }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(TestFixtures.item(id: "a"))
+        store.download(TestFixtures.item(id: "b"))
+
+        var seen: DownloadStore.DownloadProgress?
+        for _ in 0 ..< 200 {
+            if let progress = store.activeDownloadProgress, progress.total == 2 { seen = progress; break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(seen?.total, 2, "Both batches' songs are expected")
+
+        try await waitForBatch(store, id: "a")
+        try await waitForBatch(store, id: "b")
+        XCTAssertNil(store.activeDownloadProgress)
+    }
+
+    /// A failed song still counts as resolved, so the bar keeps filling past
+    /// failures instead of stalling short of the end.
+    func testActiveProgressCountsFailuresAsResolved() async throws {
+        // The first song of the playlist fails; the second is slow, so the
+        // batch is observably mid-flight with one song resolved.
+        URLProtocolStub.handler = { request in
+            guard let url = request.url else {
+                return (try emptyResponse(for: request, statusCode: 200), Data("audio".utf8))
+            }
+            if url.path.contains("/Playlists/") {
+                return (try emptyResponse(for: request, statusCode: 200), Self.itemsData([
+                    TrackStub(id: "a1").json, TrackStub(id: "a2").json
+                ]))
+            }
+            if url.path.contains("a1") {
+                return (try emptyResponse(for: request, statusCode: 500), Data())
+            }
+            return (try emptyResponse(for: request, statusCode: 200), Data("audio".utf8))
+        }
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.contains("a2") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(BaseItemDto(id: "pl1", name: "pl1", type: .playlist))
+
+        var seen: DownloadStore.DownloadProgress?
+        for _ in 0 ..< 200 {
+            if let progress = store.activeDownloadProgress, progress.completed == 1, progress.total == 2 {
+                seen = progress
+                break
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(seen?.completed, 1, "The failed song resolved, unsuccessfully")
+        XCTAssertEqual(seen?.fraction, 0.5)
+
+        try await waitForBatch(store, id: "pl1")
+        XCTAssertNil(store.activeDownloadProgress)
+    }
+
+    // MARK: - Download speed
+
+    func testTheSpeedTrackerAveragesBytesOverItsWindow() {
+        let tracker = DownloadSpeedTracker(window: 10)
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        tracker.record(bytes: 300, at: start)
+        tracker.record(bytes: 300, at: start.addingTimeInterval(3))
+
+        // 600 bytes over the 3 seconds since the first sample landed.
+        XCTAssertEqual(tracker.bytesPerSecond(asOf: start.addingTimeInterval(3)) ?? 0, 200, accuracy: 0.01)
+    }
+
+    func testSpeedSamplesFallOutOfTheWindow() {
+        let tracker = DownloadSpeedTracker(window: 10)
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        tracker.record(bytes: 100, at: start)
+        XCTAssertNil(tracker.bytesPerSecond(asOf: start.addingTimeInterval(11)), "The sample has aged out")
+
+        // A fresh sample restarts the estimate; the elapsed floor of one
+        // second keeps a just-landed chunk from reading as a spike.
+        tracker.record(bytes: 50, at: start.addingTimeInterval(11))
+        XCTAssertEqual(tracker.bytesPerSecond(asOf: start.addingTimeInterval(11)) ?? 0, 50, accuracy: 0.01)
+    }
+
+    /// The wiring the tracker exists for: bytes a download task writes reach
+    /// it through the per-task delegate, without the store owning the
+    /// session's delegate.
+    func testADownloadFeedsTheSpeedTrackerThroughItsTaskDelegate() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data(repeating: 0x61, count: 50_000))
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(TestFixtures.item(id: "a"))
+        try await waitForBatch(store, id: "a")
+
+        // The byte counts arrive on the session's queue, after the download
+        // call has returned; give them a beat to land.
+        for _ in 0 ..< 200 {
+            if store.downloadBytesPerSecond() != nil { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("The download never reported throughput")
     }
 
     // MARK: - Browsing issues no requests
