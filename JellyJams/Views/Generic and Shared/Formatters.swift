@@ -41,4 +41,9 @@ enum Format {
         let n = count ?? 0
         return n == 1 ? "1 artist" : "\(n) artists"
     }
+
+    /// Formats a byte rate as `10 MB/s`.
+    static func speed(bytesPerSecond: Double) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(max(0, bytesPerSecond)), countStyle: .file) + "/s"
+    }
 }
