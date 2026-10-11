@@ -141,10 +141,24 @@ final class DownloadStore: ObservableObject {
     /// it — which is also what progress UIs group by.
     struct Batch: Identifiable, Equatable, Sendable {
         let id: String
-        let label: String
         var completed = 0
         var failed = 0
         var total = 0
+    }
+
+    /// Song-level progress across every running batch: what the downloads
+    /// status bar's filling bar shows.
+    struct DownloadProgress: Equatable, Sendable {
+        /// Songs resolved — downloaded or failed, either way they are past.
+        var completed: Int
+        /// Songs expected, once the batch's track list has resolved.
+        var total: Int
+
+        /// Bar fill, clamped; zero while the total is unknown.
+        var fraction: Double {
+            guard total > 0 else { return 0 }
+            return min(1, Double(completed) / Double(total))
+        }
     }
 
     /// A browsable view over the downloaded songs: an album, an artist, or a
@@ -197,9 +211,12 @@ final class DownloadStore: ObservableObject {
 
     @Published private(set) var artworkEntries: [String: ArtworkEntry] = [:]
 
+    /// Every file transfer, feeding the throughput the downloads status bar
+    /// shows.
+    private let downloadSession: DownloadSession
+
     private var client: JellyfinService?
     private let directory: URL
-    private let session: URLSession
     private let manifestURL: URL
     private let artworkDirectory: URL
 
@@ -276,13 +293,16 @@ final class DownloadStore: ObservableObject {
         }
     }
 
+    /// `session` contributes its configuration — which is how a test's stubbed
+    /// protocols reach the downloads — while the transfers themselves run on
+    /// the store's own ``DownloadSession``, the one that can report progress.
     init(directory: URL? = nil, session: URLSession = .shared) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = directory ?? support.appending(path: "Downloads", directoryHint: .isDirectory)
         self.directory = dir
         self.artworkDirectory = dir.appending(path: "Artwork", directoryHint: .isDirectory)
         self.manifestURL = dir.appending(path: "manifest.json")
-        self.session = session
+        self.downloadSession = DownloadSession(configuration: session.configuration)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: artworkDirectory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: manifestURL) {
@@ -457,6 +477,23 @@ final class DownloadStore: ObservableObject {
     func isBusy(_ item: BaseItemDto) -> Bool {
         guard let id = item.id else { return false }
         return batches.contains { $0.id == id }
+    }
+
+    /// Song counts across every running batch, or `nil` while nothing is
+    /// downloading. Totals grow as collections resolve their track lists.
+    var activeDownloadProgress: DownloadProgress? {
+        guard !batches.isEmpty else { return nil }
+        return DownloadProgress(
+            completed: batches.reduce(0) { $0 + $1.completed + $1.failed },
+            total: batches.reduce(0) { $0 + $1.total }
+        )
+    }
+
+    /// Live download throughput as of `now`, or `nil` when no bytes have
+    /// landed within the tracker's window. Safe to call from any context so
+    /// the status bar can re-read it on its own tick.
+    nonisolated func downloadBytesPerSecond(asOf now: Date = Date()) -> Double? {
+        downloadSession.bytesPerSecond(asOf: now)
     }
 
     /// The saved file for `itemId`, or `nil` when it has not been downloaded.
@@ -642,7 +679,7 @@ final class DownloadStore: ObservableObject {
 
         switch item.itemType {
         case .audio:
-            var batch = Batch(id: id, label: item.displayName)
+            var batch = Batch(id: id)
             batch.total = 1
             batches.append(batch)
             Task {
@@ -657,7 +694,7 @@ final class DownloadStore: ObservableObject {
                 finishBatch(id)
             }
         case .musicArtist:
-            batches.append(Batch(id: id, label: item.displayName))
+            batches.append(Batch(id: id))
             Task {
                 do {
                     let albums = try await client.albums(forArtistId: id)
@@ -673,7 +710,7 @@ final class DownloadStore: ObservableObject {
                 finishBatch(id)
             }
         case .playlist:
-            batches.append(Batch(id: id, label: item.displayName))
+            batches.append(Batch(id: id))
             Task {
                 do {
                     let tracks = try await client.tracks(for: item)
@@ -720,7 +757,7 @@ final class DownloadStore: ObservableObject {
                 finishBatch(id)
             }
         default:
-            batches.append(Batch(id: id, label: item.displayName))
+            batches.append(Batch(id: id))
             Task {
                 await downloadCollection(item, into: id, via: client)
                 finishBatch(id)
@@ -735,7 +772,7 @@ final class DownloadStore: ObservableObject {
     func refreshPlaylist(_ id: String) {
         guard let client, let existing = playlists[id] else { return }
         guard !batches.contains(where: { $0.id == id }) else { return }
-        batches.append(Batch(id: id, label: existing.title))
+        batches.append(Batch(id: id))
         Task {
             do {
                 let stub = BaseItemDto(id: id, name: existing.title, type: .playlist)
@@ -884,7 +921,7 @@ final class DownloadStore: ObservableObject {
         }
         do {
             let remote = try client.streamURL(itemId: id, mediaSourceId: track.mediaSourceID)
-            let (tempFile, response) = try await session.download(from: remote)
+            let (tempFile, response) = try await downloadSession.download(from: remote)
             // `URLSession` happily downloads an error page as if it were audio,
             // so an HTTP failure must be caught here.
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -954,7 +991,7 @@ final class DownloadStore: ObservableObject {
         ) else { return }
 
         do {
-            let (tempFile, response) = try await session.download(from: artworkUrl)
+            let (tempFile, response) = try await downloadSession.download(from: artworkUrl)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
             // Saved as JPG (the format requested), namespaced by its owner so
             // two items sharing an image tag can't overwrite each other.

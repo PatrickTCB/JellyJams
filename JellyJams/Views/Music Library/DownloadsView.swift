@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The Downloads section: every song saved for offline playback, presented the
 /// way Favourites is — a segmented Songs / Albums / Artists / Playlists picker
-/// above a list. Albums and artists are views derived from the songs' own
+/// above a list, with a ``DownloadStatusBar`` under the picker while
+/// downloads run. Albums and artists are views derived from the songs' own
 /// metadata, playlists are saved membership records, and nothing here asks the
 /// server for anything: the section is wrapped in ``downloadsBrowsing()``, rows
 /// read the manifest, and artwork comes from saved files. Removing a collection
@@ -55,6 +56,13 @@ struct DownloadsView: View {
             .labelsHidden()
             .padding(.horizontal)
             .padding(.vertical, 8)
+
+            // Live progress for every running download. This replaces the
+            // rows the songs list used to show; the tab bar's icon and badge
+            // keep telling the rest of the app a download is running.
+            if !downloads.batches.isEmpty {
+                DownloadStatusBar()
+            }
 
             switch tab {
             case .songs: songsList
@@ -109,9 +117,6 @@ struct DownloadsView: View {
                     TrackRow(track: entry.item, showArtwork: true, selectedTracks: songSelection.contains(entry.id) ? selected : []) {
                         player.play(tracks, startAt: tracks.firstIndex { $0.id == entry.item.id } ?? 0)
                     }
-                }
-                ForEach(downloads.batches) { batch in
-                    BatchRow(batch: batch)
                 }
             } header: {
                 Text(Format.songCount(songs.count))
@@ -315,26 +320,5 @@ private struct DownloadedAlbumContextMenu: ViewModifier {
     /// list costs nothing until a menu is used.
     private var tracks: [BaseItemDto] {
         downloads.tracks(for: group.item).inAlbumOrder()
-    }
-}
-
-private struct BatchRow: View {
-    let batch: DownloadStore.Batch
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(batch.label).lineLimit(1)
-            HStack {
-                ProgressView(value: totalProgress)
-                Text("\(min(batch.completed + batch.failed, batch.total))/\(batch.total)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var totalProgress: Double {
-        guard batch.total > 0 else { return 0 }
-        return Double(batch.completed + batch.failed) / Double(batch.total)
     }
 }
