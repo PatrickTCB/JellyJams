@@ -5,10 +5,11 @@ import SwiftUI
 /// request either. Playback resolves each track to its saved file via
 /// ``DownloadStore/localURL(forItemId:)``.
 ///
-/// Albums, artists and playlists all render the same way: a header built from
-/// the group's own metadata over a list of the songs on disk. Playlists keep
-/// their saved membership order; albums are disc/track sorted by
-/// ``TrackListDetail``.
+/// Albums and playlists render the way their Library pages do: a header built
+/// from the group's own metadata over a list of the songs on disk. Playlists
+/// keep their saved membership order; albums are disc/track sorted by
+/// ``TrackListDetail``. A downloaded artist renders the way the Library artist
+/// page does — see ``DownloadedArtistDetail``.
 ///
 /// Pushed as its own value type (not the bare `BaseItemDto`) so it can share a
 /// navigation stack with library destinations without both claiming to resolve
@@ -46,33 +47,57 @@ struct DownloadedGroupRef: Hashable {
     }
 }
 
-/// A downloaded artist opened from the Downloads section: the albums of theirs
-/// with songs on disk, entirely from the manifest — no server involved. Each
-/// album opens the same offline album detail a downloaded album does.
+/// A downloaded artist opened from the Downloads section: the same layout the
+/// Library artist page shows — a circular header over an adaptive grid of
+/// their albums — built entirely from the manifest, with no server involved.
+/// The header's cover is one of the artist's albums' (an artist has no saved
+/// image of their own), its Play and Shuffle buttons start the songs on disk
+/// with playback resolving each to its saved file, and each album opens the
+/// same offline album detail a downloaded album does.
 struct DownloadedArtistDetail: View {
     let artist: DownloadStore.DownloadGroup
 
     @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var player: PlayerController
 
     private var albums: [DownloadStore.DownloadGroup] {
         downloads.downloadedAlbums(forArtistID: artist.id)
     }
 
+    /// The artist's songs on disk, album by album and each album in the order
+    /// its detail lists — what the header's Play and Shuffle buttons start.
+    private var songs: [BaseItemDto] {
+        albums.flatMap { downloads.tracks(in: $0).inAlbumOrder() }
+    }
+
     var body: some View {
-        List {
-            Section {
-                ForEach(albums) { album in
-                    // The row owns its link and its remove swipe, so an artist's
-                    // albums behave exactly like the Albums tab's.
-                    DownloadedItemRow(group: album)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                CollectionHeader(
+                    item: artist.item,
+                    subtitle: Format.albumAndSongCount(albums.count, songs.count),
+                    isCircular: true,
+                    localArtworkURL: downloads.localArtworkURL(for: artist),
+                    canPlay: !songs.isEmpty,
+                    onPlay: { player.play(songs) },
+                    onShuffle: { player.play(songs, shuffled: true) }
+                )
+
+                if !albums.isEmpty {
+                    Text("Albums")
+                        .font(.title2.bold())
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 20) {
+                        ForEach(albums) { album in
+                            NavigationLink(value: DownloadedGroupRef(album)) {
+                                DownloadedGroupCell(group: album)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
-            } header: {
-                Text(Format.albumCount(albums.count))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
+            .padding()
         }
-        .listStyle(.plain)
         .downloadsBrowsing()
         .overlay {
             if albums.isEmpty {

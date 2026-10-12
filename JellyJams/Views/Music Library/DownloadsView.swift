@@ -1,12 +1,15 @@
 import SwiftUI
 
 /// The Downloads section: every song saved for offline playback, presented the
-/// way Favourites is — a segmented Songs / Albums / Artists / Playlists picker
-/// above a list, with a ``DownloadStatusBar`` under the picker while
-/// downloads run. Albums and artists are views derived from the songs' own
-/// metadata, playlists are saved membership records, and nothing here asks the
-/// server for anything: the section is wrapped in ``downloadsBrowsing()``, rows
-/// read the manifest, and artwork comes from saved files. Removing a collection
+/// way Library and Favourites present theirs — a segmented
+/// Songs / Albums / Artists / Playlists picker, with albums and artists as the
+/// same artwork grids those sections show (square album covers, circular
+/// artist photos) and songs and playlists as lists, and a
+/// ``DownloadStatusBar`` under the picker while downloads run. Albums and
+/// artists are views derived from the songs' own metadata, playlists are
+/// saved membership records, and nothing here asks the server for anything:
+/// the section is wrapped in ``downloadsBrowsing()``, cells and rows read the
+/// manifest, and artwork comes from saved files. Removing a collection
 /// unreferences its songs; only songs no other download requires disappear.
 ///
 /// The Albums tab starts filtered to albums that are fully on disk — the filter
@@ -100,14 +103,15 @@ struct DownloadsView: View {
 
             switch tab {
             case .songs: songsList
-            default: groupsList(tab: tab)
+            case .albums, .artists: groupsGrid(tab: tab)
+            case .playlists: playlistsList
             }
         }
         .navigationTitle("Downloads")
         .downloadsBrowsing()
         .toolbar {
             if tab == .albums {
-                // A filtered list says so with a filled glyph, and the toggle
+                // A filtered grid says so with a filled glyph, and the toggle
                 // that turns it off lives in the menu it opens.
                 ToolbarItem(placement: .automatic) {
                     Menu {
@@ -177,26 +181,34 @@ struct DownloadsView: View {
         }
     }
 
-    /// One tab's groups. Albums and artists come from grouping the songs;
-    /// playlists are the saved membership records.
-    private func groupsList(tab: Tab) -> some View {
+    /// One tab's groups as the same artwork grid the Library sections show:
+    /// adaptive cells of big covers — square for albums, circular for artists
+    /// — over a count header. Like every other browse path here, a cell's
+    /// artwork is its saved file and its push opens the offline detail.
+    private func groupsGrid(tab: Tab) -> some View {
         let kind = tab.groupKind ?? .album
         let all = downloads.groups(kind: kind)
-        // Only albums are filtered: artists and playlists are their own lists,
-        // and songs are files rather than groupings that can be incomplete.
+        // Only albums are filtered: artists are their own list, and songs are
+        // files rather than groupings that can be incomplete.
         let filtered = kind == .album && preferences.showsCompleteAlbumsOnly
         let visible = filtered ? all.filter(\.isFullyDownloaded) : all
         let hidden = all.count - visible.count
-        return List {
+        let minCellWidth: CGFloat = tab == .artists ? 150 : 160
+        return ScrollView {
             Section {
-                ForEach(visible) { group in
-                    DownloadedItemRow(group: group)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: minCellWidth), spacing: 16)],
+                    spacing: 20
+                ) {
+                    ForEach(visible) { group in
+                        NavigationLink(value: DownloadedGroupRef(group)) {
+                            DownloadedGroupCell(group: group)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-            } header: {
-                Text(countText(for: kind, visible.count))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } footer: {
+                .padding()
+
                 // A filter that hides things says so where the results end, with
                 // one tap to show them again.
                 if filtered, hidden > 0 {
@@ -206,14 +218,20 @@ struct DownloadsView: View {
                     }
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.bottom)
                 }
+            } header: {
+                Text(countText(for: kind, visible.count))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
-        .listStyle(.plain)
         .overlay {
             if visible.isEmpty {
                 if filtered, hidden > 0 {
-                    // The filter emptied the list rather than there being
+                    // The filter emptied the grid rather than there being
                     // nothing downloaded.
                     ContentUnavailableView {
                         Label("No complete albums", systemImage: placeholder(for: kind))
@@ -228,6 +246,29 @@ struct DownloadsView: View {
                         systemImage: placeholder(for: kind)
                     )
                 }
+            }
+        }
+    }
+
+    /// The Playlists tab: the saved membership records as a list. (Albums and
+    /// artists render as grids; songs are the files themselves.)
+    private var playlistsList: some View {
+        let playlists = downloads.groups(kind: .playlist)
+        return List {
+            Section {
+                ForEach(playlists) { group in
+                    DownloadedItemRow(group: group)
+                }
+            } header: {
+                Text(Format.playlistCount(playlists.count))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.plain)
+        .overlay {
+            if playlists.isEmpty {
+                ContentUnavailableView("No downloaded playlists", systemImage: "music.note.list")
             }
         }
     }
@@ -249,8 +290,8 @@ struct DownloadsView: View {
     }
 }
 
-/// One row of the Downloads section: a derived group or a saved playlist, with
-/// how much of it is on disk.
+/// One row of the Downloads Playlists tab: a saved playlist, with how much of
+/// it is on disk.
 struct DownloadedItemRow: View {
     @EnvironmentObject private var downloads: DownloadStore
     let group: DownloadStore.DownloadGroup
@@ -261,11 +302,9 @@ struct DownloadedItemRow: View {
         NavigationLink(value: DownloadedGroupRef(group)) {
             rowContent
         }
-        .modifier(DownloadedAlbumContextMenu(group: group))
         .swipeActions(edge: .trailing) {
             // Only a group that was itself downloaded has anything to remove:
-            // a borrowed album's songs are required by whatever else brought
-            // them, so removing it would be a no-op.
+            // its songs are required by it, so they go when it does.
             if group.isExplicit {
                 Button(role: .destructive, action: { downloads.remove(group.item) }) {
                     Label("Remove Download", systemImage: "trash")
@@ -318,16 +357,71 @@ struct DownloadedItemRow: View {
     }
 }
 
+/// One tile of the Downloads albums and artists grids: the same artwork tile
+/// the Library grids show — a big square album cover or a circular artist
+/// photo, with title, favourite mark and subtitle — reading the group's saved
+/// cover from disk. No server artwork URL is ever built; a downloaded tile's
+/// cover is its saved file or a placeholder, never a request.
+struct DownloadedGroupCell: View {
+    @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var favourites: FavouriteStore
+    let group: DownloadStore.DownloadGroup
+
+    private var isArtist: Bool { group.kind == .artist }
+
+    /// The album artist an album tile shows under its title; artists get
+    /// none, the way the Library artist grid shows them.
+    private var subtitle: String? {
+        group.kind == .album ? group.item.subtitleAlbumArtist : nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ArtworkImage(
+                url: nil,
+                localURL: downloads.localArtworkURL(for: group),
+                cornerRadius: isArtist ? 500 : 6,
+                placeholderSystemImage: isArtist ? "music.mic" : "record.circle.fill"
+            )
+            .shadow(color: .black.opacity(0.15), radius: 3, y: 2)
+
+            HStack(spacing: 4) {
+                if isArtist { Spacer(minLength: 0) }
+                Text(group.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .multilineTextAlignment(.leading)
+                if favourites.isFavourite(group.item) {
+                    Image(systemName: "heart.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .accessibilityLabel("Favourite")
+                }
+                Spacer(minLength: 0)
+            }
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .contentShape(Rectangle())
+        .modifier(DownloadedGroupContextMenu(group: group))
+    }
+}
+
 /// Right-click (macOS) and long-press (iOS / iPadOS) actions for a downloaded
-/// album: queue its songs as they are on disk, in the order the album detail
+/// group tile: queue its songs as they are on disk, in the order the detail
 /// lists them. Like every other browse path here the queueing asks the server
 /// for nothing — the manifest holds the songs — and playback resolves each
 /// queued track to its saved file. An album that isn't complete also gets a
 /// fill-in action: the one deliberate, signed-in exception, mirroring the
-/// offline playlist detail's refresh button. Artists and playlists get no
-/// menu: an artist row is a view over albums, and both actions are
-/// album-shaped.
-private struct DownloadedAlbumContextMenu: ViewModifier {
+/// offline playlist detail's refresh button. And because a grid tile has no
+/// swipe, a group that was itself downloaded is removed from here.
+private struct DownloadedGroupContextMenu: ViewModifier {
     let group: DownloadStore.DownloadGroup
 
     @EnvironmentObject private var session: SessionStore
@@ -335,29 +429,38 @@ private struct DownloadedAlbumContextMenu: ViewModifier {
     @EnvironmentObject private var player: PlayerController
 
     func body(content: Content) -> some View {
-        if group.kind == .album {
-            content.contextMenu {
-                Button { player.playNext(tracks) } label: { Label("Play Next", systemImage: "text.insert") }
-                Button { player.addToQueue(tracks) } label: { Label("Add to Queue", systemImage: "text.append") }
+        content.contextMenu {
+            Button { player.playNext(tracks) } label: { Label("Play Next", systemImage: "text.insert") }
+            Button { player.addToQueue(tracks) } label: { Label("Add to Queue", systemImage: "text.append") }
 
-                if !group.isFullyDownloaded, session.client != nil {
-                    Divider()
-                    // Songs already on disk just gain the album's reference,
-                    // so downloading the album fetches exactly what is missing.
-                    Button { downloads.download(group.item) } label: {
-                        Label("Download Missing Songs", systemImage: "arrow.down.circle")
-                    }
-                    .disabled(downloads.isBusy(group.item))
+            if group.kind == .album, !group.isFullyDownloaded, session.client != nil {
+                Divider()
+                // Songs already on disk just gain the album's reference,
+                // so downloading the album fetches exactly what is missing.
+                Button { downloads.download(group.item) } label: {
+                    Label("Download Missing Songs", systemImage: "arrow.down.circle")
+                }
+                .disabled(downloads.isBusy(group.item))
+            }
+
+            if group.isExplicit {
+                Divider()
+                Button(role: .destructive) { downloads.remove(group.item) } label: {
+                    Label("Remove Download", systemImage: "trash")
                 }
             }
-        } else {
-            content
         }
     }
 
-    /// Resolved when an action is chosen, not on every render: a long album
-    /// list costs nothing until a menu is used.
+    /// Resolved when an action is chosen, not on every render: a long list
+    /// costs nothing until a menu is used.
     private var tracks: [BaseItemDto] {
-        downloads.tracks(for: group.item).inAlbumOrder()
+        if group.kind == .artist {
+            // Album by album, each in the order its detail lists — the same
+            // order the artist's own Play button starts.
+            return downloads.downloadedAlbums(forArtistID: group.id)
+                .flatMap { downloads.tracks(in: $0).inAlbumOrder() }
+        }
+        return downloads.tracks(for: group.item).inAlbumOrder()
     }
 }
