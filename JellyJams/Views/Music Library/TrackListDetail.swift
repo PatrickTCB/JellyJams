@@ -677,6 +677,8 @@ extension Array where Element == BaseItemDto {
             return compare(lhs.artists?.first ?? "", rhs.artists?.first ?? "")
         case .albumArtist:
             return compare(lhs.albumArtist ?? "", rhs.albumArtist ?? "")
+        case .albumArtistTrackOrder:
+            return compare(lhs.albumArtistSort, rhs.albumArtistSort)
         case .album:
             return compare(lhs.album ?? "", rhs.album ?? "")
         case .dateCreated:

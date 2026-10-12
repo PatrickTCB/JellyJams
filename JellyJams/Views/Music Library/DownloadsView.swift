@@ -57,7 +57,7 @@ struct DownloadsView: View {
     /// The downloaded songs the user has selected (rows are keyed by track
     /// id): click to select, double-click to play, shift-arrow to extend.
     @State private var songSelection: Set<String> = []
-    @State private var songSort: DownloadSongSort = .field(.artist)
+    @State private var songSort: DownloadSongSort = .field(.albumArtistTrackOrder)
     @State private var songSortOrder: SortOrder = .ascending
 
     /// The selected songs in list order — what selection actions act on.
@@ -66,11 +66,13 @@ struct DownloadsView: View {
     }
 
     /// The same fields the Library songs list sorts by, led by the section's
-    /// own recency. The list opens on Artist, the way Library and Favourites
-    /// songs do.
+    /// own recency, plus the track-order album-artist sort only this list
+    /// offers. The list opens on that one: artist by artist, album by album,
+    /// in track order.
     private let songSortOptions: [DownloadSongSort] = [
         .recentlyDownloaded,
         .field(.artist), .field(.sortName), .field(.album), .field(.albumArtist),
+        .field(.albumArtistTrackOrder),
         .field(.dateCreated), .field(.datePlayed), .field(.runtime), .field(.random),
     ]
 
