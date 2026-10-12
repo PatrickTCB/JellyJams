@@ -21,36 +21,14 @@ extension EnvironmentValues {
     }
 }
 
-/// How many downloads screens are on screen right now.
-///
-/// A count rather than a flag because a pushed downloaded-detail screen and the
-/// section behind it are both browsing, and the section must stay armed until
-/// the last of them goes.
-@MainActor
-enum DownloadsBrowsing {
-    private static var screens = 0
-
-    static var isBrowsing: Bool { screens > 0 }
-
-    static func begin() {
-        screens += 1
-        DownloadsAudit.setBrowsing(true)
-    }
-
-    static func end() {
-        screens = max(0, screens - 1)
-        DownloadsAudit.setBrowsing(screens > 0)
-    }
-}
-
 extension View {
     /// Declares this subtree a browser of downloaded content: descendants read
     /// ``EnvironmentValues/offlineBrowsing`` to keep off the network, and in debug
     /// builds any request issued from here is reported.
     func downloadsBrowsing() -> some View {
         environment(\.offlineBrowsing, true)
-            .onAppear { DownloadsBrowsing.begin() }
-            .onDisappear { DownloadsBrowsing.end() }
+            .onAppear { DownloadsAudit.beginBrowsing() }
+            .onDisappear { DownloadsAudit.endBrowsing() }
     }
 }
 
@@ -61,25 +39,31 @@ extension View {
 /// in the console whenever it fires while a downloads screen is on screen — the
 /// store's own guarantee is tested, this catches the view layer by hand.
 /// Release builds register nothing and pay nothing.
+///
+/// The screen count below is the tripwire's only state: the environment value
+/// drives the views, this count drives the protocol, and there is no second
+/// copy to drift. It is a count rather than a flag because a pushed
+/// downloaded-detail screen and the section behind it are both browsing, and
+/// the section must stay armed until the last of them goes. It is lock-guarded
+/// rather than main-actor isolated because `URLProtocol` reads it on the
+/// session's own threads.
 enum DownloadsAudit {
     private static let log = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "net.aseriesoftubes.JellyJams",
         category: "DownloadsAudit"
     )
 
-    private(set) nonisolated(unsafe) static var browsing = false
+    private static let counter = ScreenCounter()
 
-    static func setBrowsing(_ isBrowsing: Bool) {
-        #if DEBUG
-        browsing = isBrowsing
-        #endif
-    }
+    static func beginBrowsing() { counter.begin() }
+
+    static func endBrowsing() { counter.end() }
 
     /// Whether a request should be reported: only in debug, and only while a
     /// downloads screen is up.
     static var shouldReport: Bool {
         #if DEBUG
-        browsing
+        counter.isBrowsing
         #else
         false
         #endif
@@ -94,6 +78,29 @@ enum DownloadsAudit {
             (Now Playing bar, queue) are the expected exception.
             """)
         #endif
+    }
+
+    private final class ScreenCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var screens = 0
+
+        func begin() {
+            lock.lock()
+            screens += 1
+            lock.unlock()
+        }
+
+        func end() {
+            lock.lock()
+            screens = max(0, screens - 1)
+            lock.unlock()
+        }
+
+        var isBrowsing: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return screens > 0
+        }
     }
 }
 

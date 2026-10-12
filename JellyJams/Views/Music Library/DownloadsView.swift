@@ -131,8 +131,11 @@ struct DownloadsView: View {
                 Button(role: .destructive) { confirmingDeleteAll = true } label: {
                     Label("Delete All", systemImage: "trash")
                 }
-                .disabled(!downloads.batches.isEmpty
-                          || (downloads.entries.isEmpty && downloads.playlists.isEmpty))
+                // Deliberately not disabled while downloads run: deleting
+                // everything cancels them, so a stuck batch is a reason to
+                // reach for this, not a reason to grey it out.
+                .disabled(downloads.batches.isEmpty
+                          && downloads.entries.isEmpty && downloads.playlists.isEmpty)
             }
             if tab == .songs, !selectedSongs.isEmpty {
                 ToolbarItem { TrackSelectionMenu(tracks: selectedSongs) }
@@ -146,6 +149,10 @@ struct DownloadsView: View {
         .alert("Delete all downloaded music?", isPresented: $confirmingDeleteAll) {
             Button("Delete All Downloads", role: .destructive) { downloads.removeAll() }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            if !downloads.batches.isEmpty {
+                Text("Downloads in progress will be cancelled.")
+            }
         }
     }
 

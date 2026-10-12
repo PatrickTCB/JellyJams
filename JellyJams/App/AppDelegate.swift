@@ -15,5 +15,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             nil
         }
     }
+
+    /// The system waking the app to deliver background download events. The
+    /// handler is held until ``DownloadSession``'s delegate reports event
+    /// delivery is finished — calling it early lets the system suspend the
+    /// app mid-delivery.
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        guard identifier == DownloadSession.backgroundIdentifier else {
+            completionHandler()
+            return
+        }
+        DownloadSession.storeBackgroundEventsCompletionHandler(completionHandler)
+    }
 }
 #endif

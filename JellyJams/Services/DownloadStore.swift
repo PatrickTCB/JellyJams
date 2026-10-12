@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import JellyfinAPI
 import OSLog
@@ -48,6 +49,14 @@ private let downloadLog = Logger(
 /// byte of metadata those screens render. It is rewritten after every change, so
 /// downloads survive relaunches, and deliberately survives sign-out too —
 /// offline listening is the point.
+///
+/// Transfers survive the app too. On iOS they run on a background session:
+/// they continue while the app is suspended, and the system finishes them even
+/// if the app dies, delivering the files to the next launch, which adopts them
+/// and resumes every batch the manifest recorded as active. Removals always
+/// win against downloads: deleting cancels the batches it covers, and a
+/// cancelled transfer's file is discarded rather than resurrecting what was
+/// just deleted.
 @MainActor
 final class DownloadStore: ObservableObject {
     /// The kind of view the downloads section browses. Songs are not a kind:
@@ -150,6 +159,28 @@ final class DownloadStore: ObservableObject {
         var total = 0
     }
 
+    /// One transfer in flight, recorded so a completion nobody is waiting for
+    /// can still be filed.
+    ///
+    /// iOS runs transfers on a background session: the system finishes them
+    /// even if the app dies, and delivers the file when the store next creates
+    /// its session — by which point no `downloadOne` is left to receive it.
+    /// The record carries everything needed to file the delivered file the way
+    /// the transfer would have. It is keyed by a hash of the request URL — the
+    /// one thing the system echoes back that identifies the transfer — because
+    /// stream and image URLs carry the access token and the manifest must not.
+    enum PendingTransfer: Codable, Sendable {
+        case audio(
+            track: BaseItemDto,
+            filename: String,
+            source: String,
+            batchId: String,
+            albumSongCount: Int?,
+            artistKeys: Set<String>
+        )
+        case artwork(ownerID: String?, imageTag: String, filename: String, holderID: String)
+    }
+
     /// Song-level progress across every running batch: what the downloads
     /// status bar's filling bar shows.
     struct DownloadProgress: Equatable, Sendable {
@@ -219,42 +250,60 @@ final class DownloadStore: ObservableObject {
     /// shows.
     private let downloadSession: DownloadSession
 
+    /// The task running each batch, keyed by batch id, so removals can cancel
+    /// them: a download the user has deleted must not keep landing tracks.
+    private var batchTasks: [String: Task<Void, Never>] = [:]
+    /// The item each running batch was started for, persisted so a relaunch
+    /// can resume batches whose process died mid-download.
+    private var activeBatchItems: [String: BaseItemDto] = [:]
+    /// Transfers in flight, keyed by ``pendingKey(for:)`` of their request URL.
+    private var pendingTransfers: [String: PendingTransfer] = [:]
+    /// Whether the batches a previous process persisted have been resumed
+    /// this launch.
+    private var hasResumedInterruptedBatches = false
+
     private var client: JellyfinService?
     private let directory: URL
     private let manifestURL: URL
     private let artworkDirectory: URL
 
-    private nonisolated static let manifestVersion = 3
+    private nonisolated static let manifestVersion = 4
 
     private struct Manifest: Codable, Sendable {
         var version: Int
         var tracks: [String: DownloadStore.Entry]
         var playlists: [String: DownloadStore.PlaylistRecord]
         var artwork: [String: DownloadStore.ArtworkEntry]
+        var pendingTransfers: [String: DownloadStore.PendingTransfer]
+        var activeBatches: [String: BaseItemDto]
         /// The version this manifest was actually written at, which is what
-        /// decides whether a load needs migrating. Not encoded: it describes the
-        /// file being read, not the one being written.
+        /// decides whether a load needs migrating. Not encoded: it describes
+        /// the file being read, not the one being written.
         var loadedVersion: Int = DownloadStore.manifestVersion
 
         init(
             tracks: [String: DownloadStore.Entry],
             playlists: [String: DownloadStore.PlaylistRecord],
-            artwork: [String: DownloadStore.ArtworkEntry]
+            artwork: [String: DownloadStore.ArtworkEntry],
+            pendingTransfers: [String: DownloadStore.PendingTransfer],
+            activeBatches: [String: BaseItemDto]
         ) {
             version = DownloadStore.manifestVersion
             self.tracks = tracks
             self.playlists = playlists
             self.artwork = artwork
+            self.pendingTransfers = pendingTransfers
+            self.activeBatches = activeBatches
         }
 
         private enum CodingKeys: String, CodingKey {
-            case version, tracks, playlists, artwork
+            case version, tracks, playlists, artwork, pendingTransfers, activeBatches
             /// v1 only: the per-collection snapshots that are derived now.
             case collections
         }
 
         private enum WriteKeys: String, CodingKey {
-            case version, tracks, playlists, artwork
+            case version, tracks, playlists, artwork, pendingTransfers, activeBatches
         }
 
         func encode(to encoder: Encoder) throws {
@@ -263,6 +312,8 @@ final class DownloadStore: ObservableObject {
             try container.encode(tracks, forKey: .tracks)
             try container.encode(playlists, forKey: .playlists)
             try container.encode(artwork, forKey: .artwork)
+            try container.encode(pendingTransfers, forKey: .pendingTransfers)
+            try container.encode(activeBatches, forKey: .activeBatches)
         }
 
         init(from decoder: Decoder) throws {
@@ -272,6 +323,8 @@ final class DownloadStore: ObservableObject {
             let tracks = try container.decodeIfPresent([String: DownloadStore.Entry].self, forKey: .tracks) ?? [:]
             var playlists = try container.decodeIfPresent([String: DownloadStore.PlaylistRecord].self, forKey: .playlists) ?? [:]
             let artwork = try container.decodeIfPresent([String: DownloadStore.ArtworkEntry].self, forKey: .artwork) ?? [:]
+            pendingTransfers = try container.decodeIfPresent([String: DownloadStore.PendingTransfer].self, forKey: .pendingTransfers) ?? [:]
+            activeBatches = try container.decodeIfPresent([String: BaseItemDto].self, forKey: .activeBatches) ?? [:]
             // v1 stored a snapshot of every downloaded collection. Albums,
             // artists and genres are derived from the songs now, so only
             // playlists carry over — their membership becomes a record built
@@ -300,38 +353,118 @@ final class DownloadStore: ObservableObject {
     /// `session` contributes its configuration — which is how a test's stubbed
     /// protocols reach the downloads — while the transfers themselves run on
     /// the store's own ``DownloadSession``, the one that can report progress.
+    /// On iOS that session is a background session, so transfers survive the
+    /// app being suspended; `session`'s configuration is the macOS and test
+    /// path.
     init(directory: URL? = nil, session: URLSession = .shared) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = directory ?? support.appending(path: "Downloads", directoryHint: .isDirectory)
         self.directory = dir
         self.artworkDirectory = dir.appending(path: "Artwork", directoryHint: .isDirectory)
         self.manifestURL = dir.appending(path: "manifest.json")
-        self.downloadSession = DownloadSession(configuration: session.configuration)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: artworkDirectory, withIntermediateDirectories: true)
-        if let data = try? Data(contentsOf: manifestURL) {
-            do {
-                let manifest = try JSONDecoder().decode(Manifest.self, from: data)
-                entries = manifest.tracks
-                playlists = manifest.playlists
-                artworkEntries = manifest.artwork
-                // Older manifests keyed artwork per image tag (v1) or per song
-                // (v2), neither of which an album view can predict. Fold them onto
-                // the album's own image pair and reclaim the duplicate files.
-                if manifest.loadedVersion < Self.manifestVersion {
-                    let migrated = migratingArtwork(manifest.artwork, tracks: manifest.tracks)
-                    if migrated != manifest.artwork {
-                        artworkEntries = migrated
-                        persist()
-                    }
-                }
-            } catch {
-                // A manifest that will not read is every download the user has:
-                // say so, rather than reopening as empty and quietly orphaning
-                // the files on disk.
-                downloadLog.error("Download manifest could not be read: \(error.localizedDescription, privacy: .public)")
+        #if os(iOS)
+        // Recreating the session under its fixed identifier is what reconnects
+        // to transfers the system kept running — or finished — while no store
+        // existed to receive them.
+        downloadSession = DownloadSession(backgroundIdentifier: DownloadSession.backgroundIdentifier)
+        #else
+        downloadSession = DownloadSession(configuration: session.configuration)
+        #endif
+        downloadSession.setOrphanedTransferHandler { [weak self] requestURL, file, statusCode in
+            Task { @MainActor in
+                self?.adoptOrphanedTransfer(requestURL: requestURL, file: file, statusCode: statusCode)
             }
         }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: artworkDirectory, withIntermediateDirectories: true)
+        loadManifest()
+    }
+
+    private func loadManifest() {
+        let data: Data
+        do {
+            data = try Data(contentsOf: manifestURL)
+        } catch let error as NSError where error.code == NSFileReadNoSuchFileError {
+            // Nothing has ever been saved.
+            return
+        } catch {
+            quarantineUnreadableManifest(error)
+            return
+        }
+        do {
+            let manifest = try JSONDecoder().decode(Manifest.self, from: data)
+            entries = manifest.tracks
+            playlists = manifest.playlists
+            artworkEntries = manifest.artwork
+            pendingTransfers = manifest.pendingTransfers
+            activeBatchItems = manifest.activeBatches
+            guard manifest.loadedVersion < Self.manifestVersion else { return }
+            var changed = false
+            // Albums saved before the manifest carried totals were downloaded
+            // whole, so without a backfilled total they would read as forever
+            // partial — and the default "complete albums" filter would hide
+            // every album an upgraded install has.
+            let backfilled = Self.backfillingAlbumTotals(entries)
+            if backfilled != entries {
+                entries = backfilled
+                changed = true
+            }
+            // Older manifests keyed artwork per image tag (v1) or per song
+            // (v2), neither of which an album view can predict. Fold them onto
+            // the album's own image pair and reclaim the duplicate files.
+            let migrated = migratingArtwork(artworkEntries, tracks: entries)
+            if migrated != artworkEntries {
+                artworkEntries = migrated
+                changed = true
+            }
+            if changed {
+                persist()
+            }
+        } catch {
+            quarantineUnreadableManifest(error)
+        }
+    }
+
+    /// What a user is told when their downloads record could not be read.
+    private nonisolated static let manifestUnreadableMessage =
+        "The record of your downloads could not be read, so the library reopened empty. "
+        + "The old record was set aside as “manifest.corrupt.json”, and the audio files are "
+        + "still on disk — “Delete All” in Downloads clears them."
+
+    /// A manifest that will not read is every download the user has, and the
+    /// next download would otherwise persist an empty manifest over it and
+    /// destroy the record for good. Move it aside instead — the files stay on
+    /// disk and the record stays recoverable by hand — start empty, and say so.
+    private func quarantineUnreadableManifest(_ error: Error) {
+        downloadLog.error("Download manifest could not be read: \(error.localizedDescription, privacy: .public)")
+        let quarantine = directory.appending(path: "manifest.corrupt.json")
+        try? FileManager.default.removeItem(at: quarantine)
+        try? FileManager.default.moveItem(at: manifestURL, to: quarantine)
+        errorMessage = Self.manifestUnreadableMessage
+    }
+
+    /// Gives downloaded albums the total a pre-total manifest never carried:
+    /// every album downloaded before totals were stored was downloaded as a
+    /// whole album, so its songs on disk are the total it was downloaded with.
+    /// Only albums that were downloaded as albums gain a total — one that
+    /// surfaced because a playlist carried a song of it stays unknown, which
+    /// is what keeps the "complete albums" filter honest about borrowed songs.
+    private static func backfillingAlbumTotals(_ tracks: [String: Entry]) -> [String: Entry] {
+        var members: [String: [String]] = [:]
+        var explicit: Set<String> = []
+        for (id, entry) in tracks {
+            guard let key = albumKey(of: entry.track) else { continue }
+            members[key, default: []].append(id)
+            if entry.sources.contains(key) { explicit.insert(key) }
+        }
+        var updated = tracks
+        for key in explicit {
+            guard let ids = members[key] else { continue }
+            for id in ids where updated[id]?.albumSongCount == nil {
+                updated[id]?.albumSongCount = ids.count
+            }
+        }
+        return updated
     }
 
     /// Re-keys legacy artwork entries onto ``artworkPair(for:)`'s` canonical
@@ -433,25 +566,66 @@ final class DownloadStore: ObservableObject {
         try? FileManager.default.removeItem(at: artworkDirectory.appending(path: filename))
     }
 
-    /// Removes every download: all files, entries and playlist records.
+    /// Removes every download — always available, even mid-download: running
+    /// batches are cancelled first, so nothing they have not finished can land
+    /// after the wipe, and batches a relaunch would otherwise resume are
+    /// forgotten. Files are deleted by enumeration rather than by record, so
+    /// orphans no entry knows about — a quarantined manifest's audio, a
+    /// half-adopted transfer — cannot outlive the wipe either.
     func removeAll() {
-        for entry in entries.values {
-            try? FileManager.default.removeItem(at: directory.appending(path: entry.filename))
-        }
-        for artwork in artworkEntries.values {
-            try? FileManager.default.removeItem(at: artworkDirectory.appending(path: artwork.filename))
-        }
+        for task in batchTasks.values { task.cancel() }
+        batchTasks = [:]
+        batches = []
+        activeBatchItems = [:]
+        pendingTransfers = [:]
         entries = [:]
         playlists = [:]
         artworkEntries = [:]
+        empty(directory)
+        empty(artworkDirectory)
         persist()
+    }
+
+    /// Deletes everything inside `directory` and ensures the directory itself
+    /// still exists afterwards — `persist` writes its manifest into it.
+    private func empty(_ directory: URL) {
+        let contents = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for url in contents {
+            try? FileManager.default.removeItem(at: url)
+        }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
     /// Points the store at a new session. Downloaded files are kept.
     func configure(client: JellyfinService?) {
         guard client !== self.client else { return }
         self.client = client
-        errorMessage = nil
+        // Signing in or out clears a stale error — except the manifest
+        // warning, which is about the disk, not the session, and which the
+        // wiring at launch would otherwise dismiss before any alert showed it.
+        if errorMessage != Self.manifestUnreadableMessage {
+            errorMessage = nil
+        }
+        if client != nil {
+            resumeInterruptedBatches()
+        }
+    }
+
+    /// Batches a previous process persisted get started again at the first
+    /// sign-in. ``download(_:)`` counts tracks already on disk as done without
+    /// re-fetching them, so a resume downloads exactly what the interrupted
+    /// run did not finish, in whatever order the files arrived.
+    private func resumeInterruptedBatches() {
+        guard !hasResumedInterruptedBatches else { return }
+        hasResumedInterruptedBatches = true
+        guard !activeBatchItems.isEmpty else { return }
+        let items = Array(activeBatchItems.values)
+        // Cleared up front: `download` re-registers every batch it actually
+        // starts, so an item it rejects cannot linger as forever-interrupted.
+        activeBatchItems = [:]
+        for item in items {
+            download(item)
+        }
     }
 
     // MARK: - Queries
@@ -691,12 +865,17 @@ final class DownloadStore: ObservableObject {
         }
         guard !isBusy(item) else { return }
 
+        // Recorded before the first track, so a relaunch can resume the batch
+        // even if the process dies immediately.
+        activeBatchItems[id] = item
+        persist()
+
         switch item.itemType {
         case .audio:
             var batch = Batch(id: id)
             batch.total = 1
             batches.append(batch)
-            Task {
+            batchTasks[id] = Task {
                 await downloadOne(
                     item,
                     source: id,
@@ -709,11 +888,12 @@ final class DownloadStore: ObservableObject {
             }
         case .musicArtist:
             batches.append(Batch(id: id))
-            Task {
+            batchTasks[id] = Task {
                 do {
                     let albums = try await client.albums(forArtistId: id)
                     guard !albums.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
                     for album in albums {
+                        try Task.checkCancellation()
                         await downloadCollection(album, into: id, via: client)
                     }
                 } catch {
@@ -725,13 +905,14 @@ final class DownloadStore: ObservableObject {
             }
         case .playlist:
             batches.append(Batch(id: id))
-            Task {
+            batchTasks[id] = Task {
                 do {
                     let tracks = try await client.tracks(for: item)
                     guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
                     updateBatch(id) { $0.total = tracks.count }
                     var trackIDs: [String] = []
                     for track in tracks {
+                        try Task.checkCancellation()
                         if let trackId = track.id, !trackIDs.contains(trackId) { trackIDs.append(trackId) }
                         await downloadOne(
                             track,
@@ -742,6 +923,10 @@ final class DownloadStore: ObservableObject {
                             artistKeys: Self.artistKeys(of: track)
                         )
                     }
+                    // A removal while the tracks were landing wins over the
+                    // membership: saving the record now would resurrect the
+                    // playlist the user just deleted.
+                    try Task.checkCancellation()
                     playlists[id] = PlaylistRecord(
                         id: id,
                         title: item.displayName,
@@ -772,7 +957,7 @@ final class DownloadStore: ObservableObject {
             }
         default:
             batches.append(Batch(id: id))
-            Task {
+            batchTasks[id] = Task {
                 await downloadCollection(item, into: id, via: client)
                 finishBatch(id)
             }
@@ -787,7 +972,9 @@ final class DownloadStore: ObservableObject {
         guard let client, let existing = playlists[id] else { return }
         guard !batches.contains(where: { $0.id == id }) else { return }
         batches.append(Batch(id: id))
-        Task {
+        activeBatchItems[id] = BaseItemDto(id: id, name: existing.title, type: .playlist)
+        persist()
+        batchTasks[id] = Task {
             do {
                 let stub = BaseItemDto(id: id, name: existing.title, type: .playlist)
                 let tracks = try await client.tracks(for: stub)
@@ -795,6 +982,7 @@ final class DownloadStore: ObservableObject {
                 updateBatch(id) { $0.total = tracks.count }
                 var trackIDs: [String] = []
                 for track in tracks {
+                    try Task.checkCancellation()
                     if let trackId = track.id, !trackIDs.contains(trackId) { trackIDs.append(trackId) }
                     await downloadOne(
                         track,
@@ -805,6 +993,7 @@ final class DownloadStore: ObservableObject {
                         artistKeys: Self.artistKeys(of: track)
                     )
                 }
+                try Task.checkCancellation()
                 for dropped in existing.trackIDs where !trackIDs.contains(dropped) {
                     unreference(dropped, source: id)
                 }
@@ -836,6 +1025,10 @@ final class DownloadStore: ObservableObject {
     /// record and cover, since the membership was the download.
     func remove(_ item: BaseItemDto) {
         guard let id = item.id else { return }
+        // A download of this item is pointless the moment it is being removed
+        // — and worse than pointless: every track still queued for it would
+        // re-save itself after the removal.
+        cancelBatch(id)
         switch Self.groupKind(of: item) {
         case nil:
             deleteSongs([id])
@@ -844,6 +1037,18 @@ final class DownloadStore: ObservableObject {
         case let kind?:
             deleteSongs(songsMatchingGroupID(id, kind: kind).compactMap(\.track.id))
         }
+    }
+
+    /// Stops a running batch: the task is cancelled, the progress row goes,
+    /// and a relaunch will not resume it. The cancelled task's own
+    /// ``finishBatch(_:)`` still runs when it unwinds, which is a no-op sweep
+    /// over state this already cleared.
+    private func cancelBatch(_ id: String) {
+        guard let task = batchTasks.removeValue(forKey: id) else { return }
+        task.cancel()
+        batches.removeAll { $0.id == id }
+        activeBatchItems[id] = nil
+        persist()
     }
 
     func dismissError() {
@@ -865,6 +1070,7 @@ final class DownloadStore: ObservableObject {
             let collectionKeys = Self.artistKeys(of: item)
             updateBatch(batchId) { $0.total += tracks.count }
             for track in tracks {
+                try Task.checkCancellation()
                 // An album's songs are stored with the album's own attribution
                 // filled in, so the derived album view and the download
                 // reference agree on the album's id.
@@ -916,6 +1122,7 @@ final class DownloadStore: ObservableObject {
         albumSongCount: Int?,
         artistKeys: Set<String>
     ) async {
+        guard !Task.isCancelled else { return }
         guard let id = track.id else {
             updateBatch(batchId) { $0.failed += 1 }
             return
@@ -931,21 +1138,44 @@ final class DownloadStore: ObservableObject {
             updateBatch(batchId) { $0.completed += 1 }
             return
         }
+        var pendingKey: String?
         do {
             let remote = try client.streamURL(itemId: id, mediaSourceId: track.mediaSourceID)
-            let (tempFile, response) = try await downloadSession.download(from: remote)
-            // `URLSession` happily downloads an error page as if it were audio,
-            // so an HTTP failure must be caught here.
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                throw JellyfinError.downloadFailed(
-                    reason: (response as? HTTPURLResponse).map { "HTTP \($0.statusCode)" } ?? "unknown response"
-                )
-            }
             // `AVURLAsset` leans on the file extension to pick a parser, so
             // the saved name carries the track's container.
             let ext = (track.container ?? track.mediaSources?.first?.container ?? "mp3")
                 .lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
             let filename = "\(id).\(ext.isEmpty ? "mp3" : ext)"
+            // Recorded before the transfer starts: if the process dies
+            // mid-flight, the system finishes it anyway, and this record is
+            // what lets the next launch file the delivered file.
+            let key = Self.pendingKey(for: remote)
+            pendingKey = key
+            pendingTransfers[key] = .audio(
+                track: track,
+                filename: filename,
+                source: source,
+                batchId: batchId,
+                albumSongCount: albumSongCount,
+                artistKeys: artistKeys
+            )
+            persist()
+            let (tempFile, response) = try await downloadSession.download(from: remote)
+            pendingTransfers[key] = nil
+            // The transfer can finish just before a removal cancels it; the
+            // removal wins, or the file would resurrect what was just deleted.
+            guard !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: tempFile)
+                return
+            }
+            // `URLSession` happily downloads an error page as if it were audio,
+            // so an HTTP failure must be caught here.
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                try? FileManager.default.removeItem(at: tempFile)
+                throw JellyfinError.downloadFailed(
+                    reason: (response as? HTTPURLResponse).map { "HTTP \($0.statusCode)" } ?? "unknown response"
+                )
+            }
             let destination = directory.appending(path: filename)
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: tempFile, to: destination)
@@ -966,6 +1196,7 @@ final class DownloadStore: ObservableObject {
             persist()
             updateBatch(batchId) { $0.completed += 1 }
         } catch {
+            if let pendingKey { pendingTransfers[pendingKey] = nil }
             if !error.isCancellation {
                 playbackLogDownloadFailure(track, error)
             }
@@ -1002,13 +1233,28 @@ final class DownloadStore: ObservableObject {
             type: .primary
         ) else { return }
 
+        // Saved as JPG (the format requested), namespaced by its owner so
+        // two items sharing an image tag can't overwrite each other.
+        let stem = ownerID.map { "\($0)-\(imageTag)" } ?? imageTag
+        let filename = "\(stem).jpg"
+        // Recorded like an audio transfer: a cover the system finishes across
+        // a process death is filed by the same adoption path.
+        let key = Self.pendingKey(for: artworkUrl)
+        pendingTransfers[key] = .artwork(ownerID: ownerID, imageTag: imageTag, filename: filename, holderID: holderID)
+        persist()
+
         do {
             let (tempFile, response) = try await downloadSession.download(from: artworkUrl)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
-            // Saved as JPG (the format requested), namespaced by its owner so
-            // two items sharing an image tag can't overwrite each other.
-            let stem = ownerID.map { "\($0)-\(imageTag)" } ?? imageTag
-            let filename = "\(stem).jpg"
+            pendingTransfers[key] = nil
+            // A removal while the cover was in flight wins over the file.
+            guard !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: tempFile)
+                return
+            }
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                try? FileManager.default.removeItem(at: tempFile)
+                return
+            }
             let destination = artworkDirectory.appending(path: filename)
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: tempFile, to: destination)
@@ -1021,8 +1267,91 @@ final class DownloadStore: ObservableObject {
             artworkEntries[entry.key] = entry
             persist()
         } catch {
+            pendingTransfers[key] = nil
             // Artwork is optional; a missing cover is a placeholder, not an error.
         }
+    }
+
+    /// The key a transfer is recorded under: a hash of its request URL, which
+    /// is what the system echoes back with a completion it kept across a
+    /// process death. Hashed because stream and image URLs carry the access
+    /// token, and the manifest must not.
+    static func pendingKey(for url: URL) -> String {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A completion the system kept across a process death: iOS's background
+    /// session finishes in-flight transfers with the app gone and delivers
+    /// them when the store recreates its session at the next launch, by which
+    /// point no caller is waiting. The pending record says what the file was
+    /// for, and it is filed exactly the way the transfer would have filed it.
+    private func adoptOrphanedTransfer(requestURL: URL?, file: URL?, statusCode: Int?) {
+        guard let requestURL, let pending = pendingTransfers[Self.pendingKey(for: requestURL)] else {
+            if let file { try? FileManager.default.removeItem(at: file) }
+            return
+        }
+        pendingTransfers[Self.pendingKey(for: requestURL)] = nil
+        guard let file, let statusCode, (200..<300).contains(statusCode) else {
+            if let file { try? FileManager.default.removeItem(at: file) }
+            persist()
+            return
+        }
+        switch pending {
+        case let .audio(track, filename, source, _, albumSongCount, artistKeys):
+            guard let id = track.id else { break }
+            if entries[id] != nil {
+                // A resumed batch already re-fetched this song; the kept copy
+                // is the duplicate.
+                try? FileManager.default.removeItem(at: file)
+            } else {
+                let destination = directory.appending(path: filename)
+                try? FileManager.default.removeItem(at: destination)
+                do {
+                    try FileManager.default.moveItem(at: file, to: destination)
+                } catch {
+                    try? FileManager.default.removeItem(at: file)
+                    break
+                }
+                entries[id] = Entry(
+                    track: track,
+                    filename: filename,
+                    order: (entries.values.map(\.order).max() ?? 0) + 1,
+                    sources: [source],
+                    albumSongCount: albumSongCount,
+                    artistKeys: artistKeys
+                )
+                // The transfer died before its cover was fetched, and a
+                // resumed batch only references artwork that already exists:
+                // pull the cover the way `downloadOne` would have.
+                if let client, let pair = Self.artworkPair(for: track) {
+                    Task {
+                        await self.downloadArtwork(ownerID: pair.owner, imageTag: pair.tag, holderID: id, via: client)
+                    }
+                }
+            }
+        case let .artwork(ownerID, imageTag, filename, holderID):
+            let entry = ArtworkEntry(
+                filename: filename,
+                ownerItemID: ownerID,
+                imageTag: imageTag,
+                requiredBy: [holderID]
+            )
+            if artworkEntries[entry.key] != nil {
+                try? FileManager.default.removeItem(at: file)
+            } else {
+                let destination = artworkDirectory.appending(path: filename)
+                try? FileManager.default.removeItem(at: destination)
+                do {
+                    try FileManager.default.moveItem(at: file, to: destination)
+                } catch {
+                    try? FileManager.default.removeItem(at: file)
+                    break
+                }
+                artworkEntries[entry.key] = entry
+            }
+        }
+        persist()
     }
 
     /// Adds a reference to artwork already on disk for this owner and tag: the
@@ -1120,6 +1449,16 @@ final class DownloadStore: ObservableObject {
                 : "Couldn’t download \(batch.failed) of \(batch.total) tracks."
         }
         batches.removeAll { $0.id == id }
+        batchTasks[id] = nil
+        activeBatchItems[id] = nil
+        // Transfers recorded for this batch are done with it: whatever is
+        // still listed belonged to a task that failed or was cancelled before
+        // it could clear its own record.
+        for (key, transfer) in pendingTransfers {
+            if case let .audio(_, _, _, batchID, _, _) = transfer, batchID == id {
+                pendingTransfers[key] = nil
+            }
+        }
         deleteUnreferenced()
         persist()
     }
@@ -1275,21 +1614,17 @@ final class DownloadStore: ObservableObject {
 
     private func existingFile(in directory: URL, named filename: String) -> URL? {
         let url = directory.appending(path: filename)
-        #if os(macOS)
-        if #available(macOS 13.0, *) {
-            return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
-        }
-        #endif
-        #if os(iOS)
-        if #available(iOS 16.0, *) {
-            return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
-        }
-        #endif
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
     }
 
     private func persist() {
-        let manifest = Manifest(tracks: entries, playlists: playlists, artwork: artworkEntries)
+        let manifest = Manifest(
+            tracks: entries,
+            playlists: playlists,
+            artwork: artworkEntries,
+            pendingTransfers: pendingTransfers,
+            activeBatches: activeBatchItems
+        )
         if let data = try? JSONEncoder().encode(manifest) {
             try? data.write(to: manifestURL, options: .atomic)
         }

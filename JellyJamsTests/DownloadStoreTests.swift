@@ -758,7 +758,7 @@ final class DownloadStoreTests: XCTestCase {
 
         // And the rewritten manifest means the next launch needs no migration.
         let rewritten = try String(contentsOf: directory.appending(path: "manifest.json"), encoding: .utf8)
-        XCTAssertTrue(rewritten.contains(#""version":3"#))
+        XCTAssertTrue(rewritten.contains(#""version":4"#))
         XCTAssertTrue(rewritten.contains("al1|album-cover"))
     }
 
@@ -832,6 +832,179 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.playlists["pl1"]?.coverTag, "cover-legacy")
         let migratedSong = try XCTUnwrap(store.entries["t1"]?.track)
         XCTAssertNotNil(store.localArtworkURL(for: migratedSong), "A tag-only artwork entry still resolves")
+    }
+
+    /// Albums downloaded before the manifest carried a total were downloaded
+    /// whole, so migration gives them the total they were downloaded with —
+    /// without it the default "complete albums" filter would hide every album
+    /// an upgraded install has. An album that only surfaced through a playlist
+    /// song stays unknown, and stays filtered: it was never downloaded whole.
+    func testALegacyAlbumGainsItsTotalAndReadsAsComplete() throws {
+        let directory = newTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for name in ["a1", "a2", "b1"] {
+            try Data("audio".utf8).write(to: directory.appending(path: "\(name).mp3"))
+        }
+
+        func entry(id: String, albumID: String, album: String, source: String, order: Int) -> String {
+            let track = #"{"Id":"\#(id)","Name":"\#(id)","Type":"Audio","AlbumId":"\#(albumID)","Album":"\#(album)"}"#
+            return #""\#(id)":{"track":\#(track),"filename":"\#(id).mp3","order":\#(order),"requiredBy":["\#(source)"]}"#
+        }
+        let manifest = """
+        {"version":2,"tracks":{
+            \(entry(id: "a1", albumID: "al1", album: "One", source: "al1", order: 0)),
+            \(entry(id: "a2", albumID: "al1", album: "One", source: "al1", order: 1)),
+            \(entry(id: "b1", albumID: "al2", album: "Two", source: "pl1", order: 2))
+        },"playlists":{},"artwork":{}}
+        """
+        try Data(manifest.utf8).write(to: directory.appending(path: "manifest.json"))
+
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        XCTAssertEqual(store.entries["a1"]?.albumSongCount, 2, "The downloaded album's total is its songs on disk")
+        XCTAssertNil(store.entries["b1"]?.albumSongCount, "A borrowed song's album keeps its unknown total")
+        let albums = store.downloadedAlbums()
+        let one = try XCTUnwrap(albums.first { $0.id == "al1" })
+        let two = try XCTUnwrap(albums.first { $0.id == "al2" })
+        XCTAssertTrue(one.isFullyDownloaded, "The legacy album survives the complete-albums filter")
+        XCTAssertFalse(two.isFullyDownloaded, "The borrowed album stays filtered as partial")
+    }
+
+    /// The bug this guards: a manifest that would not decode reopened the
+    /// store as empty, and the next download persisted that empty state over
+    /// the unreadable file — every record gone, every file orphaned. Now the
+    /// unreadable manifest is moved aside, the user is told, and later writes
+    /// cannot touch it.
+    func testAnUnreadableManifestIsSetAsideNotOverwritten() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data("audio-a".utf8))
+        }
+        let directory = newTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let corrupt = Data("not json {{{".utf8)
+        try corrupt.write(to: directory.appending(path: "manifest.json"))
+
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let quarantine = directory.appending(path: "manifest.corrupt.json")
+        XCTAssertEqual(try? Data(contentsOf: quarantine), corrupt, "The unreadable manifest is kept as-is")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appending(path: "manifest.json").path),
+                       "Nothing overwrites the evidence until the user downloads again")
+        XCTAssertNotNil(store.errorMessage, "The user is told their downloads could not be read")
+
+        store.configure(client: TestFixtures.stubbedClient())
+        XCTAssertNotNil(store.errorMessage, "Signing in must not dismiss the warning before it was shown")
+        store.download(TestFixtures.item(id: "a"))
+        try await waitForBatch(store, id: "a")
+
+        let rewritten = try Data(contentsOf: directory.appending(path: "manifest.json"))
+        XCTAssertNotEqual(rewritten, corrupt)
+        XCTAssertNotNil(store.entries["a"], "The store works normally after starting fresh")
+        XCTAssertEqual(try? Data(contentsOf: quarantine), corrupt, "The set-aside record survives the fresh start")
+    }
+
+    /// "Delete All" mid-download: the batch is cancelled, whatever already
+    /// landed is deleted with the rest, and no in-flight track resurrects an
+    /// entry after the wipe.
+    func testRemoveAllCancelsRunningBatchesAndNothingResurrects() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.contains("t2") == true ? 0.3 : 0
+        }
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "album", artist: "Artist"))
+        for _ in 0 ..< 200 {
+            if store.entries["t1"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(store.entries["t1"], "The first song landed before the wipe")
+
+        store.removeAll()
+
+        XCTAssertTrue(store.batches.isEmpty, "The running batch is gone immediately")
+        XCTAssertTrue(store.entries.isEmpty)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertTrue(store.entries.isEmpty, "The cancelled transfer's song does not resurrect")
+        XCTAssertNil(store.errorMessage, "A cancelled download is not an error")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        XCTAssertFalse(files.contains("t1.mp3"))
+        XCTAssertFalse(files.contains("t2.mp3"))
+        let reopened = DownloadStore(directory: directory, session: try stubbedSession())
+        XCTAssertTrue(reopened.entries.isEmpty, "The empty state persists across relaunch")
+        XCTAssertTrue(reopened.batches.isEmpty, "A wiped batch is not resumed either")
+    }
+
+    /// Removing a group stops its own download: without the cancel, every
+    /// track still queued would re-save itself after the removal.
+    func testRemoveCancelsTheItemsOwnBatch() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.contains("t2") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        let album = albumStub(id: "album", artist: "Artist")
+        store.download(album)
+        for _ in 0 ..< 200 {
+            if store.entries["t1"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        store.remove(album)
+
+        XCTAssertFalse(store.isBusy(album))
+        XCTAssertTrue(store.entries.isEmpty)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertTrue(store.entries.isEmpty, "The queued track does not come back")
+        XCTAssertNil(store.errorMessage, "A cancelled download is not an error")
+    }
+
+    /// A batch the process died in the middle of is persisted with its item,
+    /// and the next signed-in launch starts it again: tracks already on disk
+    /// dedupe, so the resume fetches only what is missing.
+    func testARelaunchResumesAnInterruptedBatch() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        let directory = newTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("audio".utf8).write(to: directory.appending(path: "t1.mp3"))
+        let track = trackInAlbum("t1", albumID: "album", album: "Album")
+        let manifest = #"""
+        {"version":4,
+         "tracks":{"t1":{"track":\#(track.json),"filename":"t1.mp3","order":0,"requiredBy":["album"],"albumSongCount":2,"artistKeys":[]}},
+         "playlists":{},
+         "artwork":{},
+         "pendingTransfers":{},
+         "activeBatches":{"album":{"Id":"album","Name":"album","Type":"MusicAlbum"}}}
+        """#
+        try Data(manifest.utf8).write(to: directory.appending(path: "manifest.json"))
+
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        XCTAssertFalse(store.batches.contains { $0.id == "album" }, "Nothing resumes before a client exists")
+
+        store.configure(client: TestFixtures.stubbedClient())
+        try await waitForBatch(store, id: "album")
+
+        XCTAssertNotNil(store.entries["t1"], "The song that was already on disk keeps its entry")
+        XCTAssertNotNil(store.entries["t2"], "The missing song is fetched by the resume")
+        XCTAssertEqual(store.downloadedAlbums().first { $0.id == "album" }?.downloadedSongs, 2)
     }
 
     // MARK: - Download progress
