@@ -30,6 +30,36 @@ final class ItemPresentationTests: XCTestCase {
         XCTAssertNil(BaseItemDto().subtitleArtist)
     }
 
+    /// The key puts the album artist first, then the album, then the disc and
+    /// track numbers — zero-padded, so the string order is the numeric order.
+    func testAlbumArtistSortComposesTheWholeKey() {
+        let item = BaseItemDto(
+            album: "Album",
+            albumArtist: "Artist",
+            id: "t",
+            indexNumber: 10,
+            name: "Song",
+            parentIndexNumber: 2,
+            type: .audio
+        )
+
+        XCTAssertEqual(item.albumArtistSort, "Artist - Album - 002 - 010")
+    }
+
+    /// A track without the album artist falls back to its first artist, the
+    /// way the downloaded-artist grouping does; missing numbers sink as 999.
+    func testAlbumArtistSortFallsBackAndSinksMissingNumbers() {
+        let item = BaseItemDto(
+            album: "Album",
+            artists: ["A", "B"],
+            id: "t",
+            name: "Song",
+            type: .audio
+        )
+
+        XCTAssertEqual(item.albumArtistSort, "A - Album - 999 - 999")
+    }
+
     func testRuntimeConvertsTicksAndToleratesAbsentDurations() throws {
         let threeMinutes = BaseItemDto(runTimeTicks: 180 * Ticks.perSecond)
 
@@ -174,14 +204,22 @@ final class SortByTests: XCTestCase {
 final class LocalSortTests: XCTestCase {
     private func track(
         _ name: String,
+        album: String? = nil,
+        albumArtist: String? = nil,
         artist: String? = nil,
+        disc: Int? = nil,
+        index: Int? = nil,
         played: Date? = nil,
         runtime: Int? = nil
     ) -> BaseItemDto {
         BaseItemDto(
+            album: album,
+            albumArtist: albumArtist,
             artists: artist.map { [$0] },
             id: name,
+            indexNumber: index,
             name: name,
+            parentIndexNumber: disc,
             runTimeTicks: runtime,
             sortName: name,
             type: .audio,
@@ -235,6 +273,28 @@ final class LocalSortTests: XCTestCase {
         let long = track("Long", runtime: Ticks.perSecond * 300)
 
         XCTAssertEqual([long, short].sorted(by: .runtime, order: .ascending).map(\.displayName), ["Short", "Long"])
+    }
+
+    /// The downloads-only album-artist ordering: one artist's albums stay
+    /// whole — album by album, in track order — and numbers compare
+    /// numerically, so track 10 sorts after track 2.
+    func testAlbumArtistTrackOrderKeepsAlbumsWholeAndSortsNumbersNumerically() {
+        let tracks = [
+            track("Track Ten", album: "Album A", albumArtist: "Artist", disc: 1, index: 10),
+            track("Track Two", album: "Album A", albumArtist: "Artist", disc: 1, index: 2),
+            track("Disc Two Opener", album: "Album A", albumArtist: "Artist", disc: 2, index: 1),
+            track("Album B Opener", album: "Album B", albumArtist: "Artist", disc: 1, index: 1),
+            track("Other Artist Song", album: "Album C", albumArtist: "Bee", disc: 1, index: 1),
+        ]
+
+        XCTAssertEqual(
+            tracks.sorted(by: .albumArtistTrackOrder, order: .ascending).map(\.displayName),
+            ["Track Two", "Track Ten", "Disc Two Opener", "Album B Opener", "Other Artist Song"]
+        )
+        XCTAssertEqual(
+            tracks.sorted(by: .albumArtistTrackOrder, order: .descending).map(\.displayName),
+            ["Other Artist Song", "Album B Opener", "Disc Two Opener", "Track Ten", "Track Two"]
+        )
     }
 
     func testRandomKeepsTheSameOrderAcrossSorts() {
