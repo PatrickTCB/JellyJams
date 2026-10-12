@@ -65,6 +65,9 @@ struct FavouritesView: View {
                 if !selectedSongs.isEmpty {
                     ToolbarItem { TrackSelectionMenu(tracks: selectedSongs) }
                 }
+                ToolbarItem {
+                    SortMenu(sortBy: $songs.sortBy, sortOrder: $songs.sortOrder, options: songs.sortOptions)
+                }
             case .albums:
                 ToolbarItem {
                     SortMenu(sortBy: $albums.sortBy, sortOrder: $albums.sortOrder, options: albums.sortOptions)
