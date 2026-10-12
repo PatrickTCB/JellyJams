@@ -199,9 +199,11 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertFalse(store.batches.contains { $0.failed > 0 })
     }
 
-    /// The core reference-counting promise: deleting the album leaves the
-    /// playlist's files alone, and a second deletion actually removes them.
-    func testRemovingACollectionKeepsSongsAnotherStillRequires() async throws {
+    /// Removal deletes the songs the item stands for, whatever else required
+    /// them: removing the album takes the playlist's copy of the shared song
+    /// too, and the playlist stays listed — incomplete, its record naming a
+    /// song with no file — until it is removed or refreshed.
+    func testRemovingACollectionDeletesItsSongsWhateverElseRequiredThem() async throws {
         stubCollections([
             "album": [trackInAlbum("t1", albumID: "album", album: "Album"), TrackStub(id: "t2")],
             "playlist": [trackInAlbum("t1", albumID: "album", album: "Album")],
@@ -217,21 +219,24 @@ final class DownloadStoreTests: XCTestCase {
 
         store.remove(album)
 
-        XCTAssertEqual(store.entries["t1"]?.sources, ["playlist"])
-        XCTAssertNil(store.entries["t2"], "t2 was album-only and must be deleted")
+        XCTAssertTrue(store.entries.isEmpty, "Both songs went with the album, shared or not")
+        XCTAssertNil(store.localURL(forItemId: "t1"))
         XCTAssertNil(store.localURL(forItemId: "t2"))
-        XCTAssertNotNil(store.localURL(forItemId: "t1"))
+        XCTAssertEqual(store.playlists["playlist"]?.trackIDs, ["t1"], "The membership record keeps its place")
+        XCTAssertTrue(store.isPlaylistIncomplete(playlist))
+        XCTAssertEqual(store.downloadedPlaylists().first?.downloadedSongs, 0)
 
         store.remove(playlist)
 
-        XCTAssertTrue(store.entries.isEmpty)
-        XCTAssertNil(store.localURL(forItemId: "t1"))
-        XCTAssertFalse(store.isDownloaded(TestFixtures.item(id: "t1")))
+        XCTAssertNil(store.playlists["playlist"], "Removing the playlist takes the record with it")
+        XCTAssertFalse(store.isDownloaded(playlist))
     }
 
-    /// Deleting a song is deliberate and global: the file goes, and so does its
-    /// place in every downloaded playlist.
-    func testRemovingASongDeletesItsFileEverywhereItAppears() async throws {
+    /// Deleting a song is deliberate and global: the file goes wherever it
+    /// appeared. The playlist's membership keeps naming it — that missing
+    /// entry is the incompleteness the offline detail warns about, and the
+    /// refresh is what fills it back in.
+    func testRemovingASongDeletesItsFileButKeepsThePlaylistMembership() async throws {
         stubCollections([
             "album": [trackInAlbum("t1", albumID: "album", album: "Album")],
             "playlist": [trackInAlbum("t1", albumID: "album", album: "Album")],
@@ -240,14 +245,16 @@ final class DownloadStoreTests: XCTestCase {
         store.configure(client: TestFixtures.stubbedClient())
         store.download(albumStub(id: "album", artist: "Artist"))
         try await waitForBatch(store, id: "album")
-        store.download(BaseItemDto(id: "playlist", name: "playlist", type: .playlist))
+        let playlist = BaseItemDto(id: "playlist", name: "playlist", type: .playlist)
+        store.download(playlist)
         try await waitForBatch(store, id: "playlist")
 
         store.remove(TestFixtures.item(id: "t1"))
 
         XCTAssertNil(store.entries["t1"])
         XCTAssertNil(store.localURL(forItemId: "t1"))
-        XCTAssertEqual(store.playlists["playlist"]?.trackIDs, [], "The playlist record lost its only song")
+        XCTAssertEqual(store.playlists["playlist"]?.trackIDs, ["t1"], "The record still names the song")
+        XCTAssertTrue(store.isPlaylistIncomplete(playlist))
     }
 
     func testAFailedDownloadReportsAnErrorAndLeavesNothingBehind() async throws {
@@ -373,9 +380,10 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.downloadedArtists().first?.title, "Named")
     }
 
-    /// Removing an artist cascades through their albums; a playlist that also
-    /// required a song keeps its file.
-    func testRemovingAnArtistCascadesButRespectsOtherReferences() async throws {
+    /// Removing an artist deletes their songs, shared or not: the playlist
+    /// that also required one stays listed with a hole in its membership, and
+    /// the artist — derived from the songs — goes with them.
+    func testRemovingAnArtistDeletesTheirSongsAndLeavesAPlaylistIncomplete() async throws {
         stubCollections(
             [
                 "al1": [
@@ -395,20 +403,18 @@ final class DownloadStoreTests: XCTestCase {
         let artist = TestFixtures.item(id: "artist", type: .musicArtist)
         store.download(artist)
         try await waitForBatch(store, id: "artist")
-        store.download(BaseItemDto(id: "playlist", name: "playlist", type: .playlist))
+        let playlist = BaseItemDto(id: "playlist", name: "playlist", type: .playlist)
+        store.download(playlist)
         try await waitForBatch(store, id: "playlist")
 
         store.remove(artist)
 
-        // a1 survives because the playlist still requires it, and with it the
-        // artist surfaces — the list is derived from the songs, not stored.
-        XCTAssertEqual(store.downloadedArtists().map(\.id), ["artist"])
-        XCTAssertEqual(store.downloadedAlbums().map(\.id), ["al1"], "The borrowed album still lists")
-        XCTAssertFalse(store.downloadedAlbums().first?.isExplicit ?? true)
-        XCTAssertEqual(store.entries["a1"]?.sources, ["playlist"], "The playlist still requires its file")
-        XCTAssertNil(store.entries["a2"])
-        XCTAssertNil(store.entries["a3"])
-        XCTAssertNotNil(store.localURL(forItemId: "a1"))
+        XCTAssertTrue(store.entries.isEmpty, "Every song of the artist's albums went, shared or not")
+        XCTAssertTrue(store.downloadedArtists().isEmpty)
+        XCTAssertTrue(store.downloadedAlbums().isEmpty)
+        XCTAssertEqual(store.playlists["playlist"]?.trackIDs, ["a1"], "The membership record keeps its place")
+        XCTAssertTrue(store.isPlaylistIncomplete(playlist))
+        XCTAssertTrue(store.isDownloaded(playlist), "The record is the download; it stays")
     }
 
     /// The artist list is derived, so removing the last song of an artist's last
@@ -487,6 +493,79 @@ final class DownloadStoreTests: XCTestCase {
 
         XCTAssertEqual(store.playlists["pl1"]?.trackIDs, ["x", "y"])
         XCTAssertEqual(store.entries.count, 2)
+    }
+
+    /// A borrowed album — one that surfaced because its songs arrived through a
+    /// playlist — is removable like any other item: its songs go, and the
+    /// playlist that brought them keeps its membership and warns it is
+    /// incomplete until refreshed.
+    func testRemovingABorrowedAlbumLeavesItsPlaylistIncomplete() async throws {
+        stubCollections([
+            "pl1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist")],
+        ])
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        let playlist = BaseItemDto(id: "pl1", name: "pl1", type: .playlist)
+        store.download(playlist)
+        try await waitForBatch(store, id: "pl1")
+        let album = try XCTUnwrap(store.downloadedAlbums().first)
+
+        store.remove(album.item)
+
+        XCTAssertNil(store.entries["a1"])
+        XCTAssertTrue(store.downloadedAlbums().isEmpty)
+        XCTAssertEqual(store.playlists["pl1"]?.trackIDs, ["a1"], "The membership record keeps its place")
+        XCTAssertTrue(store.isPlaylistIncomplete(playlist))
+    }
+
+    /// Removing a playlist deletes the songs its membership required along
+    /// with the record and cover: the membership was the download.
+    func testRemovingAPlaylistDeletesItsSongsRecordAndCover() async throws {
+        stubCollections(["pl1": [TrackStub(id: "x")]])
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+        let playlist = BaseItemDto(
+            id: "pl1",
+            imageTags: ["Primary": "cover-tag"],
+            name: "pl1",
+            type: .playlist
+        )
+        store.download(playlist)
+        try await waitForBatch(store, id: "pl1")
+        XCTAssertNotNil(store.artworkEntries["pl1|cover-tag"])
+
+        store.remove(playlist)
+
+        XCTAssertNil(store.entries["x"])
+        XCTAssertNil(store.localURL(forItemId: "x"))
+        XCTAssertNil(store.playlists["pl1"])
+        XCTAssertNil(store.artworkEntries["pl1|cover-tag"])
+        XCTAssertTrue(artworkFiles(in: directory).isEmpty)
+        XCTAssertFalse(store.isDownloaded(playlist))
+    }
+
+    /// A playlist left incomplete by a removal is made whole again by its
+    /// refresh: the membership is re-pulled and the missing song re-downloaded.
+    func testRefreshingAPlaylistReDownloadsRemovedSongs() async throws {
+        stubCollections([
+            "pl1": [trackInAlbum("a1", albumID: "al1", album: "One"), TrackStub(id: "a2")],
+        ])
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        let playlist = BaseItemDto(id: "pl1", name: "pl1", type: .playlist)
+        store.download(playlist)
+        try await waitForBatch(store, id: "pl1")
+
+        store.remove(TestFixtures.item(id: "a1"))
+        XCTAssertTrue(store.isPlaylistIncomplete(playlist))
+
+        store.refreshPlaylist("pl1")
+        try await waitForBatch(store, id: "pl1")
+
+        XCTAssertNotNil(store.entries["a1"])
+        XCTAssertEqual(store.tracks(for: playlist).compactMap(\.id).sorted(), ["a1", "a2"])
+        XCTAssertFalse(store.isPlaylistIncomplete(playlist))
     }
 
     func testRemoveAllDeletesEverything() async throws {

@@ -314,6 +314,15 @@ struct TrackListDetail: View {
             Text(metaLine)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if showsIncompleteWarning {
+                // Songs can be removed from under a saved playlist — the
+                // membership record outlives the files. The refresh button in
+                // the toolbar is the way back to a complete copy.
+                Text("This playlist is incomplete. You can use the refresh button to update it from the server.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(alignment == .center ? .center : .leading)
+            }
             actions
                 .padding(.top, 6)
         }
@@ -356,6 +365,12 @@ struct TrackListDetail: View {
         let total = tracks.compactMap(\.runtimeSeconds).reduce(0, +)
         if total > 0 { parts.append(Format.duration(total)) }
         return parts.joined(separator: " • ")
+    }
+
+    /// Whether the header should warn that a downloaded playlist's songs are
+    /// not all on disk; see ``DownloadStore/isPlaylistIncomplete(_:)``.
+    private var showsIncompleteWarning: Bool {
+        downloaded && headerItem.itemType == .playlist && downloads.isPlaylistIncomplete(headerItem)
     }
 
     // MARK: - Loading

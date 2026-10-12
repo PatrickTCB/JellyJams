@@ -291,7 +291,8 @@ struct DownloadsView: View {
 }
 
 /// One row of the Downloads Playlists tab: a saved playlist, with how much of
-/// it is on disk.
+/// it is on disk, the full ``DownloadedGroupContextMenu`` of offline actions,
+/// and a swipe to remove.
 struct DownloadedItemRow: View {
     @EnvironmentObject private var downloads: DownloadStore
     let group: DownloadStore.DownloadGroup
@@ -302,13 +303,10 @@ struct DownloadedItemRow: View {
         NavigationLink(value: DownloadedGroupRef(group)) {
             rowContent
         }
+        .modifier(DownloadedGroupContextMenu(group: group))
         .swipeActions(edge: .trailing) {
-            // Only a group that was itself downloaded has anything to remove:
-            // its songs are required by it, so they go when it does.
-            if group.isExplicit {
-                Button(role: .destructive, action: { downloads.remove(group.item) }) {
-                    Label("Remove Download", systemImage: "trash")
-                }
+            Button(role: .destructive, action: { downloads.remove(group.item) }) {
+                Label("Remove Download", systemImage: "trash")
             }
         }
     }
@@ -414,13 +412,18 @@ struct DownloadedGroupCell: View {
 }
 
 /// Right-click (macOS) and long-press (iOS / iPadOS) actions for a downloaded
-/// group tile: queue its songs as they are on disk, in the order the detail
-/// lists them. Like every other browse path here the queueing asks the server
-/// for nothing — the manifest holds the songs — and playback resolves each
-/// queued track to its saved file. An album that isn't complete also gets a
-/// fill-in action: the one deliberate, signed-in exception, mirroring the
-/// offline playlist detail's refresh button. And because a grid tile has no
-/// swipe, a group that was itself downloaded is removed from here.
+/// group, whether it was downloaded itself or surfaced through another
+/// collection. The actions match the ones a Library tile offers, but every
+/// one is answered from the manifest: Play and Shuffle start the group's
+/// songs on disk with playback resolving each to its saved file, Play Next
+/// and Add to Queue enqueue them the same way. An album that isn't complete
+/// also gets a fill-in action: the one deliberate, signed-in exception,
+/// mirroring the offline playlist detail's refresh button. And removing
+/// deletes the group's songs from disk — whatever else required them keeps
+/// what it still has, a playlist keeping its membership and warning it is
+/// incomplete until refreshed — so the action is offered on every group,
+/// borrowed or not. (A grid tile has no swipe; a playlist row does, and this
+/// menu works there too.)
 private struct DownloadedGroupContextMenu: ViewModifier {
     let group: DownloadStore.DownloadGroup
 
@@ -430,6 +433,8 @@ private struct DownloadedGroupContextMenu: ViewModifier {
 
     func body(content: Content) -> some View {
         content.contextMenu {
+            Button { player.play(tracks) } label: { Label("Play", systemImage: "play.fill") }
+            Button { player.play(tracks, shuffled: true) } label: { Label("Shuffle", systemImage: "shuffle") }
             Button { player.playNext(tracks) } label: { Label("Play Next", systemImage: "text.insert") }
             Button { player.addToQueue(tracks) } label: { Label("Add to Queue", systemImage: "text.append") }
 
@@ -443,12 +448,11 @@ private struct DownloadedGroupContextMenu: ViewModifier {
                 .disabled(downloads.isBusy(group.item))
             }
 
-            if group.isExplicit {
-                Divider()
-                Button(role: .destructive) { downloads.remove(group.item) } label: {
-                    Label("Remove Download", systemImage: "trash")
-                }
+            Divider()
+            Button(role: .destructive) { downloads.remove(group.item) } label: {
+                Label("Remove Download", systemImage: "trash")
             }
+            .disabled(downloads.isBusy(group.item))
         }
     }
 
@@ -460,6 +464,10 @@ private struct DownloadedGroupContextMenu: ViewModifier {
             // order the artist's own Play button starts.
             return downloads.downloadedAlbums(forArtistID: group.id)
                 .flatMap { downloads.tracks(in: $0).inAlbumOrder() }
+        }
+        if group.kind == .playlist {
+            // The user's own order, not the album's.
+            return downloads.tracks(for: group.item)
         }
         return downloads.tracks(for: group.item).inAlbumOrder()
     }

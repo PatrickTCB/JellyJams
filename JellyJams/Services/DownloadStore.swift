@@ -25,11 +25,15 @@ private let downloadLog = Logger(
 ///
 /// Each file keeps the set of *source ids* that required it — the album,
 /// playlist or genre id it arrived with, plus its own id when it was downloaded
-/// as a song. Removing a collection unlinks it from every song it required, and
-/// songs then requiring nothing are deleted in a sweep over the entries. That
-/// reference counting is what keeps "download album, then a playlist overlapping
-/// it" from duplicating bytes or orphaning files. Removing a *song* is different
-/// and deliberate: the file goes, and with it its place in every playlist.
+/// as a song. That reference counting is what keeps "download album, then a
+/// playlist overlapping it" from duplicating bytes, and what ``isDownloaded``
+/// answers from. Removal deliberately ignores it: removing a download deletes
+/// the songs it stands for, whatever else required them. The collections left
+/// behind keep listing and report what they still have — a playlist keeps its
+/// membership record, and its offline detail warns it is incomplete until its
+/// refresh re-pulls the missing songs — so "Remove Download" behaves the same
+/// whether the item was downloaded itself or surfaced through another
+/// collection.
 ///
 /// Album artwork is downloaded alongside tracks under ``artworkPair(for:)``: the
 /// album's id with the *album's* image tag, so one file serves every song of the
@@ -479,6 +483,16 @@ final class DownloadStore: ObservableObject {
         return batches.contains { $0.id == id }
     }
 
+    /// Whether a downloaded playlist's songs are not all on disk: some were
+    /// removed after the membership was saved, or the record knows of more
+    /// songs than were ever filed. The offline playlist detail warns while
+    /// this is true; its refresh button is what re-pulls the missing songs.
+    func isPlaylistIncomplete(_ item: BaseItemDto) -> Bool {
+        guard let id = item.id, let record = playlists[id] else { return false }
+        let present = record.trackIDs.filter { entries[$0] != nil }.count
+        return present < record.trackIDs.count || present < (record.totalSongs ?? 0)
+    }
+
     /// Song counts across every running batch, or `nil` while nothing is
     /// downloading. Totals grow as collections resolve their track lists.
     var activeDownloadProgress: DownloadProgress? {
@@ -812,25 +826,23 @@ final class DownloadStore: ObservableObject {
         }
     }
 
-    /// Removes the download for `item`. A song deletes its file everywhere it
-    /// appeared. An artist removes every album downloaded for them; any other
-    /// collection unreferences every song it required, and songs requiring
-    /// nothing more are deleted in the sweep afterwards.
+    /// Removes the download for `item` by deleting the songs it stands for:
+    /// the song's own file, an artist's catalogue, a collection's songs.
+    /// Whatever else required those songs keeps listing and reports what it
+    /// still has — a playlist keeps its membership record and its detail
+    /// warns it is incomplete until its refresh re-pulls the missing songs —
+    /// so removal behaves the same whether the item was downloaded itself or
+    /// surfaced through another collection. A playlist additionally loses its
+    /// record and cover, since the membership was the download.
     func remove(_ item: BaseItemDto) {
         guard let id = item.id else { return }
-        switch item.itemType {
-        case .audio:
-            deleteSong(id)
-        case .musicArtist:
-            for album in downloadedAlbums(forArtistID: id) {
-                removeGroup(album.id, kind: .album)
-            }
-            deleteUnreferenced()
-            persist()
-        default:
-            removeGroup(id, kind: Self.groupKind(of: item) ?? .album)
-            deleteUnreferenced()
-            persist()
+        switch Self.groupKind(of: item) {
+        case nil:
+            deleteSongs([id])
+        case .playlist?:
+            deletePlaylist(id)
+        case let kind?:
+            deleteSongs(songsMatchingGroupID(id, kind: kind).compactMap(\.track.id))
         }
     }
 
@@ -1040,18 +1052,31 @@ final class DownloadStore: ObservableObject {
         }
     }
 
-    /// Removes a song's file, its artwork reference, and its place in every
-    /// downloaded playlist — deleting a song is a deliberate, global act.
-    private func deleteSong(_ id: String) {
-        guard let entry = entries[id] else { return }
-        try? FileManager.default.removeItem(at: directory.appending(path: entry.filename))
-        unreferenceArtwork(trackId: id)
-        entries[id] = nil
-        for (playlistID, record) in playlists where record.trackIDs.contains(id) {
-            var updated = record
-            updated.trackIDs.removeAll { $0 == id }
-            playlists[playlistID] = updated
+    /// Deletes many songs' files and entries in one sweep. A deleted song
+    /// keeps its place in any playlist's membership record: a record naming a
+    /// song with no file is the incompleteness the offline playlist detail
+    /// warns about, and the record's refresh is what fills it back in.
+    private func deleteSongs(_ ids: [String]) {
+        var deleted = false
+        for id in ids {
+            guard let entry = entries[id] else { continue }
+            try? FileManager.default.removeItem(at: directory.appending(path: entry.filename))
+            unreferenceArtwork(trackId: id)
+            entries[id] = nil
+            deleted = true
         }
+        guard deleted else { return }
+        deleteUnreferenced()
+        persist()
+    }
+
+    /// Deletes a downloaded playlist: the songs its membership required, then
+    /// the record and cover themselves.
+    private func deletePlaylist(_ id: String) {
+        guard let record = playlists[id] else { return }
+        deleteSongs(record.trackIDs)
+        unreferenceArtwork(holderID: id)
+        playlists[id] = nil
         deleteUnreferenced()
         persist()
     }
@@ -1062,24 +1087,6 @@ final class DownloadStore: ObservableObject {
         guard var entry = entries[trackId] else { return }
         entry.sources.remove(source)
         entries[trackId] = entry
-    }
-
-    /// Removes a group's reference from every song in it. A playlist also loses
-    /// its record and its cover reference.
-    private func removeGroup(_ id: String, kind: GroupKind) {
-        switch kind {
-        case .playlist:
-            guard let record = playlists[id] else { return }
-            for trackID in record.trackIDs {
-                unreference(trackID, source: id)
-            }
-            unreferenceArtwork(holderID: id)
-            playlists[id] = nil
-        case .album, .artist, .genre:
-            for trackID in songsMatchingGroupID(id, kind: kind).compactMap(\.track.id) {
-                unreference(trackID, source: id)
-            }
-        }
     }
 
     /// Drops a song's reference from every entry its cover could be filed
