@@ -629,4 +629,57 @@ extension Array where Element == BaseItemDto {
                 < ($1.parentIndexNumber ?? .max, $1.indexNumber ?? .max, $1.sortName ?? "")
         }
     }
+
+    /// Tracks ordered the way the server orders them for the same sort: the
+    /// field first, then `SortName` — the tiebreak every server-side sort's
+    /// raw value spells out. For track lists that are already on disk and
+    /// sorted where they are shown, like the Downloads songs list.
+    func sorted(by field: SortBy, order: SortOrder) -> [BaseItemDto] {
+        let ascending = order == .ascending
+        return sorted { lhs, rhs in
+            ascending ? Self.precedes(lhs, rhs, by: field) : Self.precedes(rhs, lhs, by: field)
+        }
+    }
+
+    /// One comparison for ``sorted(by:order:)``: the field's own order, with
+    /// `SortName` breaking ties the way every server-side sort's raw value
+    /// spells it. A field the track lacks counts as empty or oldest, so it
+    /// keeps its place whichever side it is on. `random` scrambles by id hash
+    /// instead: a stable shuffle that re-rolls each launch.
+    private static func precedes(_ lhs: BaseItemDto, _ rhs: BaseItemDto, by field: SortBy) -> Bool {
+        func tiebreak() -> Bool {
+            (lhs.sortName ?? lhs.name ?? "") < (rhs.sortName ?? rhs.name ?? "")
+        }
+        func compare<T: Comparable>(_ a: T, _ b: T) -> Bool {
+            a == b ? tiebreak() : a < b
+        }
+        switch field {
+        case .random:
+            return (lhs.id ?? "").hashValue < (rhs.id ?? "").hashValue
+        case .sortName:
+            return tiebreak()
+        case .artist:
+            return compare(lhs.artists?.first ?? "", rhs.artists?.first ?? "")
+        case .albumArtist:
+            return compare(lhs.albumArtist ?? "", rhs.albumArtist ?? "")
+        case .album:
+            return compare(lhs.album ?? "", rhs.album ?? "")
+        case .dateCreated:
+            return compare(lhs.dateCreated ?? .distantPast, rhs.dateCreated ?? .distantPast)
+        case .datePlayed:
+            return compare(lhs.userData?.lastPlayedDate ?? .distantPast, rhs.userData?.lastPlayedDate ?? .distantPast)
+        case .playCount:
+            return compare(lhs.userData?.playCount ?? 0, rhs.userData?.playCount ?? 0)
+        case .productionYear:
+            return compare(lhs.productionYear ?? 0, rhs.productionYear ?? 0)
+        case .communityRating:
+            return compare(lhs.communityRating ?? 0, rhs.communityRating ?? 0)
+        case .runtime:
+            return compare(lhs.runTimeTicks ?? 0, rhs.runTimeTicks ?? 0)
+        case .discAndTrack:
+            let lhsDisc = (lhs.parentIndexNumber ?? .max, lhs.indexNumber ?? .max)
+            let rhsDisc = (rhs.parentIndexNumber ?? .max, rhs.indexNumber ?? .max)
+            return lhsDisc == rhsDisc ? tiebreak() : lhsDisc < rhsDisc
+        }
+    }
 }

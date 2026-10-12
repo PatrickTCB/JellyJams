@@ -61,6 +61,12 @@ final class LibraryListTests: XCTestCase {
         XCTAssertEqual(LibraryList.playlists.defaultSortBy, .sortName)
         XCTAssertEqual(LibraryList.aiRadioPlaylists.defaultSortBy, .sortName)
     }
+
+    /// Favourite songs are the songs list narrowed by a filter, so they offer
+    /// the same sort fields.
+    func testFavouriteSongsOfferTheSameSortFieldsAsSongs() {
+        XCTAssertEqual(LibraryList.favouriteSongs.sortOptions, LibraryList.songs.sortOptions)
+    }
 }
 
 final class LibraryQueryTests: XCTestCase {

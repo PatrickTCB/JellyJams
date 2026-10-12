@@ -75,17 +75,16 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
 
     /// Sort fields offered in the list's toolbar menu. An empty array means the
     /// list has no sort field picker — either because the order is fixed
-    /// (playlists, favourite songs) or because only the direction is
-    /// adjustable (artists).
+    /// (playlists) or because only the direction is adjustable (artists).
     var sortOptions: [SortBy] {
         switch self {
         case .albums, .favouriteAlbums:
             [.albumArtist, .sortName, .dateCreated, .productionYear, .random]
-        case .songs:
+        case .songs, .favouriteSongs:
             [.artist, .sortName, .album, .albumArtist, .dateCreated, .datePlayed, .runtime, .random]
         case .favouriteArtists:
             [.sortName, .random]
-        case .artists, .playlists, .aiRadioPlaylists, .favouriteSongs, .favouritePlaylists:
+        case .artists, .playlists, .aiRadioPlaylists, .favouritePlaylists:
             []
         }
     }

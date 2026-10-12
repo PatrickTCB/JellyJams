@@ -167,6 +167,86 @@ final class SortByTests: XCTestCase {
     }
 }
 
+/// The local track sort the Downloads songs list applies. It has to order
+/// the way the server orders the same fields — the same menu choice must
+/// mean the same thing online and offline — and stay a real ordering even
+/// when tracks are missing the field.
+final class LocalSortTests: XCTestCase {
+    private func track(
+        _ name: String,
+        artist: String? = nil,
+        played: Date? = nil,
+        runtime: Int? = nil
+    ) -> BaseItemDto {
+        BaseItemDto(
+            artists: artist.map { [$0] },
+            id: name,
+            name: name,
+            runTimeTicks: runtime,
+            sortName: name,
+            type: .audio,
+            userData: played.map { UserItemDataDto(key: "k", lastPlayedDate: $0) }
+        )
+    }
+
+    func testNameSortsBothWays() {
+        let tracks = [track("Beta"), track("Alpha"), track("Gamma")]
+
+        XCTAssertEqual(tracks.sorted(by: .sortName, order: .ascending).map(\.displayName), ["Alpha", "Beta", "Gamma"])
+        XCTAssertEqual(tracks.sorted(by: .sortName, order: .descending).map(\.displayName), ["Gamma", "Beta", "Alpha"])
+    }
+
+    /// Every server-side sort breaks ties on SortName; the local one must too.
+    func testEqualFieldsFallBackToTheName() {
+        let tracks = [track("Zeta", artist: "A"), track("Alpha", artist: "A"), track("Mid", artist: "B")]
+
+        XCTAssertEqual(tracks.sorted(by: .artist, order: .ascending).map(\.displayName), ["Alpha", "Zeta", "Mid"])
+    }
+
+    /// A missing field must not decide the order by which side it landed on:
+    /// the pair has to flip cleanly when the direction flips.
+    func testAMissingFieldKeepsItsPlaceInBothDirections() {
+        let missing = track("Beta")
+        let present = track("Alpha", artist: "Zed")
+
+        XCTAssertEqual([missing, present].sorted(by: .artist, order: .ascending).map(\.displayName), ["Beta", "Alpha"])
+        XCTAssertEqual([missing, present].sorted(by: .artist, order: .descending).map(\.displayName), ["Alpha", "Beta"])
+    }
+
+    /// Never played is the extreme of not-recently-played: first in an
+    /// ascending order, last in a descending one.
+    func testDatePlayedCountsTheUnplayedAsTheOldest() {
+        let older = track("Older", played: Date(timeIntervalSince1970: 100))
+        let newer = track("Newer", played: Date(timeIntervalSince1970: 200))
+        let never = track("Never")
+
+        XCTAssertEqual(
+            [never, newer, older].sorted(by: .datePlayed, order: .ascending).map(\.displayName),
+            ["Never", "Older", "Newer"]
+        )
+        XCTAssertEqual(
+            [never, newer, older].sorted(by: .datePlayed, order: .descending).map(\.displayName),
+            ["Newer", "Older", "Never"]
+        )
+    }
+
+    func testRuntimeComparesTicks() {
+        let short = track("Short", runtime: Ticks.perSecond * 60)
+        let long = track("Long", runtime: Ticks.perSecond * 300)
+
+        XCTAssertEqual([long, short].sorted(by: .runtime, order: .ascending).map(\.displayName), ["Short", "Long"])
+    }
+
+    func testRandomKeepsTheSameOrderAcrossSorts() {
+        let tracks = (0..<20).map { track("Song \($0)") }
+        let once = tracks.sorted(by: .random, order: .ascending)
+        let twice = tracks.sorted(by: .random, order: .ascending)
+
+        XCTAssertEqual(once.map(\.displayName), twice.map(\.displayName))
+        XCTAssertEqual(Set(once.compactMap(\.id)), Set(tracks.compactMap(\.id)))
+    }
+}
+
 /// Cancellation is routine (a `.task(id:)` re-running, a search term changing)
 /// and must never reach the user as an error.
 final class ErrorClassificationTests: XCTestCase {

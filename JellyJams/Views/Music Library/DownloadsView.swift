@@ -12,6 +12,21 @@ import SwiftUI
 /// The Albums tab starts filtered to albums that are fully on disk — the filter
 /// menu in the toolbar shows the partial ones, and the choice is remembered in
 /// ``PreferencesStore/showsCompleteAlbumsOnly``.
+/// How the Downloads songs list can be ordered: the manifest's own order —
+/// the order files arrived in, newest first — or any field the saved tracks
+/// carry, sorted the way the server would sort it.
+enum DownloadSongSort: SortOption {
+    case recentlyDownloaded
+    case field(SortBy)
+
+    var displayName: String {
+        switch self {
+        case .recentlyDownloaded: "Recently Downloaded"
+        case .field(let field): field.displayName
+        }
+    }
+}
+
 struct DownloadsView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case albums, artists, playlists, songs
@@ -39,13 +54,32 @@ struct DownloadsView: View {
     /// The downloaded songs the user has selected (rows are keyed by track
     /// id): click to select, double-click to play, shift-arrow to extend.
     @State private var songSelection: Set<String> = []
+    @State private var songSort: DownloadSongSort = .field(.artist)
+    @State private var songSortOrder: SortOrder = .ascending
 
     /// The selected songs in list order — what selection actions act on.
     private var selectedSongs: [BaseItemDto] {
         TrackEntry.rows(songs).filter { songSelection.contains($0.id) }.map(\.item)
     }
 
-    private var songs: [BaseItemDto] { downloads.downloadedSongs() }
+    /// The same fields the Library songs list sorts by, led by the section's
+    /// own recency. The list opens on Artist, the way Library and Favourites
+    /// songs do.
+    private let songSortOptions: [DownloadSongSort] = [
+        .recentlyDownloaded,
+        .field(.artist), .field(.sortName), .field(.album), .field(.albumArtist),
+        .field(.dateCreated), .field(.datePlayed), .field(.runtime), .field(.random),
+    ]
+
+    private var songs: [BaseItemDto] {
+        switch songSort {
+        case .recentlyDownloaded:
+            let newestFirst = downloads.downloadedSongs()
+            return songSortOrder == .descending ? newestFirst : Array(newestFirst.reversed())
+        case .field(let field):
+            return downloads.downloadedSongs().sorted(by: field, order: songSortOrder)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,6 +130,11 @@ struct DownloadsView: View {
             }
             if tab == .songs, !selectedSongs.isEmpty {
                 ToolbarItem { TrackSelectionMenu(tracks: selectedSongs) }
+            }
+            if tab == .songs {
+                ToolbarItem(placement: .automatic) {
+                    SortMenu(sortBy: $songSort, sortOrder: $songSortOrder, options: songSortOptions)
+                }
             }
         }
         .alert("Delete all downloaded music?", isPresented: $confirmingDeleteAll) {
