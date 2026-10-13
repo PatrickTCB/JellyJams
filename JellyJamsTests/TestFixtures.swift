@@ -39,14 +39,16 @@ enum TestFixtures {
         )
     }
 
-    /// A client whose requests are served by ``URLProtocolStub``.
-    static func stubbedClient() -> JellyfinService {
+    /// A client whose requests are served by ``URLProtocolStub``. Pass a
+    /// distinctive `token` to assert it never reaches somewhere it must not —
+    /// the manifest, say.
+    static func stubbedClient(token: String = "token") -> JellyfinService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [URLProtocolStub.self]
         return JellyfinService(
             baseURL: URL(string: "https://example.com/jellyfin")!,
             deviceInfo: deviceInfo,
-            credentials: ServerCredentials(userId: "user-id", token: "token"),
+            credentials: ServerCredentials(userId: "user-id", token: token),
             sessionConfiguration: configuration
         )
     }

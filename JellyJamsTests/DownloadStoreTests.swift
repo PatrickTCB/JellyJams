@@ -1202,4 +1202,264 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.downloadedPlaylists().count, playlists.count)
         XCTAssertNotNil(store.localURL(forItemId: "a1"))
     }
+
+    // MARK: - Background transfers: pending records and orphan adoption
+
+    /// Writes a manifest as a process that died mid-transfer would have left
+    /// it: `pendingTransfers` seeded from real values, so a test never
+    /// hand-spells the encoder's shape.
+    private func seedManifest(
+        in directory: URL,
+        tracks: String = "{}",
+        pendingTransfers: [String: DownloadStore.PendingTransfer] = [:]
+    ) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let pending = String(data: try JSONEncoder().encode(pendingTransfers), encoding: .utf8)!
+        let manifest = #"""
+        {"version":4,"tracks":\#(tracks),"playlists":{},"artwork":{},"pendingTransfers":\#(pending),"activeBatches":{}}
+        """#
+        try Data(manifest.utf8).write(to: directory.appending(path: "manifest.json"))
+    }
+
+    /// A delivered file parked under a temporary name of ours — the shape the
+    /// session's delegate hands an adoption.
+    private func parkedFile(_ contents: String = "audio") throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "JellyJams-orphan-\(UUID().uuidString)")
+        try Data(contents.utf8).write(to: url)
+        return url
+    }
+
+    /// The record an adoption depends on is on disk while the transfer is in
+    /// flight — keyed by a hash of the request URL, because stream URLs carry
+    /// the access token and the manifest must not.
+    func testAnInFlightTransferIsRecordedWithoutItsTokenOnDisk() async throws {
+        let client = TestFixtures.stubbedClient(token: "s3cret-token")
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data("audio".utf8))
+        }
+        URLProtocolStub.responseDelay = { _ in 0.3 }
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: client)
+
+        let remote = try client.streamURL(itemId: "a", mediaSourceId: nil)
+        XCTAssertTrue(remote.absoluteString.contains("s3cret-token"), "The stream URL carries the token")
+        let key = DownloadStore.pendingKey(for: remote)
+
+        store.download(TestFixtures.item(id: "a"))
+        var text = ""
+        for _ in 0 ..< 200 {
+            let data = (try? Data(contentsOf: directory.appending(path: "manifest.json"))) ?? Data()
+            text = String(data: data, encoding: .utf8) ?? ""
+            if text.contains(key) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(text.contains(key), "The in-flight transfer is recorded under its URL hash")
+        XCTAssertFalse(text.contains("s3cret-token"), "The token never reaches the disk")
+
+        try await waitForBatch(store, id: "a")
+        XCTAssertNotNil(store.entries["a"])
+        let after = String(
+            data: try Data(contentsOf: directory.appending(path: "manifest.json")),
+            encoding: .utf8
+        ) ?? ""
+        XCTAssertFalse(after.contains(key), "The record is consumed once the file lands")
+        XCTAssertFalse(after.contains("s3cret-token"), "Neither does the finished manifest carry it")
+    }
+
+    /// A completion the system kept across a process death is filed exactly
+    /// the way the transfer would have filed itself: entry, file under its
+    /// recorded name, and the pending record consumed and persisted.
+    func testAnOrphanedAudioTransferIsFiledFromItsPendingRecord() throws {
+        let directory = newTestDirectory()
+        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
+        try seedManifest(in: directory, pendingTransfers: [
+            DownloadStore.pendingKey(for: remote): .audio(
+                track: TestFixtures.item(id: "t1"),
+                filename: "t1.mp3",
+                source: "album",
+                batchId: "album",
+                albumSongCount: 2,
+                artistKeys: ["Artist"]
+            ),
+        ])
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let parked = try parkedFile()
+        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+
+        let entry = try XCTUnwrap(store.entries["t1"], "The kept file is filed as the song it was for")
+        XCTAssertEqual(entry.filename, "t1.mp3")
+        XCTAssertEqual(entry.sources, ["album"])
+        XCTAssertEqual(entry.albumSongCount, 2)
+        XCTAssertEqual(entry.artistKeys, ["Artist"])
+        XCTAssertEqual(
+            try? Data(contentsOf: directory.appending(path: "t1.mp3")),
+            Data("audio".utf8),
+            "The file is filed under its recorded name"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: parked.path), "The parked copy is consumed")
+
+        let reopened = DownloadStore(directory: directory, session: try stubbedSession())
+        XCTAssertNotNil(reopened.entries["t1"], "The adoption survives a relaunch")
+        let text = String(
+            data: try Data(contentsOf: directory.appending(path: "manifest.json")),
+            encoding: .utf8
+        ) ?? ""
+        XCTAssertFalse(text.contains(DownloadStore.pendingKey(for: remote)), "The pending record is consumed")
+    }
+
+    /// A cover the system finished across a death is filed the same way, under
+    /// the owner-plus-tag key the views resolve.
+    func testAnOrphanedArtworkTransferIsFiledFromItsPendingRecord() throws {
+        let directory = newTestDirectory()
+        let remote = URL(string: "https://example.com/jellyfin/Items/al1/Images/Primary")!
+        try seedManifest(in: directory, pendingTransfers: [
+            DownloadStore.pendingKey(for: remote): .artwork(
+                ownerID: "al1",
+                imageTag: "cover",
+                filename: "al1-cover.jpg",
+                holderID: "t1"
+            ),
+        ])
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let parked = try parkedFile("jpeg-bytes")
+        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+
+        let entry = try XCTUnwrap(store.artworkEntries["al1|cover"])
+        XCTAssertEqual(entry.requiredBy, ["t1"])
+        XCTAssertEqual(
+            try? Data(contentsOf: directory.appending(path: "Artwork").appending(path: "al1-cover.jpg")),
+            Data("jpeg-bytes".utf8)
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: parked.path))
+    }
+
+    /// The pending record is the only authority for a delivery: a file nobody
+    /// recorded, one whose record named a different transfer, and one whose
+    /// transfer failed HTTP are all deleted rather than filed — an error page
+    /// must not become a song.
+    func testOrphanedTransfersWithoutAUsableRecordAreDiscarded() throws {
+        let directory = newTestDirectory()
+        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
+        try seedManifest(in: directory, pendingTransfers: [
+            DownloadStore.pendingKey(for: remote): .audio(
+                track: TestFixtures.item(id: "t1"),
+                filename: "t1.mp3",
+                source: "album",
+                batchId: "album",
+                albumSongCount: nil,
+                artistKeys: []
+            ),
+        ])
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let unknown = try parkedFile()
+        store.adoptOrphanedTransfer(
+            requestURL: URL(string: "https://example.com/jellyfin/Audio/other/stream")!,
+            file: unknown,
+            statusCode: 200
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: unknown.path), "An unrecorded file is deleted")
+
+        let nameless = try parkedFile()
+        store.adoptOrphanedTransfer(requestURL: nil, file: nameless, statusCode: nil)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: nameless.path), "A delivery with no URL cannot match a record")
+
+        XCTAssertTrue(store.entries.isEmpty, "Neither delivery filed anything")
+
+        let failed = try parkedFile("<html>500</html>")
+        store.adoptOrphanedTransfer(requestURL: remote, file: failed, statusCode: 500)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: failed.path), "A failed transfer's file is deleted")
+        XCTAssertTrue(store.entries.isEmpty, "An error page is not filed as audio")
+
+        let reopened = DownloadStore(directory: directory, session: try stubbedSession())
+        XCTAssertTrue(reopened.entries.isEmpty)
+        let text = String(
+            data: try Data(contentsOf: directory.appending(path: "manifest.json")),
+            encoding: .utf8
+        ) ?? ""
+        XCTAssertFalse(
+            text.contains(DownloadStore.pendingKey(for: remote)),
+            "The failed record does not linger to catch a later delivery"
+        )
+    }
+
+    /// A resumed batch can re-fetch a song the system also kept: the entry
+    /// that already exists wins and the kept duplicate is deleted, rather
+    /// than the adoption overwriting the fresher file.
+    func testAnOrphanedSongAResumeAlreadyRefetchedIsDiscarded() throws {
+        let directory = newTestDirectory()
+        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
+        let tracks = #"""
+        {"t1":{"track":{"Id":"t1","Name":"t1","Type":"Audio"},"filename":"t1.mp3","order":0,"requiredBy":["album"],"albumSongCount":1,"artistKeys":[]}}
+        """#
+        try seedManifest(in: directory, tracks: tracks, pendingTransfers: [
+            DownloadStore.pendingKey(for: remote): .audio(
+                track: TestFixtures.item(id: "t1"),
+                filename: "t1.mp3",
+                source: "album",
+                batchId: "album",
+                albumSongCount: 1,
+                artistKeys: []
+            ),
+        ])
+        try Data("already-here".utf8).write(to: directory.appending(path: "t1.mp3"))
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let parked = try parkedFile("kept-duplicate")
+        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: parked.path), "The kept duplicate is deleted")
+        XCTAssertEqual(
+            try? Data(contentsOf: directory.appending(path: "t1.mp3")),
+            Data("already-here".utf8),
+            "The refetched file stays as it was"
+        )
+        XCTAssertEqual(store.entries.count, 1)
+    }
+
+    /// The quarantine message's promise: the audio an unreadable manifest
+    /// orphaned is still on disk, and "Delete All" — which wipes by directory
+    /// enumeration, not by record — reclaims it along with the set-aside
+    /// manifest itself.
+    func testRemoveAllReclaimsAudioAQuarantinedManifestOrphaned() throws {
+        let directory = newTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("not json {{{".utf8).write(to: directory.appending(path: "manifest.json"))
+        try Data("audio".utf8).write(to: directory.appending(path: "orphaned-song.mp3"))
+        try FileManager.default.createDirectory(at: directory.appending(path: "Artwork"), withIntermediateDirectories: true)
+        try Data("jpeg".utf8).write(to: directory.appending(path: "Artwork").appending(path: "orphaned-cover.jpg"))
+
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        XCTAssertNotNil(store.errorMessage, "The unreadable manifest is quarantined")
+        XCTAssertTrue(store.entries.isEmpty)
+
+        store.removeAll()
+
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        XCTAssertFalse(files.contains("orphaned-song.mp3"), "Audio no entry knows about is reclaimed too")
+        XCTAssertFalse(files.contains("manifest.corrupt.json"), "The user chose to delete everything")
+        let artwork = (try? FileManager.default.contentsOfDirectory(atPath: directory.appending(path: "Artwork").path)) ?? []
+        XCTAssertEqual(artwork, [])
+        XCTAssertTrue(store.entries.isEmpty)
+    }
+
+    #if os(iOS)
+    /// The configuration the background transfers are promised to run under:
+    /// proceeds right away rather than at the system's discretion, and wakes
+    /// the app when the system finishes a transfer it kept across a death.
+    func testTheBackgroundSessionIsConfiguredToSurviveTheApp() {
+        let session = DownloadSession(
+            backgroundIdentifier: "net.aseriesoftubes.JellyJamsTests.\(UUID().uuidString)"
+        )
+        XCTAssertTrue(
+            session.configuration.sessionSendsLaunchEvents,
+            "A transfer finished after a death wakes the app to adopt it"
+        )
+        XCTAssertFalse(session.configuration.isDiscretionary, "Downloads proceed right away")
+    }
+    #endif
 }
