@@ -5,6 +5,10 @@ import JellyfinAPI
 enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
     case sortName = "SortName"
     case albumArtist = "AlbumArtist,SortName"
+    /// Album-artist ordering that keeps each album's tracks together, in
+    /// track order. Offered by the Downloads songs list only; the
+    /// server-backed Library lists don't include it.
+    case albumArtistTrackOrder = "AlbumArtist,Album,ParentIndexNumber,IndexNumber,SortName"
     case album = "Album,SortName"
     case artist = "Artist,SortName"
     case dateCreated = "DateCreated,SortName"
@@ -23,6 +27,7 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .sortName: [.sortName]
         case .albumArtist: [.albumArtist, .sortName]
+        case .albumArtistTrackOrder: [.albumArtist, .album, .parentIndexNumber, .indexNumber, .sortName]
         case .album: [.album, .sortName]
         case .artist: [.artist, .sortName]
         case .dateCreated: [.dateCreated, .sortName]
@@ -40,6 +45,7 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
         switch self {
         case .sortName: return "Name"
         case .albumArtist: return "Album Artist"
+        case .albumArtistTrackOrder: return "Album Artist (Track Order)"
         case .album: return "Album"
         case .artist: return "Artist"
         case .dateCreated: return "Date Added"

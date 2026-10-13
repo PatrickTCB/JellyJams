@@ -1,15 +1,24 @@
 import SwiftUI
 
+/// What a ``SortMenu`` offers: a picker-taggable value that names itself.
+/// `SortBy` covers every server-side sort; lists that sort locally conform
+/// with their own cases, such as the Downloads songs list's recency.
+protocol SortOption: Hashable {
+    var displayName: String { get }
+}
+
+extension SortBy: SortOption {}
+
 /// A toolbar sort control: pick a field and toggle ascending/descending.
-struct SortMenu: View {
-    @Binding var sortBy: SortBy
+struct SortMenu<Option: SortOption>: View {
+    @Binding var sortBy: Option
     @Binding var sortOrder: SortOrder
-    var options: [SortBy]
+    var options: [Option]
 
     var body: some View {
         Menu {
             Picker("Sort By", selection: $sortBy) {
-                ForEach(options) { option in
+                ForEach(options, id: \.self) { option in
                     Text(option.displayName).tag(option)
                 }
             }

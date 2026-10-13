@@ -72,13 +72,13 @@ final class CarPlayController {
             ]),
             CPListSection(items: [
                 navItem("Albums", systemImage: "record.circle") { [weak self] in
-                    self?.pushDownloadedList(type: .musicAlbum, title: "Albums")
+                    self?.pushDownloadedGroups(kind: .album, title: "Albums")
                 },
                 navItem("Artists", systemImage: "music.mic") { [weak self] in
-                    self?.pushDownloadedArtists()
+                    self?.pushDownloadedGroups(kind: .artist, title: "Artists")
                 },
                 navItem("Playlists", systemImage: "music.note.list") { [weak self] in
-                    self?.pushDownloadedList(type: .playlist, title: "Playlists")
+                    self?.pushDownloadedGroups(kind: .playlist, title: "Playlists")
                 },
             ]),
         ])
@@ -250,13 +250,41 @@ final class CarPlayController {
 
     // MARK: - Downloads
 
-    private func pushDownloadedList(type: ItemType, title: String) {
+    /// A downloaded group row. Everything about it comes from the manifest and
+    /// the saved artwork file: browsing downloads in CarPlay issues no request
+    /// either, so a missing cover stays a missing cover rather than a fetch.
+    private func downloadedItem(_ group: DownloadStore.DownloadGroup, onTap: @escaping () -> Void) -> CPListItem {
+        let listItem = CPListItem(text: group.title, detailText: downloadedDetail(for: group))
+        listItem.accessoryType = .disclosureIndicator
+        listItem.handler = { _, completion in
+            onTap()
+            completion()
+        }
+        if let url = downloads?.localArtworkURL(for: group), let image = CarPlayArtwork.image(fileAt: url) {
+            listItem.setImage(image)
+        }
+        return listItem
+    }
+
+    private func downloadedDetail(for group: DownloadStore.DownloadGroup) -> String? {
+        switch group.kind {
+        case .artist:
+            return Format.albumCount(downloads?.downloadedAlbums(forArtistID: group.id).count ?? 0)
+        case .album, .playlist, .genre:
+            guard let total = group.totalSongs, total > group.downloadedSongs else {
+                return Format.songCount(group.downloadedSongs)
+            }
+            return "\(Format.songCount(group.downloadedSongs)) of \(total)"
+        }
+    }
+
+    private func pushDownloadedGroups(kind: DownloadStore.GroupKind, title: String) {
         guard let downloads else { return }
-        let items = downloads.downloadedCollections(ofType: type)
+        let groups = downloads.groups(kind: kind)
         let template = CPListTemplate(title: title, sections: [
-            CPListSection(items: items.map { item in
-                self.collectionItem(item) {
-                    self.pushDownloadedTracks(for: item)
+            CPListSection(items: groups.map { group in
+                self.downloadedItem(group) {
+                    self.pushDownloadedGroup(group)
                 }
             }),
         ])
@@ -264,26 +292,21 @@ final class CarPlayController {
         interfaceController?.pushTemplate(template, animated: true, completion: nil)
     }
 
-    private func pushDownloadedArtists() {
-        guard let downloads else { return }
-        let artists = downloads.downloadedArtists()
-        let template = CPListTemplate(title: "Artists", sections: [
-            CPListSection(items: artists.map { artist in
-                self.collectionItem(artist) {
-                    self.pushDownloadedAlbums(for: artist)
-                }
-            }),
-        ])
-        template.emptyViewTitleVariants = ["Nothing downloaded"]
-        interfaceController?.pushTemplate(template, animated: true, completion: nil)
+    private func pushDownloadedGroup(_ group: DownloadStore.DownloadGroup) {
+        switch group.kind {
+        case .artist:
+            pushDownloadedAlbums(for: group)
+        case .album, .playlist, .genre:
+            pushDownloadedTracks(for: group)
+        }
     }
 
-    private func pushDownloadedAlbums(for artist: BaseItemDto) {
+    private func pushDownloadedAlbums(for artist: DownloadStore.DownloadGroup) {
         guard let downloads else { return }
-        let albums = downloads.downloadedAlbums(forArtistId: artist.id ?? "")
-        let template = CPListTemplate(title: artist.displayName, sections: [
+        let albums = downloads.downloadedAlbums(forArtistID: artist.id)
+        let template = CPListTemplate(title: artist.title, sections: [
             CPListSection(items: albums.map { album in
-                self.collectionItem(album) {
+                self.downloadedItem(album) {
                     self.pushDownloadedTracks(for: album)
                 }
             }),
@@ -292,10 +315,10 @@ final class CarPlayController {
         interfaceController?.pushTemplate(template, animated: true, completion: nil)
     }
 
-    private func pushDownloadedTracks(for item: BaseItemDto) {
+    private func pushDownloadedTracks(for group: DownloadStore.DownloadGroup) {
         guard let downloads else { return }
-        let tracks = downloads.tracks(forItemId: item.id ?? "")
-        let template = CPListTemplate(title: item.displayName, sections: [
+        let tracks = downloads.tracks(in: group)
+        let template = CPListTemplate(title: group.title, sections: [
             CPListSection(items: trackItems(tracks)),
         ])
         template.emptyViewTitleVariants = ["No songs"]
@@ -349,8 +372,17 @@ final class CarPlayController {
     }
 }
 
-/// Loads remote artwork for CarPlay rows, reusing the app's memory cache.
+/// Loads artwork for CarPlay rows, reusing the app's memory cache.
 enum CarPlayArtwork {
+    /// A saved artwork file, for rows that must not ask the server — a
+    /// downloaded group's cover is on disk or absent.
+    static func image(fileAt url: URL) -> UIImage? {
+        if let cached = ImageCache.shared.image(for: url) { return cached }
+        guard let image = UIImage(contentsOfFile: url.path) else { return nil }
+        ImageCache.shared.set(image, for: url)
+        return image
+    }
+
     static func image(from url: URL) async -> UIImage? {
         if let cached = ImageCache.shared.image(for: url) { return cached }
         do {

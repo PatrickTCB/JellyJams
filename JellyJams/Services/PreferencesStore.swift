@@ -40,6 +40,7 @@ struct DefaultPlaybackSetting: Codable, Equatable, Sendable {
 final class PreferencesStore: ObservableObject {
     private enum Key {
         static let showsSimilarItems = "showsSimilarItems"
+        static let showsCompleteAlbumsOnly = "showsCompleteAlbumsOnly"
         static let aiRadioEnabled = "aiRadioEnabled"
         static let aiRadioSuffix = "aiRadioSuffix"
         static let defaultPlayback = "defaultPlayback"
@@ -57,6 +58,17 @@ final class PreferencesStore: ObservableObject {
     /// quiet gets exactly that.
     @Published var showsSimilarItems: Bool {
         didSet { defaults.set(showsSimilarItems, forKey: Key.showsSimilarItems) }
+    }
+
+    /// Whether the Downloads albums list shows only albums whose every song is
+    /// on disk.
+    ///
+    /// On by default: the section is where you go for what you can actually
+    /// listen to, so albums that surfaced from one borrowed song shouldn't
+    /// crowd it. Switching it off shows those partial albums too, which is how
+    /// you find an album to finish downloading.
+    @Published var showsCompleteAlbumsOnly: Bool {
+        didSet { defaults.set(showsCompleteAlbumsOnly, forKey: Key.showsCompleteAlbumsOnly) }
     }
 
     /// Whether playlists AudioMuse-AI generated are gathered into their own
@@ -96,6 +108,7 @@ final class PreferencesStore: ObservableObject {
         // `object(forKey:)` rather than `bool(forKey:)`: the latter reports
         // false for an absent key, which would ship the feature switched off.
         showsSimilarItems = defaults.object(forKey: Key.showsSimilarItems) as? Bool ?? true
+        showsCompleteAlbumsOnly = defaults.object(forKey: Key.showsCompleteAlbumsOnly) as? Bool ?? true
         aiRadioEnabled = defaults.object(forKey: Key.aiRadioEnabled) as? Bool ?? false
         aiRadioSuffix = defaults.string(forKey: Key.aiRadioSuffix) ?? Self.defaultAIRadioSuffix
         defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {

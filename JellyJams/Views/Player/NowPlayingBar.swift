@@ -32,11 +32,8 @@ struct NowPlayingBar: View {
 
     var body: some View {
         if let item = player.currentItem {
-            var localArtworkURL: URL? {
-                guard session.serverReachable == false else { return nil }
-                guard downloads.isDownloaded(item) else { return nil }
-                return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
-            }
+            // A downloaded track's cover comes from disk, never from the server.
+            let localArtworkURL = downloads.localArtworkURL(for: item)
             VStack(spacing: 0) {
                 if isDocked { Divider() }
                 HStack(spacing: isInline ? 8 : 12) {

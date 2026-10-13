@@ -1,140 +1,112 @@
 import SwiftUI
 
-/// A downloaded collection opened from the Downloads section: the tracks
-/// saved for it, entirely from the manifest — no server involved. Playback
-/// resolves each track to its saved file via ``DownloadStore/localURL(forItemId:)``.
+/// A downloaded collection opened from the Downloads section: the songs saved
+/// for it, entirely from the manifest — no server involved, and no artwork
+/// request either. Playback resolves each track to its saved file via
+/// ``DownloadStore/localURL(forItemId:)``.
 ///
-/// Pushed as its own value type (not the bare `BaseItemDto`) so it can share
-/// a navigation stack with library destinations without both claiming to
-/// resolve `BaseItemDto` pushes.
+/// Albums and playlists render the way their Library pages do: a header built
+/// from the group's own metadata over a list of the songs on disk. Playlists
+/// keep their saved membership order; albums are disc/track sorted by
+/// ``TrackListDetail``. A downloaded artist renders the way the Library artist
+/// page does — see ``DownloadedArtistDetail``.
+///
+/// Pushed as its own value type (not the bare `BaseItemDto`) so it can share a
+/// navigation stack with library destinations without both claiming to resolve
+/// `BaseItemDto` pushes.
 struct DownloadedCollectionDetail: View {
+    let group: DownloadStore.DownloadGroup
+
+    var body: some View {
+        TrackListDetail(
+            headerItem: group.item,
+            subtitle: group.item.artistNameForGroup,
+            showArtworkInRows: group.kind == .playlist,
+            downloaded: true
+        )
+        .downloadsBrowsing()
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+}
+
+/// Navigation value for a downloaded group. Distinct from `BaseItemDto` so
+/// ``ItemDetailRouter`` doesn't claim pushes that should open the offline detail
+/// instead, and carries the kind because albums, artists and playlists can share
+/// an id space.
+struct DownloadedGroupRef: Hashable {
+    let id: String
+    let kind: DownloadStore.GroupKind
+    let title: String
+
+    init(_ group: DownloadStore.DownloadGroup) {
+        id = group.id
+        kind = group.kind
+        title = group.title
+    }
+}
+
+/// A downloaded artist opened from the Downloads section: the same layout the
+/// Library artist page shows — a circular header over an adaptive grid of
+/// their albums — built entirely from the manifest, with no server involved.
+/// The header's cover is one of the artist's albums' (an artist has no saved
+/// image of their own), its Play and Shuffle buttons start the songs on disk
+/// with playback resolving each to its saved file, and each album opens the
+/// same offline album detail a downloaded album does.
+struct DownloadedArtistDetail: View {
+    let artist: DownloadStore.DownloadGroup
+
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var player: PlayerController
-    let collection: BaseItemDto
-    /// The tracks the user has selected (rows are keyed by track id): click
-    /// to select, double-click to play, shift-arrow to extend.
-    @State private var selection: Set<String> = []
+
+    private var albums: [DownloadStore.DownloadGroup] {
+        downloads.downloadedAlbums(forArtistID: artist.id)
+    }
+
+    /// The artist's songs on disk, album by album and each album in the order
+    /// its detail lists — what the header's Play and Shuffle buttons start.
+    private var songs: [BaseItemDto] {
+        albums.flatMap { downloads.tracks(in: $0).inAlbumOrder() }
+    }
 
     var body: some View {
-        if collection.type == .musicAlbum {
-            TrackListDetail(
-                headerItem: collection,
-                subtitle: collection.subtitleAlbumArtist,
-                showsGenres: false,
-                showsSimilarAlbums: false,
-                downloaded: true
-            )
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-        } else if collection.type == .playlist {
-            TrackListDetail(headerItem: collection, showArtworkInRows: true)
-        } else {
-            var tracks: [BaseItemDto] {
-                downloads.tracks(forItemId: collection.id ?? "")
-            }
-            /// The selected tracks in list order — what selection actions
-            /// act on.
-            var selectedTracks: [BaseItemDto] {
-                TrackEntry.rows(tracks).filter { selection.contains($0.id) }.map(\.item)
-            }
-            // Resolved once; naming the computed properties inside the
-            // `ForEach` would re-derive them per row.
-            let items = tracks
-            let entries = TrackEntry.rows(items)
-            let selected = selectedTracks
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                CollectionHeader(
+                    item: artist.item,
+                    subtitle: Format.albumAndSongCount(albums.count, songs.count),
+                    isCircular: true,
+                    localArtworkURL: downloads.localArtworkURL(for: artist),
+                    canPlay: !songs.isEmpty,
+                    onPlay: { player.play(songs) },
+                    onShuffle: { player.play(songs, shuffled: true) }
+                )
 
-            List(selection: $selection) {
-                Section {
-                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                        TrackRow(track: entry.item, selectedTracks: selection.contains(entry.id) ? selected : []) {
-                            player.play(items, startAt: index)
+                if !albums.isEmpty {
+                    Text("Albums")
+                        .font(.title2.bold())
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 20) {
+                        ForEach(albums) { album in
+                            NavigationLink(value: DownloadedGroupRef(album)) {
+                                DownloadedGroupCell(group: album)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
-            .listStyle(.plain)
-            .shiftArrowSelection($selection, ids: tracks.compactMap(\.id))
-            .onKeyPress(.escape) {
-                selection = []
-                return .handled
-            }
-            .focusable()
-            .toolbar {
-                if !selectedTracks.isEmpty {
-                    ToolbarItem { TrackSelectionMenu(tracks: selectedTracks) }
-                }
-            }
-            .overlay {
-                if tracks.isEmpty {
-                    ContentUnavailableView("No songs", systemImage: "music.note")
-                }
-            }
-            .navigationTitle(collection.displayName)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
+            .padding()
         }
-    }
-}
-
-/// Navigation value for a downloaded collection. Distinct from `BaseItemDto`
-/// so ``ItemDetailRouter`` doesn't claim pushes that should open the offline
-/// detail instead.
-struct DownloadedCollectionRef: Hashable {
-    let id: String
-    let name: String
-    let isArtist: Bool
-
-    init?(_ item: BaseItemDto) {
-        guard let id = item.id else { return nil }
-        self.id = id
-        self.name = item.displayName
-        self.isArtist = item.itemType == .musicArtist
-    }
-}
-
-/// A downloaded artist opened from the Downloads section: their downloaded
-/// albums, entirely from the manifest — no server involved. Each album opens
-/// the same offline album detail a downloaded album does.
-struct DownloadedArtistDetail: View {
-    let artist: BaseItemDto
-
-    @EnvironmentObject private var downloads: DownloadStore
-
-    private var albums: [BaseItemDto] { downloads.downloadedAlbums(forArtistId: artist.id ?? "") }
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(albums) { album in
-                    if let ref = DownloadedCollectionRef(album) {
-                        NavigationLink(value: ref) {
-                            row(for: album)
-                        }
-                    } else {
-                        row(for: album)
-                    }
-                }
-            } header: {
-                Text(Format.albumCount(albums.count))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .listStyle(.plain)
+        .downloadsBrowsing()
         .overlay {
             if albums.isEmpty {
                 ContentUnavailableView("No downloaded albums", systemImage: "square.stack")
             }
         }
-        .navigationTitle(artist.displayName)
+        .navigationTitle(artist.title)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-    }
-
-    private func row(for album: BaseItemDto) -> some View {
-        ItemRow(item: album)
     }
 }

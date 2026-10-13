@@ -41,6 +41,21 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "showsSimilarItems") as? Bool, true)
     }
 
+    // MARK: - Downloads filter
+
+    /// On by default: the Downloads album list starts filtered to what is fully
+    /// on disk, and a preference that read as off before anyone touched it would
+    /// ship the filter already switched off.
+    func testCompleteAlbumsFilterIsOnBeforeTheUserHasChosen() {
+        XCTAssertTrue(PreferencesStore(defaults: defaults).showsCompleteAlbumsOnly)
+    }
+
+    func testShowingPartialAlbumsSurvivesRelaunch() {
+        PreferencesStore(defaults: defaults).showsCompleteAlbumsOnly = false
+
+        XCTAssertFalse(PreferencesStore(defaults: defaults).showsCompleteAlbumsOnly)
+    }
+
     // MARK: - AI Radio
 
     /// Off until asked for: switching it on hides playlists from the library,

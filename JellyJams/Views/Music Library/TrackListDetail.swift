@@ -39,17 +39,14 @@ struct TrackListDetail: View {
     
     private var tracks: [BaseItemDto] {
         let raw = downloaded
-            ? downloads.tracks(forItemId: headerItem.id ?? "")
+            ? downloads.tracks(for: headerItem)
             : loader.value
         // Download order is a global save counter, so a track first saved by
         // another collection keeps that position here. Albums re-sort by disc
         // then track (missing numbers sink to the end); playlists keep their
         // user-assembled order.
         guard headerItem.itemType == .musicAlbum else { return raw }
-        return raw.sorted {
-            ($0.parentIndexNumber ?? .max, $0.indexNumber ?? .max, $0.sortName ?? "")
-                < ($1.parentIndexNumber ?? .max, $1.indexNumber ?? .max, $1.sortName ?? "")
-        }
+        return raw.inAlbumOrder()
     }
 
     var body: some View {
@@ -121,7 +118,9 @@ struct TrackListDetail: View {
                 }
             } else if loader.isPending, tracks.isEmpty {
                 ProgressView()
-            } else if loader.hasLoadedOnce, tracks.isEmpty {
+            } else if tracks.isEmpty, downloaded || loader.hasLoadedOnce {
+                // A downloaded collection never loads, so "loaded once" can't
+                // be the condition for its empty state.
                 ContentUnavailableView(
                     "No songs",
                     systemImage: headerItem.itemType == .playlist ? "music.note.list" : "square.stack"
@@ -143,6 +142,26 @@ struct TrackListDetail: View {
             #endif
             ToolbarItem { FavouriteButton(item: headerItem) }
             ToolbarItem { DownloadButton(item: headerItem) }
+            if downloaded && headerItem.itemType == .playlist {
+                // A membership snapshot ages. Refreshing is the only way it
+                // changes, and it is a deliberate, online-only action — never
+                // something browsing downloads does by itself.
+                ToolbarItem {
+                    Button {
+                        downloads.refreshPlaylist(headerItem.id ?? "")
+                    } label: {
+                        if downloads.isBusy(headerItem) {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(session.client == nil || downloads.isBusy(headerItem))
+                    .help(session.client == nil
+                        ? "Sign in to check this playlist for new songs"
+                        : "Check this playlist for new songs")
+                }
+            }
             if !selectedTracks.isEmpty {
                 ToolbarItem { TrackSelectionMenu(tracks: selectedTracks) }
             }
@@ -155,7 +174,7 @@ struct TrackListDetail: View {
             }
         }
         .task(id: headerItem.id) { await reload() }
-        .refreshable { await reload() }
+        .refreshableWhenAvailable(!downloaded) { await reload() }
         .refreshToolbarItem(isAvailable: !downloaded) { await reload() }
         #if os(iOS)
         .nowPlayingTabContentDock()
@@ -257,13 +276,11 @@ struct TrackListDetail: View {
     }
 
     private var artwork: some View {
-        var localArtworkURL: URL? {
-            guard session.serverReachable == false else { return nil }
-            guard downloads.isDownloaded(headerItem) else { return nil }
-            return downloads.localArtworkURL(forImageTag: headerItem.primaryImageTag ?? headerItem.albumPrimaryImageTag ?? "")
-        }
+        /// Downloaded collections show the cover saved alongside their songs;
+        /// the server is never asked for it.
+        var localArtworkURL: URL? { downloads.localArtworkURL(for: headerItem) }
         return ArtworkImage(
-            url: session.library.artworkURL(for: headerItem, size: 500),
+            url: downloaded ? nil : session.library.artworkURL(for: headerItem, size: 500),
             localURL: localArtworkURL,
             cornerRadius: 8,
             placeholderSystemImage: headerItem.itemType == .playlist ? "music.note.list" : "square.stack"
@@ -297,6 +314,15 @@ struct TrackListDetail: View {
             Text(metaLine)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if showsIncompleteWarning {
+                // Songs can be removed from under a saved playlist — the
+                // membership record outlives the files. The refresh button in
+                // the toolbar is the way back to a complete copy.
+                Text("This playlist is incomplete. You can use the refresh button to update it from the server.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(alignment == .center ? .center : .leading)
+            }
             actions
                 .padding(.top, 6)
         }
@@ -341,6 +367,12 @@ struct TrackListDetail: View {
         return parts.joined(separator: " • ")
     }
 
+    /// Whether the header should warn that a downloaded playlist's songs are
+    /// not all on disk; see ``DownloadStore/isPlaylistIncomplete(_:)``.
+    private var showsIncompleteWarning: Bool {
+        downloaded && headerItem.itemType == .playlist && downloads.isPlaylistIncomplete(headerItem)
+    }
+
     // MARK: - Loading
 
     /// Playlists are the only collection whose order the user owns — albums
@@ -363,6 +395,10 @@ struct TrackListDetail: View {
     }
 
     private func reload() async {
+        // A downloaded collection reads the manifest. There is nothing to fetch,
+        // and fetching is exactly what made a downloaded playlist unloadable
+        // offline.
+        guard !downloaded else { return }
         await loader.load { try await session.library.tracks(for: headerItem) }
     }
 
@@ -595,4 +631,72 @@ extension BaseItemDto {
     /// from a playlist (unique even when the same song is in the playlist
     /// twice), otherwise the item id.
     var playlistEntryKey: String? { playlistItemID ?? id }
+}
+
+extension Array where Element == BaseItemDto {
+    /// Tracks in the order an album lists them: disc, then track number, then
+    /// name, with missing numbers sinking to the end. Shared between the album
+    /// detail's rows and the downloaded-album queue menu, so what gets queued
+    /// plays in the order the screen showed.
+    func inAlbumOrder() -> [BaseItemDto] {
+        sorted {
+            ($0.parentIndexNumber ?? .max, $0.indexNumber ?? .max, $0.sortName ?? "")
+                < ($1.parentIndexNumber ?? .max, $1.indexNumber ?? .max, $1.sortName ?? "")
+        }
+    }
+
+    /// Tracks ordered the way the server orders them for the same sort: the
+    /// field first, then `SortName` — the tiebreak every server-side sort's
+    /// raw value spells out. For track lists that are already on disk and
+    /// sorted where they are shown, like the Downloads songs list.
+    func sorted(by field: SortBy, order: SortOrder) -> [BaseItemDto] {
+        let ascending = order == .ascending
+        return sorted { lhs, rhs in
+            ascending ? Self.precedes(lhs, rhs, by: field) : Self.precedes(rhs, lhs, by: field)
+        }
+    }
+
+    /// One comparison for ``sorted(by:order:)``: the field's own order, with
+    /// `SortName` breaking ties the way every server-side sort's raw value
+    /// spells it. A field the track lacks counts as empty or oldest, so it
+    /// keeps its place whichever side it is on. `random` scrambles by id hash
+    /// instead: a stable shuffle that re-rolls each launch.
+    private static func precedes(_ lhs: BaseItemDto, _ rhs: BaseItemDto, by field: SortBy) -> Bool {
+        func tiebreak() -> Bool {
+            (lhs.sortName ?? lhs.name ?? "") < (rhs.sortName ?? rhs.name ?? "")
+        }
+        func compare<T: Comparable>(_ a: T, _ b: T) -> Bool {
+            a == b ? tiebreak() : a < b
+        }
+        switch field {
+        case .random:
+            return (lhs.id ?? "").hashValue < (rhs.id ?? "").hashValue
+        case .sortName:
+            return tiebreak()
+        case .artist:
+            return compare(lhs.artists?.first ?? "", rhs.artists?.first ?? "")
+        case .albumArtist:
+            return compare(lhs.albumArtist ?? "", rhs.albumArtist ?? "")
+        case .albumArtistTrackOrder:
+            return compare(lhs.albumArtistSort, rhs.albumArtistSort)
+        case .album:
+            return compare(lhs.album ?? "", rhs.album ?? "")
+        case .dateCreated:
+            return compare(lhs.dateCreated ?? .distantPast, rhs.dateCreated ?? .distantPast)
+        case .datePlayed:
+            return compare(lhs.userData?.lastPlayedDate ?? .distantPast, rhs.userData?.lastPlayedDate ?? .distantPast)
+        case .playCount:
+            return compare(lhs.userData?.playCount ?? 0, rhs.userData?.playCount ?? 0)
+        case .productionYear:
+            return compare(lhs.productionYear ?? 0, rhs.productionYear ?? 0)
+        case .communityRating:
+            return compare(lhs.communityRating ?? 0, rhs.communityRating ?? 0)
+        case .runtime:
+            return compare(lhs.runTimeTicks ?? 0, rhs.runTimeTicks ?? 0)
+        case .discAndTrack:
+            let lhsDisc = (lhs.parentIndexNumber ?? .max, lhs.indexNumber ?? .max)
+            let rhsDisc = (rhs.parentIndexNumber ?? .max, rhs.indexNumber ?? .max)
+            return lhsDisc == rhsDisc ? tiebreak() : lhsDisc < rhsDisc
+        }
+    }
 }

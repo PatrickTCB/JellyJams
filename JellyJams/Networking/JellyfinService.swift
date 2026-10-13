@@ -52,6 +52,7 @@ final class JellyfinService: Sendable {
             config.waitsForConnectivity = true
             networkConfiguration = config
         }
+        Self.registerAuditProtocol(in: networkConfiguration)
 
         apiClient = JellyfinAPI.JellyfinClient(
             configuration: .init(
@@ -64,6 +65,15 @@ final class JellyfinService: Sendable {
             ),
             sessionConfiguration: networkConfiguration
         )
+    }
+
+    /// Appends the debug-only downloads tripwire to a session's protocol list.
+    /// Registered last, so an injected stub keeps priority and the audit only
+    /// ever observes requests.
+    static func registerAuditProtocol(in configuration: URLSessionConfiguration) {
+        #if DEBUG
+        configuration.protocolClasses = (configuration.protocolClasses ?? []) + [DownloadsAuditProtocol.self]
+        #endif
     }
 
     func authenticated(with credentials: ServerCredentials) -> JellyfinService {

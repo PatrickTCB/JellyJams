@@ -30,6 +30,36 @@ final class ItemPresentationTests: XCTestCase {
         XCTAssertNil(BaseItemDto().subtitleArtist)
     }
 
+    /// The key puts the album artist first, then the album, then the disc and
+    /// track numbers — zero-padded, so the string order is the numeric order.
+    func testAlbumArtistSortComposesTheWholeKey() {
+        let item = BaseItemDto(
+            album: "Album",
+            albumArtist: "Artist",
+            id: "t",
+            indexNumber: 10,
+            name: "Song",
+            parentIndexNumber: 2,
+            type: .audio
+        )
+
+        XCTAssertEqual(item.albumArtistSort, "Artist - Album - 002 - 010")
+    }
+
+    /// A track without the album artist falls back to its first artist, the
+    /// way the downloaded-artist grouping does; missing numbers sink as 999.
+    func testAlbumArtistSortFallsBackAndSinksMissingNumbers() {
+        let item = BaseItemDto(
+            album: "Album",
+            artists: ["A", "B"],
+            id: "t",
+            name: "Song",
+            type: .audio
+        )
+
+        XCTAssertEqual(item.albumArtistSort, "A - Album - 999 - 999")
+    }
+
     func testRuntimeConvertsTicksAndToleratesAbsentDurations() throws {
         let threeMinutes = BaseItemDto(runTimeTicks: 180 * Ticks.perSecond)
 
@@ -164,6 +194,116 @@ final class SortByTests: XCTestCase {
     func testSortOrderTogglesBothWays() {
         XCTAssertEqual(SortOrder.ascending.toggled, .descending)
         XCTAssertEqual(SortOrder.descending.toggled, .ascending)
+    }
+}
+
+/// The local track sort the Downloads songs list applies. It has to order
+/// the way the server orders the same fields — the same menu choice must
+/// mean the same thing online and offline — and stay a real ordering even
+/// when tracks are missing the field.
+final class LocalSortTests: XCTestCase {
+    private func track(
+        _ name: String,
+        album: String? = nil,
+        albumArtist: String? = nil,
+        artist: String? = nil,
+        disc: Int? = nil,
+        index: Int? = nil,
+        played: Date? = nil,
+        runtime: Int? = nil
+    ) -> BaseItemDto {
+        BaseItemDto(
+            album: album,
+            albumArtist: albumArtist,
+            artists: artist.map { [$0] },
+            id: name,
+            indexNumber: index,
+            name: name,
+            parentIndexNumber: disc,
+            runTimeTicks: runtime,
+            sortName: name,
+            type: .audio,
+            userData: played.map { UserItemDataDto(key: "k", lastPlayedDate: $0) }
+        )
+    }
+
+    func testNameSortsBothWays() {
+        let tracks = [track("Beta"), track("Alpha"), track("Gamma")]
+
+        XCTAssertEqual(tracks.sorted(by: .sortName, order: .ascending).map(\.displayName), ["Alpha", "Beta", "Gamma"])
+        XCTAssertEqual(tracks.sorted(by: .sortName, order: .descending).map(\.displayName), ["Gamma", "Beta", "Alpha"])
+    }
+
+    /// Every server-side sort breaks ties on SortName; the local one must too.
+    func testEqualFieldsFallBackToTheName() {
+        let tracks = [track("Zeta", artist: "A"), track("Alpha", artist: "A"), track("Mid", artist: "B")]
+
+        XCTAssertEqual(tracks.sorted(by: .artist, order: .ascending).map(\.displayName), ["Alpha", "Zeta", "Mid"])
+    }
+
+    /// A missing field must not decide the order by which side it landed on:
+    /// the pair has to flip cleanly when the direction flips.
+    func testAMissingFieldKeepsItsPlaceInBothDirections() {
+        let missing = track("Beta")
+        let present = track("Alpha", artist: "Zed")
+
+        XCTAssertEqual([missing, present].sorted(by: .artist, order: .ascending).map(\.displayName), ["Beta", "Alpha"])
+        XCTAssertEqual([missing, present].sorted(by: .artist, order: .descending).map(\.displayName), ["Alpha", "Beta"])
+    }
+
+    /// Never played is the extreme of not-recently-played: first in an
+    /// ascending order, last in a descending one.
+    func testDatePlayedCountsTheUnplayedAsTheOldest() {
+        let older = track("Older", played: Date(timeIntervalSince1970: 100))
+        let newer = track("Newer", played: Date(timeIntervalSince1970: 200))
+        let never = track("Never")
+
+        XCTAssertEqual(
+            [never, newer, older].sorted(by: .datePlayed, order: .ascending).map(\.displayName),
+            ["Never", "Older", "Newer"]
+        )
+        XCTAssertEqual(
+            [never, newer, older].sorted(by: .datePlayed, order: .descending).map(\.displayName),
+            ["Newer", "Older", "Never"]
+        )
+    }
+
+    func testRuntimeComparesTicks() {
+        let short = track("Short", runtime: Ticks.perSecond * 60)
+        let long = track("Long", runtime: Ticks.perSecond * 300)
+
+        XCTAssertEqual([long, short].sorted(by: .runtime, order: .ascending).map(\.displayName), ["Short", "Long"])
+    }
+
+    /// The downloads-only album-artist ordering: one artist's albums stay
+    /// whole — album by album, in track order — and numbers compare
+    /// numerically, so track 10 sorts after track 2.
+    func testAlbumArtistTrackOrderKeepsAlbumsWholeAndSortsNumbersNumerically() {
+        let tracks = [
+            track("Track Ten", album: "Album A", albumArtist: "Artist", disc: 1, index: 10),
+            track("Track Two", album: "Album A", albumArtist: "Artist", disc: 1, index: 2),
+            track("Disc Two Opener", album: "Album A", albumArtist: "Artist", disc: 2, index: 1),
+            track("Album B Opener", album: "Album B", albumArtist: "Artist", disc: 1, index: 1),
+            track("Other Artist Song", album: "Album C", albumArtist: "Bee", disc: 1, index: 1),
+        ]
+
+        XCTAssertEqual(
+            tracks.sorted(by: .albumArtistTrackOrder, order: .ascending).map(\.displayName),
+            ["Track Two", "Track Ten", "Disc Two Opener", "Album B Opener", "Other Artist Song"]
+        )
+        XCTAssertEqual(
+            tracks.sorted(by: .albumArtistTrackOrder, order: .descending).map(\.displayName),
+            ["Other Artist Song", "Album B Opener", "Disc Two Opener", "Track Ten", "Track Two"]
+        )
+    }
+
+    func testRandomKeepsTheSameOrderAcrossSorts() {
+        let tracks = (0..<20).map { track("Song \($0)") }
+        let once = tracks.sorted(by: .random, order: .ascending)
+        let twice = tracks.sorted(by: .random, order: .ascending)
+
+        XCTAssertEqual(once.map(\.displayName), twice.map(\.displayName))
+        XCTAssertEqual(Set(once.compactMap(\.id)), Set(tracks.compactMap(\.id)))
     }
 }
 

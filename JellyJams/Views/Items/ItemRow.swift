@@ -10,17 +10,16 @@ struct ItemRow: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var downloads: DownloadStore
-    
-    private var localArtworkURL: URL? {
-        guard session.serverReachable == false else { return nil }
-        guard downloads.isDownloaded(item) else { return nil }
-        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
-    }
+    @Environment(\.offlineBrowsing) private var offlineBrowsing
+
+    /// Downloaded artwork comes from disk and is never re-requested; see
+    /// ``ArtworkImage`` and ``DownloadStore/localArtworkURL(for:)``.
+    private var localArtworkURL: URL? { downloads.localArtworkURL(for: item) }
 
     var body: some View {
         HStack(spacing: 12) {
             ArtworkImage(
-                url: session.library.artworkURL(for: item, size: 96),
+                url: offlineBrowsing ? nil : session.library.artworkURL(for: item, size: 96),
                 localURL: localArtworkURL,
                 cornerRadius: circular ? 500 : 6,
                 placeholderSystemImage: placeholderSystemImage

@@ -6,18 +6,22 @@ struct CollectionHeader: View {
     let item: BaseItemDto
     var subtitle: String?
     var isCircular = false
+    /// A saved artwork file the caller resolved itself, for an item whose own
+    /// keys cannot find it — a downloaded artist, whose cover is borrowed from
+    /// one of their albums. `nil` (the default) resolves for `item` as usual.
+    var localArtworkURL: URL? = nil
     var canPlay: Bool
     var onPlay: () -> Void
     var onShuffle: () -> Void
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var downloads: DownloadStore
-    
-    private var localArtworkURL: URL? {
-        guard session.serverReachable == false else { return nil }
-        guard downloads.isDownloaded(item) else { return nil }
-        return downloads.localArtworkURL(forImageTag: item.primaryImageTag ?? item.albumPrimaryImageTag ?? "")
-    }
+    /// Downloaded content never builds a server artwork request.
+    @Environment(\.offlineBrowsing) private var offlineBrowsing
+
+    /// Downloaded artwork comes from disk and is never re-requested; see
+    /// ``ArtworkImage`` and ``DownloadStore/localArtworkURL(for:)``.
+    private var artworkFileURL: URL? { localArtworkURL ?? downloads.localArtworkURL(for: item) }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -35,8 +39,8 @@ struct CollectionHeader: View {
 
     private var artwork: some View {
         return ArtworkImage(
-            url: session.library.artworkURL(for: item, size: 500),
-            localURL: localArtworkURL,
+            url: offlineBrowsing ? nil : session.library.artworkURL(for: item, size: 500),
+            localURL: artworkFileURL,
             cornerRadius: isCircular ? 500 : 8,
             placeholderSystemImage: isCircular ? "music.mic" : "guitars"
         )

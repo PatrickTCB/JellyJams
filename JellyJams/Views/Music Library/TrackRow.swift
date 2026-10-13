@@ -43,15 +43,16 @@ struct TrackRow: View {
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
+    /// Inside the Downloads section the row must issue no requests at all: no
+    /// artwork fetch, and no background playlist-cache refresh on appear.
+    @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     @State private var isPresentingNewPlaylist = false
     @State private var newPlaylistName = ""
     
-    private var localArtworkURL: URL? {
-        guard session.serverReachable == false else { return nil }
-        guard downloads.isDownloaded(track) else { return nil }
-        return downloads.localArtworkURL(forImageTag: track.primaryImageTag ?? track.albumPrimaryImageTag ?? "")
-    }
+    /// Downloaded artwork comes from disk and is never re-requested; see
+    /// ``ArtworkImage`` and ``DownloadStore/localArtworkURL(for:)``.
+    private var localArtworkURL: URL? { downloads.localArtworkURL(for: track) }
 
     #if os(iOS)
     /// Active while an enclosing list is in edit mode — playlist detail's
@@ -68,7 +69,7 @@ struct TrackRow: View {
     var body: some View {
         playTarget
             .contextMenu { contextMenu }
-            .onAppear { playlistStore.refreshIfNeeded() }
+            .onAppear { if !offlineBrowsing { playlistStore.refreshIfNeeded() } }
             .alert("New Playlist", isPresented: $isPresentingNewPlaylist) {
                 TextField("Name", text: $newPlaylistName)
                 Button("Cancel", role: .cancel) { newPlaylistName = "" }
@@ -170,7 +171,7 @@ struct TrackRow: View {
     @ViewBuilder private var leading: some View {
         if showArtwork {
             ArtworkImage(
-                url: session.library.artworkURL(for: track, size: 96),
+                url: offlineBrowsing ? nil : session.library.artworkURL(for: track, size: 96),
                 localURL: localArtworkURL
             )
                 .frame(width: 40, height: 40)

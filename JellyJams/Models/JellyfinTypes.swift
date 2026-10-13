@@ -40,6 +40,29 @@ extension JellyfinAPI.BaseItemDto {
         return nil
     }
 
+    /// The sort key behind the Downloads "Album Artist (Track Order)" option:
+    /// album artist, then album, then disc and track number, flattened into
+    /// one string. Numbers are zero-padded and missing ones sink as `999`, so
+    /// plain string comparison matches numeric order — and each album's
+    /// tracks stay together, in order.
+    var albumArtistSort: String {
+        let artist: String
+        if let albumArtist, !albumArtist.isEmpty {
+            artist = albumArtist
+        } else if let first = artists?.first, !first.isEmpty {
+            artist = first
+        } else {
+            artist = ""
+        }
+
+        func padded(_ number: Int?) -> String {
+            number.map { String(format: "%03d", $0) } ?? "999"
+        }
+
+        return [artist, album ?? "", padded(parentIndexNumber), padded(indexNumber)]
+            .joined(separator: " - ")
+    }
+
     var primaryImageTag: String? {
         imageTags?[JellyfinAPI.ImageType.primary.rawValue]
     }
