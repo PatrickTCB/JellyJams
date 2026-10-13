@@ -34,12 +34,17 @@ final class DownloadSession: @unchecked Sendable {
 
     private let session: URLSession
     private let bridge: Bridge
+    /// The configuration the session was built from — kept so a test can
+    /// assert the background wiring (`URLSession` copies it and does not
+    /// expose the original).
+    let configuration: URLSessionConfiguration
 
     /// Builds the session from `configuration`, which is where a stubbed
     /// protocol or a shared default is carried in.
     init(configuration: URLSessionConfiguration) {
         let bridge = Bridge()
         self.bridge = bridge
+        self.configuration = configuration
         self.session = URLSession(configuration: configuration, delegate: bridge, delegateQueue: nil)
     }
 

@@ -350,26 +350,30 @@ final class DownloadStore: ObservableObject {
         }
     }
 
-    /// `session` contributes its configuration — which is how a test's stubbed
-    /// protocols reach the downloads — while the transfers themselves run on
-    /// the store's own ``DownloadSession``, the one that can report progress.
-    /// On iOS that session is a background session, so transfers survive the
-    /// app being suspended; `session`'s configuration is the macOS and test
-    /// path.
-    init(directory: URL? = nil, session: URLSession = .shared) {
+    /// Transfers run on the store's own ``DownloadSession``, the one that can
+    /// report progress. An injected `session` contributes its configuration on
+    /// every platform — which is how a test's stubbed protocols reach the
+    /// downloads, and how the tests run on iOS too. With none injected, iOS
+    /// builds a background session, so transfers survive the app being
+    /// suspended, and macOS uses the shared configuration.
+    init(directory: URL? = nil, session: URLSession? = nil) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = directory ?? support.appending(path: "Downloads", directoryHint: .isDirectory)
         self.directory = dir
         self.artworkDirectory = dir.appending(path: "Artwork", directoryHint: .isDirectory)
         self.manifestURL = dir.appending(path: "manifest.json")
-        #if os(iOS)
-        // Recreating the session under its fixed identifier is what reconnects
-        // to transfers the system kept running — or finished — while no store
-        // existed to receive them.
-        downloadSession = DownloadSession(backgroundIdentifier: DownloadSession.backgroundIdentifier)
-        #else
-        downloadSession = DownloadSession(configuration: session.configuration)
-        #endif
+        if let session {
+            downloadSession = DownloadSession(configuration: session.configuration)
+        } else {
+            #if os(iOS)
+            // Recreating the session under its fixed identifier is what
+            // reconnects to transfers the system kept running — or finished —
+            // while no store existed to receive them.
+            downloadSession = DownloadSession(backgroundIdentifier: DownloadSession.backgroundIdentifier)
+            #else
+            downloadSession = DownloadSession(configuration: URLSession.shared.configuration)
+            #endif
+        }
         downloadSession.setOrphanedTransferHandler { [weak self] requestURL, file, statusCode in
             Task { @MainActor in
                 self?.adoptOrphanedTransfer(requestURL: requestURL, file: file, statusCode: statusCode)
@@ -1286,7 +1290,10 @@ final class DownloadStore: ObservableObject {
     /// them when the store recreates its session at the next launch, by which
     /// point no caller is waiting. The pending record says what the file was
     /// for, and it is filed exactly the way the transfer would have filed it.
-    private func adoptOrphanedTransfer(requestURL: URL?, file: URL?, statusCode: Int?) {
+    /// Internal rather than private so tests can drive the delivery directly —
+    /// in production the only caller is the session's orphaned-transfer
+    /// handler, wired in `init`.
+    func adoptOrphanedTransfer(requestURL: URL?, file: URL?, statusCode: Int?) {
         guard let requestURL, let pending = pendingTransfers[Self.pendingKey(for: requestURL)] else {
             if let file { try? FileManager.default.removeItem(at: file) }
             return
