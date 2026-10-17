@@ -95,15 +95,17 @@ final class DownloadStoreTests: XCTestCase {
 
     /// Serves the collection lookups the download paths make — an artist's
     /// albums, and each collection's track listing, keyed by the request's
-    /// parentId / artistIds / playlist path — and audio or artwork bytes for
-    /// everything else.
+    /// parentId / artistIds / playlist path — the artist-picture sync's
+    /// by-ids lookup — and audio or artwork bytes for everything else.
     private func stubCollections(
         _ collections: [String: [TrackStub]],
-        artistAlbums: [String: [AlbumStub]] = [:]
+        artistAlbums: [String: [AlbumStub]] = [:],
+        artists: [String: String] = [:]
     ) {
         URLProtocolStub.handler = Self.itemsHandler(
             collections: collections,
-            artistAlbums: artistAlbums
+            artistAlbums: artistAlbums,
+            artists: artists
         )
     }
 
@@ -111,12 +113,23 @@ final class DownloadStoreTests: XCTestCase {
     /// isolation — `startLoading` calls it off the main thread.
     nonisolated private static func itemsHandler(
         collections: [String: [TrackStub]],
-        artistAlbums: [String: [AlbumStub]]
+        artistAlbums: [String: [AlbumStub]],
+        artists: [String: String] = [:]
     ) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
         { request in
             let response = try emptyResponse(for: request, statusCode: 200)
             guard let url = request.url else { return (response, Data()) }
             let items = RecordedRequest(request)
+
+            // The artist-picture sync: `/Items?ids=…&IncludeItemTypes=MusicArtist`,
+            // answered with each artist's payload carrying their image tag.
+            let requestedIDs = items.values(for: "ids")
+            if !requestedIDs.isEmpty {
+                let found = requestedIDs.compactMap { id in artists[id].map { tag in
+                    #"{"Id":"\#(id)","Name":"\#(id)","Type":"MusicArtist","ImageTags":{"Primary":"\#(tag)"}}"#
+                } }
+                return (response, itemsData(found))
+            }
 
             // An artist's albums: `/Items?IncludeItemTypes=MusicAlbum&AlbumArtistIds=…`
             if items.values(for: "includeItemTypes").contains("MusicAlbum") {
@@ -680,8 +693,10 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertNotNil(store.localArtworkURL(for: group!))
     }
 
-    /// An artist has no image of its own saved; its row borrows the cover of one
-    /// of its downloaded albums rather than asking the server.
+    /// An artist surfaced by an album download has no picture of their own
+    /// saved; the row borrows the cover of one of the artist's downloaded
+    /// albums rather than asking the server. (A picture arrives with an
+    /// artist download or the sign-in sync.)
     func testArtistArtworkIsBorrowedFromItsDownloadedAlbum() async throws {
         stubCollections([
             "al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover-1")],
@@ -694,6 +709,171 @@ final class DownloadStoreTests: XCTestCase {
         let artist = try XCTUnwrap(store.downloadedArtists().first)
         XCTAssertEqual(artist.artworkKeys.first, "al1|cover-1")
         XCTAssertNotNil(store.localArtworkURL(for: artist))
+    }
+
+    /// A downloaded artist's artwork is *their* picture — the image Jellyfin
+    /// holds on the artist item — with the album cover only ever a fallback:
+    /// used when the artist has no picture of their own on disk.
+    func testArtistArtworkIsTheirOwnPictureWithAnAlbumCoverAsFallback() async throws {
+        stubCollections(
+            ["al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover-1")]],
+            artistAlbums: ["art-1": [AlbumStub(id: "al1", artistID: "art-1", artist: "Artist")]]
+        )
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        // The artist item as the Library grid passes it: carrying their picture's tag.
+        let artist = BaseItemDto(
+            id: "art-1",
+            imageTags: ["Primary": "artist-image"],
+            name: "Artist",
+            type: .musicArtist
+        )
+        store.download(artist)
+        try await waitForBatch(store, id: "art-1")
+
+        // The artist's own picture was saved with them, under their own id.
+        XCTAssertNotNil(store.artworkEntries["art-1|artist-image"])
+
+        // And it is what the artist group resolves — not an album cover.
+        let group = try XCTUnwrap(store.downloadedArtists().first)
+        let url = try XCTUnwrap(store.localArtworkURL(for: group))
+        XCTAssertEqual(url.lastPathComponent, "art-1-artist-image.jpg")
+    }
+
+    /// Artists surfaced by songs alone — downloads saved before artist
+    /// pictures came with artist downloads — still gain their picture: the
+    /// sign-in sync resolves every downloaded artist missing one and saves
+    /// each picture under the artist's own id.
+    func testSurfacedArtistsGainTheirPictureAtSignIn() async throws {
+        stubCollections(
+            ["al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover-1")]],
+            artists: ["art-1": "artist-image"]
+        )
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+
+        // Surfaced by the album's songs: no picture of the artist's own yet,
+        // so the album cover is what the group resolves.
+        XCTAssertNil(store.artworkEntries.values.first { $0.ownerItemID == "art-1" })
+        let surfaced = try XCTUnwrap(store.downloadedArtists().first)
+        XCTAssertEqual(surfaced.artworkKeys.first, "al1|cover-1")
+
+        await store.syncArtistArtwork()
+
+        // The sync saved the artist's own picture, and it takes priority over
+        // the album cover.
+        XCTAssertNotNil(store.artworkEntries["art-1|artist-image"])
+        let synced = try XCTUnwrap(store.downloadedArtists().first)
+        XCTAssertEqual(store.localArtworkURL(for: synced)?.lastPathComponent, "art-1-artist-image.jpg")
+    }
+
+    /// An artist's picture is claimed by the artist's own id, so it outlives
+    /// the songs that showed it: removing the artist's albums one by one drops
+    /// the group without dropping the picture. The sign-in sync reclaims it —
+    /// while keeping the picture of an artist who is still downloaded.
+    func testTheSyncPassReclaimsAPictureForAnArtistWhoNoLongerLists() async throws {
+        stubCollections(
+            ["al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist")]],
+            artistAlbums: ["art-1": [AlbumStub(id: "al1", artistID: "art-1", artist: "Artist")]],
+            artists: ["art-1": "artist-image"]
+        )
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(BaseItemDto(id: "art-1", imageTags: ["Primary": "artist-image"], name: "Artist", type: .musicArtist))
+        try await waitForBatch(store, id: "art-1")
+
+        // While the artist is still downloaded, the pass keeps their picture.
+        await store.syncArtistArtwork()
+        XCTAssertNotNil(store.artworkEntries["art-1|artist-image"])
+
+        // Removing the album directly — rather than the artist — takes the
+        // songs, and with them the group, but leaves the picture claimed.
+        store.remove(albumStub(id: "al1", artistID: "art-1", artist: "Artist"))
+        XCTAssertTrue(store.downloadedArtists().isEmpty)
+        XCTAssertNotNil(store.artworkEntries["art-1|artist-image"], "The picture outlived the group")
+
+        await store.syncArtistArtwork()
+
+        XCTAssertNil(store.artworkEntries["art-1|artist-image"])
+        XCTAssertTrue(artworkFiles(in: directory).isEmpty)
+    }
+
+    /// The reclaim half of the sync pass only takes pictures whose artist is
+    /// gone: an album's cover, a playlist's cover and a song's own embedded
+    /// art all survive a pass over a fully populated download set.
+    func testTheSyncPassKeepsArtworkEverythingStillUses() async throws {
+        stubCollections(
+            [
+                "al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover-1")],
+                "pl1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover-1")],
+            ],
+            artistAlbums: ["art-1": [AlbumStub(id: "al1", artistID: "art-1", artist: "Artist")]],
+            artists: ["art-1": "artist-image"]
+        )
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(BaseItemDto(id: "art-1", imageTags: ["Primary": "artist-image"], name: "Artist", type: .musicArtist))
+        try await waitForBatch(store, id: "art-1")
+        store.download(BaseItemDto(id: "pl1", imageTags: ["Primary": "pl-cover"], name: "pl1", type: .playlist))
+        try await waitForBatch(store, id: "pl1")
+        // A song with no album attribution saves its own embedded art under
+        // its own id — self-claimed, like an artist's picture.
+        store.download(BaseItemDto(id: "s1", imageTags: ["Primary": "own-1"], name: "s1", type: .audio))
+        try await waitForBatch(store, id: "s1")
+
+        await store.syncArtistArtwork()
+
+        XCTAssertEqual(
+            Set(store.artworkEntries.keys),
+            ["al1|cover-1", "pl1|pl-cover", "art-1|artist-image", "s1|own-1"]
+        )
+    }
+
+    /// Removing an artist's download takes their picture with it: the claim
+    /// the artist id held goes, and the sweep reclaims the file — the same
+    /// way a playlist's cover goes with the playlist.
+    func testRemovingAnArtistTakesTheirPictureWithIt() async throws {
+        stubCollections(
+            ["al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist")]],
+            artistAlbums: ["art-1": [AlbumStub(id: "al1", artistID: "art-1", artist: "Artist")]]
+        )
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+        let artist = BaseItemDto(id: "art-1", imageTags: ["Primary": "artist-image"], name: "Artist", type: .musicArtist)
+        store.download(artist)
+        try await waitForBatch(store, id: "art-1")
+        XCTAssertNotNil(store.artworkEntries["art-1|artist-image"])
+
+        store.remove(artist)
+
+        XCTAssertNil(store.artworkEntries["art-1|artist-image"])
+        XCTAssertTrue(artworkFiles(in: directory).isEmpty)
+    }
+
+    /// A picture whose tag the server replaced is superseded, not accumulated
+    /// beside: re-downloading the artist claims the new one, and the sweep
+    /// reclaims the old file.
+    func testARedownloadedArtistPictureSupersedesTheEarlierOne() async throws {
+        stubCollections(
+            ["al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist")]],
+            artistAlbums: ["art-1": [AlbumStub(id: "al1", artistID: "art-1", artist: "Artist")]]
+        )
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(BaseItemDto(id: "art-1", imageTags: ["Primary": "old-tag"], name: "Artist", type: .musicArtist))
+        try await waitForBatch(store, id: "art-1")
+        store.download(BaseItemDto(id: "art-1", imageTags: ["Primary": "new-tag"], name: "Artist", type: .musicArtist))
+        try await waitForBatch(store, id: "art-1")
+
+        XCTAssertEqual(Set(store.artworkEntries.keys), ["art-1|new-tag"])
+        XCTAssertEqual(artworkFiles(in: directory), ["art-1-new-tag.jpg"])
     }
 
     /// Songs carrying their own embedded art — the common case for lossless
