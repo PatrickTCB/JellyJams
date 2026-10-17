@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What a ``SortMenu`` offers: a picker-taggable value that names itself.
 /// `SortBy` covers every server-side sort; lists that sort locally conform
-/// with their own cases, such as the Downloads songs list's recency.
+/// with their own cases, such as the Downloads lists' recency.
 protocol SortOption: Hashable {
     var displayName: String { get }
 }

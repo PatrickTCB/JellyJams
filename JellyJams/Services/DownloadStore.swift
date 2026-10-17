@@ -223,6 +223,11 @@ final class DownloadStore: ObservableObject {
         let artworkKeys: [String]
         /// Artist attribution for an album group; empty for playlists.
         let artistKeys: Set<String>
+        /// The newest fetch order among the group's songs on disk — what the
+        /// Downloads grids' "Recently Downloaded" sort orders groups by. An
+        /// artist is as recent as its newest album; a group whose songs have
+        /// all been deleted holds 0.
+        let mostRecentOrder: Int
 
         /// Every song the group has on the server is on disk.
         ///
@@ -756,7 +761,8 @@ final class DownloadStore: ObservableObject {
                 totalSongs: record.totalSongs,
                 isExplicit: true,
                 artworkKeys: Self.artworkKeys(ownID: record.id, tag: record.coverTag),
-                artistKeys: []
+                artistKeys: [],
+                mostRecentOrder: record.trackIDs.compactMap { entries[$0]?.order }.max() ?? 0
             )
         }
         .sorted { $0.title < $1.title }
@@ -785,7 +791,8 @@ final class DownloadStore: ObservableObject {
                 totalSongs: total,
                 isExplicit: group.contains { $0.sources.contains(key) },
                 artworkKeys: Self.artworkKeys(for: lead),
-                artistKeys: keys.isEmpty ? Set([lead.albumArtist].compactNamed()) : keys
+                artistKeys: keys.isEmpty ? Set([lead.albumArtist].compactNamed()) : keys,
+                mostRecentOrder: sorted.last?.order ?? 0
             )
         }
         .sorted { $0.title < $1.title }
@@ -817,7 +824,8 @@ final class DownloadStore: ObservableObject {
                 totalSongs: nil,
                 isExplicit: albums.contains { $0.isExplicit },
                 artworkKeys: lead.artworkKeys,
-                artistKeys: [key]
+                artistKeys: [key],
+                mostRecentOrder: albums.map(\.mostRecentOrder).max() ?? 0
             )
         }
         .sorted { $0.title < $1.title }
@@ -1539,13 +1547,17 @@ final class DownloadStore: ObservableObject {
     }
 
     /// A display item for a downloaded album, assembled from its songs: name,
-    /// attribution, year and the image tag its artwork was saved under.
+    /// attribution, year and the image tag its artwork was saved under. The
+    /// album's own Date Added is never on disk — only the songs' are — so the
+    /// earliest of theirs stands in: an album entered the library when its
+    /// first song did, which is what the Downloads grid's Date Added sort reads.
     private static func albumItem(key: String, members: [Entry], total: Int?, artistKeys: Set<String>) -> BaseItemDto {
         guard let lead = members.first?.track else {
             return BaseItemDto(id: key, name: key, type: .musicAlbum)
         }
         let pairs = members.flatMap { $0.track.albumArtists ?? [] }
         let year = members.compactMap(\.track.productionYear).min()
+        let added = members.compactMap(\.track.dateCreated).min()
         let tag = lead.albumPrimaryImageTag ?? lead.primaryImageTag
         let artistName = lead.albumArtist ?? members.compactMap(\.track.albumArtist).first
             ?? (pairs.isEmpty ? nil : pairs.first?.name)
@@ -1554,6 +1566,7 @@ final class DownloadStore: ObservableObject {
             albumArtist: artistName,
             albumArtists: pairs.isEmpty ? artistName.map({ [NameIDPair(id: artistKeys.first, name: $0)] }) : pairs,
             childCount: total,
+            dateCreated: added,
             id: key,
             imageTags: tag.map { [ImageType.primary.rawValue: $0] },
             name: lead.album ?? key,

@@ -660,8 +660,9 @@ extension Array where Element == BaseItemDto {
     /// `SortName` breaking ties the way every server-side sort's raw value
     /// spells it. A field the track lacks counts as empty or oldest, so it
     /// keeps its place whichever side it is on. `random` scrambles by id hash
-    /// instead: a stable shuffle that re-rolls each launch.
-    private static func precedes(_ lhs: BaseItemDto, _ rhs: BaseItemDto, by field: SortBy) -> Bool {
+    /// instead: a stable shuffle that re-rolls each launch. Shared with the
+    /// Downloads grids, which run it over each derived group's stand-in item.
+    static func precedes(_ lhs: BaseItemDto, _ rhs: BaseItemDto, by field: SortBy) -> Bool {
         func tiebreak() -> Bool {
             (lhs.sortName ?? lhs.name ?? "") < (rhs.sortName ?? rhs.name ?? "")
         }

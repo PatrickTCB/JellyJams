@@ -14,11 +14,13 @@ import SwiftUI
 ///
 /// The Albums tab starts filtered to albums that are fully on disk — the filter
 /// menu in the toolbar shows the partial ones, and the choice is remembered in
-/// ``PreferencesStore/showsCompleteAlbumsOnly``.
-/// How the Downloads songs list can be ordered: the manifest's own order —
-/// the order files arrived in, newest first — or any field the saved tracks
-/// carry, sorted the way the server would sort it.
-enum DownloadSongSort: SortOption {
+/// ``PreferencesStore/showsCompleteAlbumsOnly``. The Songs, Albums and Artists
+/// tabs each carry a sort menu: the fields their online lists offer, applied
+/// here to what is on disk, led by the section's own recency.
+/// How a Downloads list can be ordered: the manifest's own order — the order
+/// files arrived in, newest first — or any field the saved tracks or derived
+/// groups carry, sorted the way the server would sort it.
+enum DownloadSort: SortOption {
     case recentlyDownloaded
     case field(SortBy)
 
@@ -26,6 +28,33 @@ enum DownloadSongSort: SortOption {
         switch self {
         case .recentlyDownloaded: "Recently Downloaded"
         case .field(let field): field.displayName
+        }
+    }
+}
+
+extension Array where Element == DownloadStore.DownloadGroup {
+    /// Groups ordered the way the server orders albums for the same sort: the
+    /// track comparator run over each group's stand-in item, so a downloaded
+    /// album sorts exactly as its online counterpart would be sorted. Fields
+    /// the stand-in does not carry fall back to the name tiebreak; the option
+    /// lists below only offer fields they do.
+    func sorted(by field: SortBy, order: SortOrder) -> [Element] {
+        let ascending = order == .ascending
+        return sorted { lhs, rhs in
+            ascending
+                ? [BaseItemDto].precedes(lhs.item, rhs.item, by: field)
+                : [BaseItemDto].precedes(rhs.item, lhs.item, by: field)
+        }
+    }
+
+    /// Groups newest-arrival first: an album is as recent as its newest song
+    /// on disk, an artist as recent as its newest album. The store's name
+    /// order breaks ties.
+    func mostRecentFirst() -> [Element] {
+        sorted { lhs, rhs in
+            lhs.mostRecentOrder != rhs.mostRecentOrder
+                ? lhs.mostRecentOrder > rhs.mostRecentOrder
+                : lhs.title < rhs.title
         }
     }
 }
@@ -57,8 +86,14 @@ struct DownloadsView: View {
     /// The downloaded songs the user has selected (rows are keyed by track
     /// id): click to select, double-click to play, shift-arrow to extend.
     @State private var songSelection: Set<String> = []
-    @State private var songSort: DownloadSongSort = .field(.albumArtistTrackOrder)
+    @State private var songSort: DownloadSort = .field(.albumArtistTrackOrder)
     @State private var songSortOrder: SortOrder = .ascending
+    /// The Albums and Artists grids open on the defaults their online lists
+    /// open on — albums by album artist, artists by name.
+    @State private var albumSort: DownloadSort = .field(.albumArtist)
+    @State private var albumSortOrder: SortOrder = .ascending
+    @State private var artistSort: DownloadSort = .field(.sortName)
+    @State private var artistSortOrder: SortOrder = .ascending
 
     /// The selected songs in list order — what selection actions act on.
     private var selectedSongs: [BaseItemDto] {
@@ -69,11 +104,27 @@ struct DownloadsView: View {
     /// own recency, plus the track-order album-artist sort only this list
     /// offers. The list opens on that one: artist by artist, album by album,
     /// in track order.
-    private let songSortOptions: [DownloadSongSort] = [
+    private let songSortOptions: [DownloadSort] = [
         .recentlyDownloaded,
         .field(.artist), .field(.sortName), .field(.album), .field(.albumArtist),
         .field(.albumArtistTrackOrder),
         .field(.dateCreated), .field(.datePlayed), .field(.runtime), .field(.random),
+    ]
+
+    /// What the Library and Favourites album lists offer, led by the
+    /// section's own recency: the albums grid sorts derived albums by the
+    /// fields their stand-in items carry.
+    private let albumSortOptions: [DownloadSort] = [
+        .recentlyDownloaded,
+        .field(.albumArtist), .field(.sortName), .field(.dateCreated),
+        .field(.productionYear), .field(.random),
+    ]
+
+    /// A derived artist carries a name and an id, so the picker matches the
+    /// Favourites artists tab — plus the section's recency.
+    private let artistSortOptions: [DownloadSort] = [
+        .recentlyDownloaded,
+        .field(.sortName), .field(.random),
     ]
 
     private var songs: [BaseItemDto] {
@@ -83,6 +134,29 @@ struct DownloadsView: View {
             return songSortOrder == .descending ? newestFirst : Array(newestFirst.reversed())
         case .field(let field):
             return downloads.downloadedSongs().sorted(by: field, order: songSortOrder)
+        }
+    }
+
+    /// One tab's derived groups in the order its sort menu chose. Playlists
+    /// have no menu: they keep the store's name order.
+    private func sortedGroups(kind: DownloadStore.GroupKind) -> [DownloadStore.DownloadGroup] {
+        let groups = downloads.groups(kind: kind)
+        let sort: DownloadSort
+        let order: SortOrder
+        switch kind {
+        case .album:
+            (sort, order) = (albumSort, albumSortOrder)
+        case .artist:
+            (sort, order) = (artistSort, artistSortOrder)
+        case .playlist, .genre:
+            return groups
+        }
+        switch sort {
+        case .recentlyDownloaded:
+            let newestFirst = groups.mostRecentFirst()
+            return order == .descending ? newestFirst : Array(newestFirst.reversed())
+        case .field(let field):
+            return groups.sorted(by: field, order: order)
         }
     }
 
@@ -145,6 +219,16 @@ struct DownloadsView: View {
                     SortMenu(sortBy: $songSort, sortOrder: $songSortOrder, options: songSortOptions)
                 }
             }
+            if tab == .albums {
+                ToolbarItem(placement: .automatic) {
+                    SortMenu(sortBy: $albumSort, sortOrder: $albumSortOrder, options: albumSortOptions)
+                }
+            }
+            if tab == .artists {
+                ToolbarItem(placement: .automatic) {
+                    SortMenu(sortBy: $artistSort, sortOrder: $artistSortOrder, options: artistSortOptions)
+                }
+            }
         }
         .alert("Delete all downloaded music?", isPresented: $confirmingDeleteAll) {
             Button("Delete All Downloads", role: .destructive) { downloads.removeAll() }
@@ -192,11 +276,12 @@ struct DownloadsView: View {
 
     /// One tab's groups as the same artwork grid the Library sections show:
     /// adaptive cells of big covers — square for albums, circular for artists
-    /// — over a count header. Like every other browse path here, a cell's
-    /// artwork is its saved file and its push opens the offline detail.
+    /// — over a count header, in the order the tab's sort menu chose. Like
+    /// every other browse path here, a cell's artwork is its saved file and
+    /// its push opens the offline detail.
     private func groupsGrid(tab: Tab) -> some View {
         let kind = tab.groupKind ?? .album
-        let all = downloads.groups(kind: kind)
+        let all = sortedGroups(kind: kind)
         // Only albums are filtered: artists are their own list, and songs are
         // files rather than groupings that can be incomplete.
         let filtered = kind == .album && preferences.showsCompleteAlbumsOnly
