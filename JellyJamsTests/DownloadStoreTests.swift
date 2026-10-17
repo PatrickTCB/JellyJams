@@ -196,6 +196,40 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.entries["a"]?.sources, ["a"])
     }
 
+    func testFileExtensionPicksTheAudioSpellingOfAContainerFamily() {
+        XCTAssertEqual(DownloadStore.fileExtension(forContainer: "mov,mp4,m4a,3gp,3g2,mj2"), "m4a")
+        XCTAssertEqual(DownloadStore.fileExtension(forContainer: "matroska,webm"), "webm")
+        XCTAssertEqual(DownloadStore.fileExtension(forContainer: "FLAC"), "flac")
+        XCTAssertEqual(DownloadStore.fileExtension(forContainer: ".mp3"), "mp3")
+        XCTAssertEqual(DownloadStore.fileExtension(forContainer: ""), "mp3")
+        XCTAssertEqual(DownloadStore.fileExtension(forContainer: nil), "mp3")
+    }
+
+    /// The bug this guards: the server reports an Apple Lossless song's
+    /// container as ffprobe's whole family — `mov,mp4,m4a,3gp,3g2,mj2` — and
+    /// using that verbatim as the file extension made the saved file
+    /// unplayable, because `AVURLAsset` refuses an extension it cannot map to
+    /// a known format. The family's audio spelling is what gets saved.
+    func testAMultiValueContainerIsSavedUnderItsAudioExtension() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data("audio".utf8))
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        let track = BaseItemDto(
+            container: "mov,mp4,m4a,3gp,3g2,mj2",
+            id: "a",
+            name: "a",
+            type: .audio
+        )
+
+        store.download(track)
+        try await waitForBatch(store, id: "a")
+
+        XCTAssertEqual(store.entries["a"]?.filename, "a.m4a")
+        XCTAssertEqual(store.localURL(forItemId: "a")?.lastPathComponent, "a.m4a")
+    }
+
     func testOverlappingCollectionsDoNotDuplicateFiles() async throws {
         stubCollections([
             "album": [trackInAlbum("t1", albumID: "album", album: "Album"), TrackStub(id: "t2")],
@@ -1090,6 +1124,44 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertFalse(two.isFullyDownloaded, "The borrowed album stays filtered as partial")
     }
 
+    /// An installed manifest that saved its songs under the server's raw
+    /// multi-value container as the extension is repaired at load: the same
+    /// bytes move to the playable name and the manifest is rewritten — no
+    /// re-download, so the album an upgrade left unplayable plays again.
+    func testASavedFileWithAnUnplayableExtensionIsRepairedOnLoad() throws {
+        let directory = newTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let unplayable = "a1.mov,mp4,m4a,3gp,3g2,mj2"
+        try Data("audio".utf8).write(to: directory.appending(path: unplayable))
+
+        let manifest = #"""
+        {"version":4,"tracks":{
+            "a1":{"track":{"Id":"a1","Name":"a1","Type":"Audio","Container":"mov,mp4,m4a,3gp,3g2,mj2","AlbumId":"al1","Album":"One"},
+                  "filename":"\#(unplayable)","order":0,"requiredBy":["al1"]}
+        },"playlists":{},"artwork":{},"pendingTransfers":{},"activeBatches":{}}
+        """#
+        try Data(manifest.utf8).write(to: directory.appending(path: "manifest.json"))
+
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        XCTAssertEqual(store.entries["a1"]?.filename, "a1.m4a")
+        XCTAssertEqual(
+            store.localURL(forItemId: "a1")?.lastPathComponent,
+            "a1.m4a",
+            "The song resolves without a re-download"
+        )
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        XCTAssertFalse(files.contains(unplayable), "The unplayable name is gone")
+        XCTAssertEqual(
+            try? Data(contentsOf: directory.appending(path: "a1.m4a")),
+            Data("audio".utf8),
+            "The bytes moved with the rename"
+        )
+        let rewritten = try String(contentsOf: directory.appending(path: "manifest.json"), encoding: .utf8)
+        XCTAssertTrue(rewritten.contains("a1.m4a"), "The repair is persisted")
+        XCTAssertFalse(rewritten.contains(unplayable), "The unplayable name is not recorded any more")
+    }
+
     /// The bug this guards: a manifest that would not decode reopened the
     /// store as empty, and the next download persisted that empty state over
     /// the unreadable file — every record gone, every file orphaned. Now the
@@ -1528,6 +1600,36 @@ final class DownloadStoreTests: XCTestCase {
             encoding: .utf8
         ) ?? ""
         XCTAssertFalse(text.contains(DownloadStore.pendingKey(for: remote)), "The pending record is consumed")
+    }
+
+    /// A transfer that was in flight when the app was upgraded recorded the
+    /// raw multi-value container as its filename. The record is repaired at
+    /// load, so the delivery the system kept is filed under the playable
+    /// name.
+    func testAPendingTransferRecordIsRepairedToThePlayableFilename() throws {
+        let directory = newTestDirectory()
+        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
+        try seedManifest(in: directory, pendingTransfers: [
+            DownloadStore.pendingKey(for: remote): .audio(
+                track: BaseItemDto(container: "mov,mp4,m4a,3gp,3g2,mj2", id: "t1", name: "t1", type: .audio),
+                filename: "t1.mov,mp4,m4a,3gp,3g2,mj2",
+                source: "album",
+                batchId: "album",
+                albumSongCount: nil,
+                artistKeys: []
+            ),
+        ])
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let parked = try parkedFile()
+        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+
+        XCTAssertEqual(store.entries["t1"]?.filename, "t1.m4a")
+        XCTAssertEqual(
+            try? Data(contentsOf: directory.appending(path: "t1.m4a")),
+            Data("audio".utf8),
+            "The kept file is filed under the playable name"
+        )
     }
 
     /// A cover the system finished across a death is filed the same way, under
