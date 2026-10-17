@@ -42,8 +42,14 @@ enum Format {
         return n == 1 ? "1 artist" : "\(n) artists"
     }
 
+    /// Formats a byte count the way the system formats file sizes: `150 MB`,
+    /// `1.5 GB`.
+    static func byteCount(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
     /// Formats a byte rate as `10 MB/s`.
     static func speed(bytesPerSecond: Double) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(max(0, bytesPerSecond)), countStyle: .file) + "/s"
+        byteCount(Int64(max(0, bytesPerSecond))) + "/s"
     }
 }

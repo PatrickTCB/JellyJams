@@ -255,7 +255,7 @@ struct DownloadsView: View {
                     }
                 }
             } header: {
-                Text(Format.songCount(songs.count))
+                Text(countWithSize(Format.songCount(songs.count)))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -316,7 +316,7 @@ struct DownloadsView: View {
                     .padding(.bottom)
                 }
             } header: {
-                Text(countText(for: kind, visible.count))
+                Text(countWithSize(countText(for: kind, visible.count)))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -351,7 +351,7 @@ struct DownloadsView: View {
                     DownloadedItemRow(group: group)
                 }
             } header: {
-                Text(Format.playlistCount(playlists.count))
+                Text(countWithSize(Format.playlistCount(playlists.count)))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -370,6 +370,17 @@ struct DownloadsView: View {
         case .artist: Format.artistCount(count)
         case .playlist, .genre: Format.playlistCount(count)
         }
+    }
+
+    /// A tab's count line with the section's whole disk usage appended —
+    /// "3 albums | 150 MB". Every tab reports the same total: the tabs are
+    /// views over one shared set of files, and per-tab sizes would
+    /// double-count a song two collections share. The size is left out while
+    /// nothing is on disk, so an empty section just reports its counts.
+    private func countWithSize(_ countText: String) -> String {
+        let bytes = downloads.totalByteCount
+        guard bytes > 0 else { return countText }
+        return "\(countText) | \(Format.byteCount(bytes))"
     }
 
     private func placeholder(for kind: DownloadStore.GroupKind) -> String {

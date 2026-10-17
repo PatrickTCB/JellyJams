@@ -1016,6 +1016,137 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertTrue(rewritten.contains("al1|album-cover"))
     }
 
+    // MARK: - Sizes
+
+    /// The stub answers artwork requests — their path contains `/Items` —
+    /// with an empty collection payload, so a saved cover is this many bytes.
+    private var stubbedCoverSize: Int64 { Int64(Self.itemsData([]).count) }
+
+    /// The header total: every song file and every artwork file, each
+    /// counted once however many collections reference it.
+    func testTheTotalCountsEverySongAndArtworkFileOnce() async throws {
+        stubCollections([
+            "al1": [
+                trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover"),
+                trackInAlbum("a2", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover"),
+            ],
+            "pl1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover")],
+        ])
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+        store.download(BaseItemDto(id: "pl1", name: "Mix", type: .playlist))
+        try await waitForBatch(store, id: "pl1")
+
+        // The stub serves 5-byte "audio" for every song; the playlist's
+        // member is the album's already-saved file, and the album's two
+        // songs share one cover.
+        XCTAssertEqual(store.entries["a1"]?.fileSize, 5)
+        XCTAssertEqual(store.entries["a2"]?.fileSize, 5)
+        XCTAssertEqual(store.totalByteCount, 10 + stubbedCoverSize)
+    }
+
+    /// A collection's own size, as its detail reports it: its songs on disk
+    /// plus the cover it resolves. The group and its stand-in item agree —
+    /// the detail renders the item — and an artist borrows the album's cover.
+    func testCollectionsCountTheirSongsAndTheArtworkTheyResolve() async throws {
+        stubCollections([
+            "al1": [
+                trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover"),
+                trackInAlbum("a2", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover"),
+            ],
+        ])
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+
+        let album = try XCTUnwrap(store.downloadedAlbums().first)
+        XCTAssertEqual(store.byteCount(for: album), 10 + stubbedCoverSize)
+        XCTAssertEqual(
+            store.byteCount(for: album.item),
+            store.byteCount(for: album),
+            "The detail's stand-in item resolves the same bytes as the group"
+        )
+        let artist = try XCTUnwrap(store.downloadedArtists().first)
+        XCTAssertEqual(
+            store.byteCount(for: artist),
+            10 + stubbedCoverSize,
+            "An artist counts their songs and borrows the album's cover"
+        )
+        // A plain song counts only its own file — the cover belongs to the album.
+        XCTAssertEqual(store.byteCount(for: TestFixtures.item(id: "a1")), 5)
+    }
+
+    /// A downloaded playlist counts its members' files and its own cover.
+    func testAPlaylistCountsItsMembersFilesAndItsCover() async throws {
+        stubCollections(["pl1": [TrackStub(id: "x"), TrackStub(id: "y")]])
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(BaseItemDto(
+            id: "pl1",
+            imageTags: ["Primary": "cover-tag"],
+            name: "Mix",
+            type: .playlist
+        ))
+        try await waitForBatch(store, id: "pl1")
+
+        let playlist = try XCTUnwrap(store.downloadedPlaylists().first)
+        XCTAssertEqual(store.byteCount(for: playlist), 10 + stubbedCoverSize)
+        XCTAssertEqual(store.byteCount(for: playlist.item), store.byteCount(for: playlist))
+    }
+
+    func testSizesSurviveRelaunch() async throws {
+        stubCollections([
+            "al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover")],
+        ])
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+        let total = store.totalByteCount
+
+        // The manifest write is async; give it a beat before reopening.
+        try await Task.sleep(for: .milliseconds(100))
+        let reopened = DownloadStore(directory: directory, session: try stubbedSession())
+
+        XCTAssertEqual(reopened.entries["a1"]?.fileSize, 5)
+        XCTAssertEqual(reopened.totalByteCount, total, "Sizes are read back from the manifest")
+    }
+
+    /// A manifest saved before sizes were recorded gains them at load,
+    /// measured off the files themselves — the totals work after an upgrade
+    /// without a re-download, and the measured sizes are persisted.
+    func testAManifestWithoutSizesGainsThemFromTheFilesOnLoad() throws {
+        let directory = newTestDirectory()
+        let artworkDirectory = directory.appending(path: "Artwork", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: artworkDirectory, withIntermediateDirectories: true)
+        try Data("audio-byte".utf8).write(to: directory.appending(path: "t1.mp3"))
+        try Data("jpeg-data".utf8).write(to: artworkDirectory.appending(path: "al1-cover.jpg"))
+
+        let manifest = #"""
+        {"version":4,"tracks":{
+            "t1":{"track":{"Id":"t1","Name":"t1","Type":"Audio","AlbumId":"al1","Album":"One","AlbumPrimaryImageTag":"cover"},
+                  "filename":"t1.mp3","order":0,"requiredBy":["al1"]}
+        },"playlists":{},"artwork":{
+            "al1|cover":{"filename":"al1-cover.jpg","ownerItemID":"al1","imageTag":"cover","requiredBy":["t1"]}
+        },"pendingTransfers":{},"activeBatches":{}}
+        """#
+        try Data(manifest.utf8).write(to: directory.appending(path: "manifest.json"))
+
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        XCTAssertEqual(store.entries["t1"]?.fileSize, 10)
+        XCTAssertEqual(store.artworkEntries["al1|cover"]?.fileSize, 9)
+        XCTAssertEqual(store.totalByteCount, 19)
+        let album = try XCTUnwrap(store.downloadedAlbums().first)
+        XCTAssertEqual(store.byteCount(for: album), 19)
+        let rewritten = try String(contentsOf: directory.appending(path: "manifest.json"), encoding: .utf8)
+        XCTAssertTrue(rewritten.contains(#""fileSize":10"#), "The measured sizes are persisted")
+    }
+
     // MARK: - Persistence
 
     func testTheManifestSurvivesRelaunch() async throws {

@@ -167,6 +167,20 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(Format.artistCount(3), "3 artists")
         XCTAssertEqual(Format.artistCount(nil), "0 artists")
     }
+
+    /// Space totals are the system's own file-size formatting — the same
+    /// spelling the download speed already used. The expectations are built
+    /// with the formatter itself, because both the decimal separator and the
+    /// unit symbols are locale-dependent.
+    func testByteCountsFormatAsSystemFileSizes() {
+        func system(_ bytes: Int64) -> String {
+            ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        }
+        XCTAssertEqual(Format.byteCount(0), system(0))
+        XCTAssertEqual(Format.byteCount(750), system(750))
+        XCTAssertEqual(Format.byteCount(150_000_000), system(150_000_000))
+        XCTAssertEqual(Format.byteCount(1_500_000_000), system(1_500_000_000))
+    }
 }
 
 /// Sort options are sent to the server as ordered field lists; a mismatch

@@ -71,12 +71,22 @@ struct DownloadedArtistDetail: View {
         albums.flatMap { downloads.tracks(in: $0).inAlbumOrder() }
     }
 
+    /// The header's count lines with the artist's whole disk usage under
+    /// them: albums, songs, and the space they take up. The group overload
+    /// sizes the artist — their stand-in item carries no image tag, so the
+    /// group is what knows their picture's key.
+    private var subtitle: String {
+        let counts = Format.albumAndSongCount(albums.count, songs.count)
+        let bytes = downloads.byteCount(for: artist)
+        return bytes > 0 ? "\(counts)\n\(Format.byteCount(bytes))" : counts
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 CollectionHeader(
                     item: artist.item,
-                    subtitle: Format.albumAndSongCount(albums.count, songs.count),
+                    subtitle: subtitle,
                     isCircular: true,
                     localArtworkURL: downloads.localArtworkURL(for: artist),
                     canPlay: !songs.isEmpty,

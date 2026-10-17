@@ -76,6 +76,11 @@ final class DownloadStore: ObservableObject {
     struct Entry: Codable, Sendable, Equatable {
         var track: BaseItemDto
         var filename: String
+        /// The saved file's size in bytes, measured as it landed — what the
+        /// space totals report, so browsing never stats the disk. `nil` in a
+        /// manifest saved before sizes were recorded; the load-time backfill
+        /// measures those files once.
+        var fileSize: Int64?
         /// Fetch order, preserved so collections list their tracks in the
         /// order the server returned them.
         var order: Int
@@ -92,13 +97,14 @@ final class DownloadStore: ObservableObject {
         var artistKeys: Set<String>
 
         private enum CodingKeys: String, CodingKey {
-            case track, filename, order, albumSongCount, artistKeys
+            case track, filename, fileSize, order, albumSongCount, artistKeys
             case sources = "requiredBy"
         }
 
         init(
             track: BaseItemDto,
             filename: String,
+            fileSize: Int64? = nil,
             order: Int,
             sources: Set<String>,
             albumSongCount: Int? = nil,
@@ -106,6 +112,7 @@ final class DownloadStore: ObservableObject {
         ) {
             self.track = track
             self.filename = filename
+            self.fileSize = fileSize
             self.order = order
             self.sources = sources
             self.albumSongCount = albumSongCount
@@ -118,6 +125,7 @@ final class DownloadStore: ObservableObject {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             track = try container.decode(BaseItemDto.self, forKey: .track)
             filename = try container.decode(String.self, forKey: .filename)
+            fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize)
             order = try container.decode(Int.self, forKey: .order)
             sources = try container.decodeIfPresent(Set<String>.self, forKey: .sources) ?? []
             albumSongCount = try container.decodeIfPresent(Int.self, forKey: .albumSongCount)
@@ -149,6 +157,8 @@ final class DownloadStore: ObservableObject {
         /// Track ids — and playlist or artist ids, for a collection's own
         /// cover or picture — that require this artwork.
         var requiredBy: Set<String>
+        /// The saved image's size in bytes; see ``Entry/fileSize``.
+        var fileSize: Int64? = nil
 
         /// The manifest key: owner plus tag, or the bare tag for artwork
         /// carried over from a v1 manifest.
@@ -442,6 +452,11 @@ final class DownloadStore: ObservableObject {
             if repairingUnplayableFilenames() {
                 changed = true
             }
+            // Sizes a manifest saved before they were recorded never carried:
+            // measured off the files themselves, once.
+            if backfillingFileSizes() {
+                changed = true
+            }
             if changed {
                 persist()
             }
@@ -566,6 +581,28 @@ final class DownloadStore: ObservableObject {
     /// ``fileExtension(forContainer:)`` derives from its container.
     private static func filename(trackID: String, container: String?) -> String {
         "\(trackID).\(fileExtension(forContainer: container))"
+    }
+
+    /// Measures the files a manifest recorded without sizes — the shape every
+    /// manifest saved before sizes were recorded has — so the space totals
+    /// report honestly after an upgrade without a re-download. A file that is
+    /// not on disk keeps `nil` and counts as nothing. Idempotent: entries that
+    /// carry a size are left alone.
+    private func backfillingFileSizes() -> Bool {
+        var backfilled = false
+        for (id, var entry) in entries where entry.fileSize == nil {
+            guard let size = Self.byteSize(of: directory.appending(path: entry.filename)) else { continue }
+            entry.fileSize = size
+            entries[id] = entry
+            backfilled = true
+        }
+        for (key, var artwork) in artworkEntries where artwork.fileSize == nil {
+            guard let size = Self.byteSize(of: artworkDirectory.appending(path: artwork.filename)) else { continue }
+            artwork.fileSize = size
+            artworkEntries[key] = artwork
+            backfilled = true
+        }
+        return backfilled
     }
 
     /// Re-keys legacy artwork entries onto ``artworkPair(for:)`'s` canonical
@@ -771,6 +808,46 @@ final class DownloadStore: ObservableObject {
         guard let id = item.id, let record = playlists[id] else { return false }
         let present = record.trackIDs.filter { entries[$0] != nil }.count
         return present < record.trackIDs.count || present < (record.totalSongs ?? 0)
+    }
+
+    /// Every byte the downloads occupy on disk: each saved song plus each
+    /// saved artwork file, counted once however many collections reference
+    /// it. Every Downloads tab's header reports this same total — the tabs
+    /// are views over one shared set of files, and per-tab sizes would
+    /// double-count a song two collections share.
+    var totalByteCount: Int64 {
+        entries.values.reduce(0) { $0 + ($1.fileSize ?? 0) }
+            + artworkEntries.values.reduce(0) { $0 + ($1.fileSize ?? 0) }
+    }
+
+    /// The bytes one downloaded item's files occupy: the songs on disk saved
+    /// for it plus the artwork they resolve to. A plain song counts only its
+    /// own file — a cover belongs to its album. A song shared with another
+    /// collection counts towards both, the way it lists in both.
+    func byteCount(for item: BaseItemDto) -> Int64 {
+        guard let id = item.id else { return 0 }
+        guard let kind = Self.groupKind(of: item) else {
+            return entries[id]?.fileSize ?? 0
+        }
+        var songs: [Entry]
+        if kind == .playlist, let record = playlists[id] {
+            songs = record.trackIDs.compactMap { entries[$0] }
+        } else {
+            songs = songsMatchingGroupID(id, kind: kind)
+        }
+        return songs.reduce(0) { $0 + ($1.fileSize ?? 0) }
+            + artworkByteCount(forKeys: Self.artworkKeys(for: item))
+    }
+
+    /// The bytes one downloaded group occupies: its songs on disk plus the
+    /// cover its artwork keys resolve to. An artist's detail reads this
+    /// rather than ``byteCount(for:)`` — the artist's stand-in item carries
+    /// no image tag, so only the group knows the picture's key.
+    func byteCount(for group: DownloadGroup) -> Int64 {
+        tracks(in: group).reduce(Int64(0)) { total, track in
+            guard let id = track.id, let entry = entries[id] else { return total }
+            return total + (entry.fileSize ?? 0)
+        } + artworkByteCount(forKeys: group.artworkKeys)
     }
 
     /// Song counts across every running batch, or `nil` while nothing is
@@ -1317,6 +1394,7 @@ final class DownloadStore: ObservableObject {
             entries[id] = Entry(
                 track: track,
                 filename: filename,
+                fileSize: Self.byteSize(of: destination),
                 order: (entries.values.map(\.order).max() ?? 0) + 1,
                 sources: [source],
                 albumSongCount: albumSongCount,
@@ -1397,7 +1475,8 @@ final class DownloadStore: ObservableObject {
                 filename: filename,
                 ownerItemID: ownerID,
                 imageTag: imageTag,
-                requiredBy: [holderID]
+                requiredBy: [holderID],
+                fileSize: Self.byteSize(of: destination)
             )
             artworkEntries[entry.key] = entry
             persist()
@@ -1537,6 +1616,7 @@ final class DownloadStore: ObservableObject {
                 entries[id] = Entry(
                     track: track,
                     filename: filename,
+                    fileSize: Self.byteSize(of: destination),
                     order: (entries.values.map(\.order).max() ?? 0) + 1,
                     sources: [source],
                     albumSongCount: albumSongCount,
@@ -1552,7 +1632,7 @@ final class DownloadStore: ObservableObject {
                 }
             }
         case let .artwork(ownerID, imageTag, filename, holderID):
-            let entry = ArtworkEntry(
+            var entry = ArtworkEntry(
                 filename: filename,
                 ownerItemID: ownerID,
                 imageTag: imageTag,
@@ -1569,6 +1649,7 @@ final class DownloadStore: ObservableObject {
                     try? FileManager.default.removeItem(at: file)
                     break
                 }
+                entry.fileSize = Self.byteSize(of: destination)
                 artworkEntries[entry.key] = entry
             }
         }
@@ -1828,6 +1909,16 @@ final class DownloadStore: ObservableObject {
         return nil
     }
 
+    /// The size of the artwork file the keys resolve to — the same one
+    /// ``artworkURL(forAnyOf:)`` shows — or 0 when none is saved.
+    private func artworkByteCount(forKeys keys: [String]) -> Int64 {
+        for key in keys {
+            guard let entry = artworkEntries[key] else { continue }
+            if artworkFileExists(entry.filename) { return entry.fileSize ?? 0 }
+        }
+        return 0
+    }
+
     private func artworkURL(forKey key: String) -> URL? {
         guard let filename = artworkEntries[key]?.filename else { return nil }
         return existingFile(in: artworkDirectory, named: filename)
@@ -1841,6 +1932,12 @@ final class DownloadStore: ObservableObject {
     private func existingFile(in directory: URL, named filename: String) -> URL? {
         let url = directory.appending(path: filename)
         return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
+    }
+
+    /// A saved file's size in bytes, or `nil` when it is not on disk.
+    private static func byteSize(of file: URL) -> Int64? {
+        guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return nil }
+        return Int64(size)
     }
 
     private func persist() {

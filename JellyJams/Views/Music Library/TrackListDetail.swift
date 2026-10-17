@@ -364,6 +364,12 @@ struct TrackListDetail: View {
         parts.append(Format.songCount(count))
         let total = tracks.compactMap(\.runtimeSeconds).reduce(0, +)
         if total > 0 { parts.append(Format.duration(total)) }
+        if downloaded {
+            // How much space this collection's files take up on disk — a
+            // downloaded collection's detail is where its own size shows.
+            let bytes = downloads.byteCount(for: headerItem)
+            if bytes > 0 { parts.append(Format.byteCount(bytes)) }
+        }
         return parts.joined(separator: " • ")
     }
 
