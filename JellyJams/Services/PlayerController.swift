@@ -981,6 +981,7 @@ final class PlayerController: ObservableObject {
             currentTime: clock.currentTime,
             duration: clock.duration,
             artworkURL: currentItem.flatMap { client?.artworkURL(for: $0, size: 600) },
+            localArtworkURL: currentItem.flatMap { downloads?.localArtworkURL(for: $0) },
             canGoNext: canGoNext,
             canGoPrevious: canGoPrevious
         )

@@ -25,6 +25,7 @@ final class NowPlayingCenter {
     static let shared = NowPlayingCenter()
     private var didConfigure = false
     private var artworkURL: URL?
+    private var localArtworkURL: URL?
 
     private init() {}
 
@@ -74,6 +75,7 @@ final class NowPlayingCenter {
         currentTime: Double,
         duration: Double,
         artworkURL: URL?,
+        localArtworkURL: URL?,
         canGoNext: Bool,
         canGoPrevious: Bool
     ) {
@@ -95,34 +97,54 @@ final class NowPlayingCenter {
         if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
         if let track = item.indexNumber { info[MPMediaItemPropertyAlbumTrackNumber] = track }
 
-        // Reuse existing artwork if the URL hasn't changed.
+        // Reuse existing artwork if neither source has changed.
         if let existing = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork],
-           artworkURL == self.artworkURL {
+           artworkURL == self.artworkURL, localArtworkURL == self.localArtworkURL {
             info[MPMediaItemPropertyArtwork] = existing
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 
-        if artworkURL != self.artworkURL {
+        if artworkURL != self.artworkURL || localArtworkURL != self.localArtworkURL {
             self.artworkURL = artworkURL
-            loadArtwork(from: artworkURL)
+            self.localArtworkURL = localArtworkURL
+            loadArtwork(local: localArtworkURL, remote: artworkURL)
         }
     }
 
-    private func loadArtwork(from url: URL?) {
-        guard let url else { return }
+    private func loadArtwork(local: URL?, remote: URL?) {
+        guard local != nil || remote != nil else { return }
         Task {
-            if let cached = ImageCache.shared.image(for: url) {
-                apply(artwork: cached, for: url)
+            // The saved file is authoritative, mirroring ``ArtworkImage``:
+            // downloaded artwork comes from disk and is never requested from
+            // the server, so having one ends the lookup — even when it cannot
+            // be decoded, where no artwork is the honest answer.
+            if let local {
+                if let cached = ImageCache.shared.image(for: local) {
+                    apply(artwork: cached, local: local, remote: remote)
+                    return
+                }
+                if let decoded = await ArtworkDecoder.decode(
+                    fileAt: local,
+                    maxPixelSize: Self.artworkPixelSize
+                ) {
+                    ImageCache.shared.set(decoded, for: local)
+                    apply(artwork: decoded, local: local, remote: remote)
+                }
+                return
+            }
+            guard let remote else { return }
+            if let cached = ImageCache.shared.image(for: remote) {
+                apply(artwork: cached, local: nil, remote: remote)
                 return
             }
             do {
-                let (data, response) = try await ArtworkLoader.session.data(from: url)
+                let (data, response) = try await ArtworkLoader.session.data(from: remote)
                 guard let response = response as? HTTPURLResponse,
                       (200..<300).contains(response.statusCode),
                       let image = PlatformImage(data: data)
                 else { return }
-                ImageCache.shared.set(image, for: url)
-                apply(artwork: image, for: url)
+                ImageCache.shared.set(image, for: remote)
+                apply(artwork: image, local: nil, remote: remote)
             } catch {
                 guard !error.isCancellation else { return }
                 nowPlayingLogger.debug("Could not load Now Playing artwork: \(error.localizedDescription, privacy: .public)")
@@ -130,8 +152,13 @@ final class NowPlayingCenter {
         }
     }
 
-    private func apply(artwork image: PlatformImage, for url: URL) {
-        guard url == artworkURL else { return }
+    /// The longest side artwork is decoded at. Downloaded covers are saved at
+    /// 500 px and remote artwork is requested at 600 px, so this bounds the
+    /// decode without ever downsampling either source.
+    private static let artworkPixelSize = 1024
+
+    private func apply(artwork image: PlatformImage, local: URL?, remote: URL?) {
+        guard local == localArtworkURL, remote == artworkURL else { return }
         let requestHandler: @Sendable (CGSize) -> PlatformImage = { _ in image }
         let artwork = MPMediaItemArtwork(boundsSize: image.size, requestHandler: requestHandler)
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
@@ -141,6 +168,7 @@ final class NowPlayingCenter {
 
     func clear() {
         artworkURL = nil
+        localArtworkURL = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         setCommandAvailability(
             hasItem: false,
