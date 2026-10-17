@@ -305,6 +305,95 @@ final class LocalSortTests: XCTestCase {
         XCTAssertEqual(once.map(\.displayName), twice.map(\.displayName))
         XCTAssertEqual(Set(once.compactMap(\.id)), Set(tracks.compactMap(\.id)))
     }
+
+    // MARK: - Downloaded groups
+
+    /// A derived group standing in for a downloaded album, carrying only the
+    /// fields the Downloads grids' sort menus read.
+    private func group(
+        _ title: String,
+        artist: String? = nil,
+        added: Date? = nil,
+        year: Int? = nil,
+        recency: Int = 0
+    ) -> DownloadStore.DownloadGroup {
+        DownloadStore.DownloadGroup(
+            id: title,
+            kind: .album,
+            title: title,
+            item: BaseItemDto(
+                albumArtist: artist,
+                dateCreated: added,
+                id: title,
+                name: title,
+                productionYear: year,
+                type: .musicAlbum
+            ),
+            downloadedSongs: 1,
+            totalSongs: nil,
+            isExplicit: true,
+            artworkKeys: [],
+            artistKeys: [],
+            mostRecentOrder: recency
+        )
+    }
+
+    /// The albums grid offers the online list's fields; the derived album
+    /// sorts by the ones its stand-in carries, with the same name tiebreak.
+    func testGroupsSortByTheStandInItemsFields() {
+        let groups = [
+            group("Zeta", artist: "A"),
+            group("Alpha", artist: "B"),
+            group("Mid", artist: "A"),
+        ]
+
+        XCTAssertEqual(groups.sorted(by: .albumArtist, order: .ascending).map(\.title), ["Mid", "Zeta", "Alpha"])
+        XCTAssertEqual(groups.sorted(by: .albumArtist, order: .descending).map(\.title), ["Alpha", "Zeta", "Mid"])
+    }
+
+    func testGroupsSortByDateAddedAndYear() {
+        let older = group("Old", added: Date(timeIntervalSince1970: 100), year: 1990)
+        let newer = group("New", added: Date(timeIntervalSince1970: 200), year: 2000)
+        let undated = group("Undated")
+
+        XCTAssertEqual(
+            [newer, undated, older].sorted(by: .dateCreated, order: .ascending).map(\.title),
+            ["Undated", "Old", "New"]
+        )
+        XCTAssertEqual(
+            [newer, older].sorted(by: .productionYear, order: .descending).map(\.title),
+            ["New", "Old"]
+        )
+    }
+
+    /// A field the stand-in lacks must not decide the order by which side it
+    /// landed on: the pair has to flip cleanly when the direction flips.
+    func testGroupsWithoutTheFieldFallBackToTheName() {
+        let missing = group("Beta")
+        let present = group("Alpha", artist: "Zed")
+
+        XCTAssertEqual([missing, present].sorted(by: .albumArtist, order: .ascending).map(\.title), ["Beta", "Alpha"])
+        XCTAssertEqual([missing, present].sorted(by: .albumArtist, order: .descending).map(\.title), ["Alpha", "Beta"])
+    }
+
+    /// Recently Downloaded: newest arrival first, and groups that share a
+    /// newest song (two artists off one compilation, say) keep name order.
+    func testMostRecentFirstOrdersByNewestSongThenName() {
+        let early = group("A", recency: 3)
+        let late = group("B", recency: 9)
+        let earlyToo = group("C", recency: 3)
+
+        XCTAssertEqual([late, early, earlyToo].mostRecentFirst().map(\.title), ["B", "A", "C"])
+    }
+
+    func testRandomGroupOrderIsStableAcrossSorts() {
+        let groups = (0..<20).map { group("Album \($0)") }
+        let once = groups.sorted(by: .random, order: .ascending)
+        let twice = groups.sorted(by: .random, order: .ascending)
+
+        XCTAssertEqual(once.map(\.title), twice.map(\.title))
+        XCTAssertEqual(Set(once.map(\.title)), Set(groups.map(\.title)))
+    }
 }
 
 /// Cancellation is routine (a `.task(id:)` re-running, a search term changing)

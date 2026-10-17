@@ -25,6 +25,9 @@ final class DownloadStoreTests: XCTestCase {
         /// The song's own `ImageTags["Primary"]` — what a file with embedded art
         /// carries, and which differs from song to song on the same album.
         var ownTag: String?
+        /// The server's `DateCreated`, as an `/Items` payload carries it — what
+        /// the Downloads grids' Date Added sort reads off the saved snapshots.
+        var dateCreated: String?
 
         var json: String {
             var fields = [
@@ -40,6 +43,7 @@ final class DownloadStoreTests: XCTestCase {
             }
             if let imageTag { fields.append("\"AlbumPrimaryImageTag\":\"\(imageTag)\"") }
             if let ownTag { fields.append("\"ImageTags\":{\"Primary\":\"\(ownTag)\"}") }
+            if let dateCreated { fields.append("\"DateCreated\":\"\(dateCreated)\"") }
             return "{" + fields.joined(separator: ",") + "}"
         }
     }
@@ -155,8 +159,8 @@ final class DownloadStoreTests: XCTestCase {
     }
 
     /// The track payload for one song of one album, as the server returns it.
-    private func trackInAlbum(_ id: String, albumID: String, album: String, artistID: String? = nil, artist: String? = nil, imageTag: String? = nil, ownTag: String? = nil) -> TrackStub {
-        TrackStub(id: id, albumID: albumID, album: album, artistID: artistID, artist: artist, imageTag: imageTag, ownTag: ownTag)
+    private func trackInAlbum(_ id: String, albumID: String, album: String, artistID: String? = nil, artist: String? = nil, imageTag: String? = nil, ownTag: String? = nil, dateCreated: String? = nil) -> TrackStub {
+        TrackStub(id: id, albumID: albumID, album: album, artistID: artistID, artist: artist, imageTag: imageTag, ownTag: ownTag, dateCreated: dateCreated)
     }
 
     // MARK: - Downloading songs
@@ -339,6 +343,42 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.downloadedAlbums().first?.downloadedSongs, 2)
         XCTAssertEqual(store.downloadedAlbums().first?.totalSongs, 3)
         XCTAssertFalse(store.downloadedAlbums().first?.isFullyDownloaded ?? true)
+    }
+
+    /// The derived album carries the sort keys the Downloads grids' menus
+    /// read: each song's Date Added is all the manifest holds, so the album
+    /// reports the earliest of them, and the newest song on disk decides the
+    /// group's Recently Downloaded place.
+    func testDerivedAlbumsCarrySortKeysFromTheirSongs() async throws {
+        stubCollections([
+            "al1": [
+                trackInAlbum("a1", albumID: "al1", album: "Album One", artistID: "art-1", artist: "Artist", dateCreated: "2026-01-02T00:00:00Z"),
+                trackInAlbum("a2", albumID: "al1", album: "Album One", artistID: "art-1", artist: "Artist", dateCreated: "2026-01-01T00:00:00Z"),
+            ],
+            "al2": [
+                trackInAlbum("b1", albumID: "al2", album: "Album Two", artistID: "art-1", artist: "Artist", dateCreated: "2026-01-03T00:00:00Z"),
+            ],
+        ])
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+        store.download(albumStub(id: "al2", artist: "Artist"))
+        try await waitForBatch(store, id: "al2")
+
+        let albums = store.downloadedAlbums()
+        let one = try XCTUnwrap(albums.first { $0.id == "al1" })
+        let two = try XCTUnwrap(albums.first { $0.id == "al2" })
+
+        // The album entered the library when its first song did.
+        XCTAssertEqual(one.item.dateCreated, Date(timeIntervalSince1970: 1_767_225_600), "Earliest song date wins") // 2026-01-01T00:00:00Z
+        XCTAssertEqual(two.item.dateCreated, Date(timeIntervalSince1970: 1_767_398_400)) // 2026-01-03T00:00:00Z
+        // Recency: each album is as new as its newest song, and Album Two's
+        // arrived after everything of Album One's.
+        XCTAssertEqual(one.mostRecentOrder, 2)
+        XCTAssertEqual(two.mostRecentOrder, 3)
+        let artist = try XCTUnwrap(store.downloadedArtists().first)
+        XCTAssertEqual(artist.mostRecentOrder, 3, "An artist is as recent as their newest album")
     }
 
     /// Downloading an artist saves each of their albums as a normal album
