@@ -308,7 +308,6 @@ struct DownloadsView: View {
                 if filtered, hidden > 0 {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Hiding \(Format.albumCount(hidden)) not downloaded in full.")
-                        Button("Show partial albums") { preferences.showsCompleteAlbumsOnly = false }
                     }
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -331,8 +330,6 @@ struct DownloadsView: View {
                         Label("No complete albums", systemImage: placeholder(for: kind))
                     } description: {
                         Text("Nothing is downloaded in full yet.")
-                    } actions: {
-                        Button("Show partial albums") { preferences.showsCompleteAlbumsOnly = false }
                     }
                 } else {
                     ContentUnavailableView(
