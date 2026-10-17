@@ -50,10 +50,11 @@ struct DownloadedGroupRef: Hashable {
 /// A downloaded artist opened from the Downloads section: the same layout the
 /// Library artist page shows — a circular header over an adaptive grid of
 /// their albums — built entirely from the manifest, with no server involved.
-/// The header's cover is one of the artist's albums' (an artist has no saved
-/// image of their own), its Play and Shuffle buttons start the songs on disk
-/// with playback resolving each to its saved file, and each album opens the
-/// same offline album detail a downloaded album does.
+/// The header's cover is the artist's own picture when one was saved with the
+/// download (or filled in by the sign-in sync), else one of their albums'; its
+/// Play and Shuffle buttons start the songs on disk with playback resolving
+/// each to its saved file, and each album opens the same offline album detail a
+/// downloaded album does.
 struct DownloadedArtistDetail: View {
     let artist: DownloadStore.DownloadGroup
 

@@ -44,6 +44,13 @@ private let downloadLog = Logger(
 /// file and leave the album views with nothing to resolve. Artwork follows the
 /// same reference counting as audio.
 ///
+/// An artist's picture is saved the same way — under the artist's own id, when
+/// the artist is downloaded — and the artist views prefer it, with the borrowed
+/// album cover as the fallback for an artist surfaced by songs alone. The
+/// sign-in pass ``syncArtistArtwork()`` keeps the pictures honest both ways:
+/// downloads saved before pictures came with artists gain theirs, and a picture
+/// whose artist is no longer downloaded is reclaimed.
+///
 /// Nothing in the browse path (`groups`, `tracks`, `localURL`, `localArtworkURL`)
 /// touches the network or needs a signed-in session: the manifest holds every
 /// byte of metadata those screens render. It is rewritten after every change, so
@@ -135,11 +142,12 @@ final class DownloadStore: ObservableObject {
     struct ArtworkEntry: Codable, Sendable, Equatable {
         var filename: String
         /// The item that owns the image — the album for album art, the playlist
-        /// for a playlist cover. `nil` for artwork saved by a v1 manifest,
-        /// which keyed files by tag alone.
+        /// for a playlist cover, the artist for their picture. `nil` for
+        /// artwork saved by a v1 manifest, which keyed files by tag alone.
         var ownerItemID: String?
         var imageTag: String
-        /// Track ids (and playlist ids, for covers) that require this artwork.
+        /// Track ids — and playlist or artist ids, for a collection's own
+        /// cover or picture — that require this artwork.
         var requiredBy: Set<String>
 
         /// The manifest key: owner plus tag, or the bare tag for artwork
@@ -217,9 +225,10 @@ final class DownloadStore: ObservableObject {
         /// the rest.
         let isExplicit: Bool
         /// The keys this group's cover is filed under, canonical first — an
-        /// album's own pair, an artist the borrowed pair of one of its albums, a
-        /// playlist its saved cover — followed by the spellings older manifests
-        /// used, so artwork saved before a migration still shows.
+        /// album's own pair, an artist their saved picture with the borrowed
+        /// pair of one of their albums behind it, a playlist its saved cover —
+        /// followed by the spellings older manifests used, so artwork saved
+        /// before a migration still shows.
         let artworkKeys: [String]
         /// Artist attribution for an album group; empty for playlists.
         let artistKeys: Set<String>
@@ -617,6 +626,11 @@ final class DownloadStore: ObservableObject {
         }
         if client != nil {
             resumeInterruptedBatches()
+            // Reconciles artist pictures with what is downloaded: fills in the
+            // ones saved before pictures came with artists, reclaims the ones
+            // whose artist is gone. A no-op once the pictures are in order;
+            // retried at the next sign-in if it failed (offline, say).
+            Task { await syncArtistArtwork() }
         }
     }
 
@@ -709,10 +723,10 @@ final class DownloadStore: ObservableObject {
         artworkURL(forAnyOf: Self.artworkKeys(for: item))
     }
 
-    /// The saved artwork file for a downloaded group. Artists have no image of
-    /// their own on disk, so a group carries the candidate keys of the album it
-    /// borrowed its cover from, in the same order ``localArtworkURL(for:)``
-    /// tries them.
+    /// The saved artwork file for a downloaded group. An artist carries its own
+    /// picture's keys first — an artist downloaded with a picture has one on
+    /// disk — with the album it borrowed its cover from behind them, in the
+    /// same order ``localArtworkURL(for:)`` tries them.
     func localArtworkURL(for group: DownloadGroup) -> URL? {
         artworkURL(forAnyOf: group.artworkKeys)
     }
@@ -809,10 +823,12 @@ final class DownloadStore: ObservableObject {
             }
         }
         return albumsByArtist.compactMap { key, albums in
-            // An artist's artwork is one of their albums' covers: artists have
-            // no image of their own saved, and borrowing one costs no request.
-            // An artist's cover is one of their albums': the first album that
-            // has anywhere to look, which after migration is every one of them.
+            // An artist's artwork is their own picture when one has been
+            // saved — it arrived with the artist download, or with the
+            // sign-in sync — with the cover of one of their albums behind
+            // it: the fallback for an artist surfaced by songs alone. `lead`
+            // is the first album that has anywhere to look, which after
+            // migration is every one of them.
             guard let lead = albums.first(where: { !$0.artworkKeys.isEmpty }) ?? albums.first else { return nil }
             let name = lead.item.artistNameForGroup ?? key
             return DownloadGroup(
@@ -823,12 +839,23 @@ final class DownloadStore: ObservableObject {
                 downloadedSongs: albums.reduce(0) { $0 + $1.downloadedSongs },
                 totalSongs: nil,
                 isExplicit: albums.contains { $0.isExplicit },
-                artworkKeys: lead.artworkKeys,
+                artworkKeys: artistArtworkKeys(forArtistID: key) + lead.artworkKeys,
                 artistKeys: [key],
                 mostRecentOrder: albums.map(\.mostRecentOrder).max() ?? 0
             )
         }
         .sorted { $0.title < $1.title }
+    }
+
+    /// The manifest keys the artist's own picture is filed under: every entry
+    /// the artist item owns, sorted for a deterministic order. Superseding
+    /// keeps an artist to one picture, so this is normally empty or a single
+    /// key.
+    private func artistArtworkKeys(forArtistID id: String) -> [String] {
+        artworkEntries
+            .filter { $0.value.ownerItemID == id }
+            .map { $0.key }
+            .sorted()
     }
 
     /// The downloaded albums attributed to `artistID` — an id, or an artist name
@@ -908,6 +935,12 @@ final class DownloadStore: ObservableObject {
                         try Task.checkCancellation()
                         await downloadCollection(album, into: id, via: client)
                     }
+                    // The artist's own picture, saved under the artist's id —
+                    // one request, so their rows never need the server for it
+                    // and an album cover stays what an artist *without* a
+                    // picture falls back to.
+                    try Task.checkCancellation()
+                    await downloadArtistArtwork(for: item, via: client)
                 } catch {
                     if !error.isCancellation {
                         errorMessage = "Couldn’t download “\(item.displayName)”. \(error.userFacingMessage)"
@@ -1046,6 +1079,14 @@ final class DownloadStore: ObservableObject {
             deleteSongs([id])
         case .playlist?:
             deletePlaylist(id)
+        case .artist?:
+            deleteSongs(songsMatchingGroupID(id, kind: .artist).compactMap(\.track.id))
+            // The artist's picture was saved with the download, so its claim
+            // goes with it — the sweep reclaims the file rather than keeping
+            // it for an artist that no longer lists.
+            unreferenceArtwork(holderID: id)
+            deleteUnreferenced()
+            persist()
         case let kind?:
             deleteSongs(songsMatchingGroupID(id, kind: kind).compactMap(\.track.id))
         }
@@ -1284,6 +1325,89 @@ final class DownloadStore: ObservableObject {
         }
     }
 
+    /// Saves the artist's own picture — the image the artist item carries —
+    /// under the artist's id, so the artist views resolve it without the
+    /// server. An earlier picture whose tag the server has replaced is
+    /// superseded: this artist's claim on it goes, and the sweep that follows
+    /// reclaims the file. An artist without a picture keeps falling back to
+    /// one of their albums' covers.
+    private func downloadArtistArtwork(for item: BaseItemDto, via client: JellyfinService) async {
+        guard let id = item.id, let tag = item.primaryImageTag.nonEmpty else { return }
+        for (key, var entry) in artworkEntries where entry.ownerItemID == id && entry.imageTag != tag {
+            if entry.requiredBy.remove(id) != nil {
+                artworkEntries[key] = entry
+            }
+        }
+        await downloadArtwork(ownerID: id, imageTag: tag, holderID: id, via: client)
+    }
+
+    /// Reconciles artist pictures with what is actually downloaded, at sign-in.
+    ///
+    /// Two halves, both about the artist's own picture saved under the artist's
+    /// id:
+    ///
+    /// - **Fills the gap** left by downloads saved before pictures came with
+    ///   artist downloads: those surface their artists with album covers,
+    ///   because no picture of the artist's own was ever saved. One request
+    ///   resolves every downloaded artist still missing a picture, and each
+    ///   one's image is saved under the artist's id. Best effort — a failure
+    ///   leaves the album-cover fallback in place and the next sign-in tries
+    ///   again.
+    /// - **Reclaims the leftovers**: a picture is claimed by the artist's own
+    ///   id, so it outlives the songs that showed it — removing every album of
+    ///   an artist one by one drops the group without dropping the picture,
+    ///   which nothing else would ever reclaim. See
+    ///   ``reclaimOrphanedArtistPictures()``.
+    ///
+    /// Internal rather than private so tests can drive it directly — in
+    /// production the only caller is ``configure(client:)``, at sign-in.
+    func syncArtistArtwork() async {
+        // Local, and worth doing even when there is nothing to fetch.
+        reclaimOrphanedArtistPictures()
+        guard let client else { return }
+        let missing = downloadedArtists().map(\.id).filter { !artistPictureFileExists(for: $0) }
+        guard !missing.isEmpty else { return }
+        guard let found = try? await client.getItems(includeItemTypes: [.musicArtist], ids: missing).items else { return }
+        for artist in found {
+            await downloadArtistArtwork(for: artist, via: client)
+        }
+        persist()
+    }
+
+    /// Deletes the pictures of artists that are no longer downloaded.
+    ///
+    /// A leftover is an entry claimed by its own owner — the shape an artist's
+    /// picture is saved in — whose owner is nothing that is still here: not a
+    /// song on disk, not a saved playlist, not an artist the downloaded songs
+    /// still surface. That last check is the one that makes this safe: album
+    /// covers are claimed by their *tracks* rather than by themselves, a song's
+    /// own embedded art and a playlist's cover are self-claimed too but by ids
+    /// that are still live, so an artist's id with no group behind it is the
+    /// only thing left standing.
+    private func reclaimOrphanedArtistPictures() {
+        let artistIDs = Set(downloadedArtists().map(\.id))
+        var reclaimed = false
+        for (key, entry) in artworkEntries {
+            guard let owner = entry.ownerItemID,
+                  entry.requiredBy == [owner],
+                  entries[owner] == nil,
+                  playlists[owner] == nil,
+                  !artistIDs.contains(owner)
+            else { continue }
+            deleteArtworkFile(entry.filename)
+            artworkEntries[key] = nil
+            reclaimed = true
+        }
+        if reclaimed { persist() }
+    }
+
+    /// Whether the artist has a picture of their own on disk.
+    private func artistPictureFileExists(for id: String) -> Bool {
+        artworkEntries.contains { entry in
+            entry.value.ownerItemID == id && artworkFileExists(entry.value.filename)
+        }
+    }
+
     /// The key a transfer is recorded under: a hash of its request URL, which
     /// is what the system echoes back with a completion it kept across a
     /// process death. Hashed because stream and image URLs carry the access
@@ -1484,8 +1608,8 @@ final class DownloadStore: ObservableObject {
     }
 
     /// The sweep that follows a removal: delete the files and entries of songs
-    /// no download requires any more, and the artwork no song or playlist cover
-    /// references.
+    /// no download requires any more, and the artwork no song, playlist cover
+    /// or artist picture references.
     private func deleteUnreferenced() {
         for (id, entry) in entries where entry.sources.isEmpty {
             try? FileManager.default.removeItem(at: directory.appending(path: entry.filename))

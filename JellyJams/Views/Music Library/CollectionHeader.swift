@@ -7,8 +7,9 @@ struct CollectionHeader: View {
     var subtitle: String?
     var isCircular = false
     /// A saved artwork file the caller resolved itself, for an item whose own
-    /// keys cannot find it — a downloaded artist, whose cover is borrowed from
-    /// one of their albums. `nil` (the default) resolves for `item` as usual.
+    /// keys cannot find it — a downloaded artist, whose group resolves its
+    /// picture (or borrowed album cover) through keys the stand-in item does
+    /// not carry. `nil` (the default) resolves for `item` as usual.
     var localArtworkURL: URL? = nil
     var canPlay: Bool
     var onPlay: () -> Void
