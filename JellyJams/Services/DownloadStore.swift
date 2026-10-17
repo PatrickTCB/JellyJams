@@ -416,23 +416,30 @@ final class DownloadStore: ObservableObject {
             artworkEntries = manifest.artwork
             pendingTransfers = manifest.pendingTransfers
             activeBatchItems = manifest.activeBatches
-            guard manifest.loadedVersion < Self.manifestVersion else { return }
             var changed = false
-            // Albums saved before the manifest carried totals were downloaded
-            // whole, so without a backfilled total they would read as forever
-            // partial — and the default "complete albums" filter would hide
-            // every album an upgraded install has.
-            let backfilled = Self.backfillingAlbumTotals(entries)
-            if backfilled != entries {
-                entries = backfilled
-                changed = true
+            if manifest.loadedVersion < Self.manifestVersion {
+                // Albums saved before the manifest carried totals were downloaded
+                // whole, so without a backfilled total they would read as forever
+                // partial — and the default "complete albums" filter would hide
+                // every album an upgraded install has.
+                let backfilled = Self.backfillingAlbumTotals(entries)
+                if backfilled != entries {
+                    entries = backfilled
+                    changed = true
+                }
+                // Older manifests keyed artwork per image tag (v1) or per song
+                // (v2), neither of which an album view can predict. Fold them onto
+                // the album's own image pair and reclaim the duplicate files.
+                let migrated = migratingArtwork(artworkEntries, tracks: entries)
+                if migrated != artworkEntries {
+                    artworkEntries = migrated
+                    changed = true
+                }
             }
-            // Older manifests keyed artwork per image tag (v1) or per song
-            // (v2), neither of which an album view can predict. Fold them onto
-            // the album's own image pair and reclaim the duplicate files.
-            let migrated = migratingArtwork(artworkEntries, tracks: entries)
-            if migrated != artworkEntries {
-                artworkEntries = migrated
+            // Runs even for a current-version manifest: files saved by an older
+            // *build* can sit under a name playback refuses, whatever schema
+            // version recorded them.
+            if repairingUnplayableFilenames() {
                 changed = true
             }
             if changed {
@@ -483,6 +490,82 @@ final class DownloadStore: ObservableObject {
             }
         }
         return updated
+    }
+
+    /// The single filename extension a track is saved under.
+    ///
+    /// The server reports ffprobe's container name, which for an ambiguous
+    /// container is the whole comma-joined family — an Apple Lossless song
+    /// arrives as `mov,mp4,m4a,3gp,3g2,mj2`. `AVURLAsset` picks its parser
+    /// from the file extension and refuses to open a name it cannot map to a
+    /// known format (`kAudioFileEndOfFileError`, "This media format is not
+    /// supported") even though the bytes are fine, so the saved name carries
+    /// exactly one extension, preferring the family's audio spelling.
+    static func fileExtension(forContainer container: String?) -> String {
+        let tokens = (container ?? "")
+            .lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+        guard !tokens.isEmpty else { return "mp3" }
+        // The audio spellings of the container families, most preferred first;
+        // a single-token container always passes through unchanged.
+        let audioFirst = [
+            "m4a", "m4b", "aac", "mp3", "flac", "ogg", "oga", "opus",
+            "wav", "aiff", "aif", "caf", "webm", "mp4", "mov",
+        ]
+        return audioFirst.first(where: tokens.contains) ?? tokens[0]
+    }
+
+    /// Renames saved songs their filename makes unplayable. Downloads saved
+    /// before ``fileExtension(forContainer:)`` took the server's container
+    /// verbatim, so a song whose container was an ambiguous family list sits
+    /// on disk under an extension `AVURLAsset` refuses to open — the bytes
+    /// are fine, only the name is wrong. Every entry is re-derived from its
+    /// track snapshot and a mismatch is renamed, so an installed album plays
+    /// again without a re-download. Pending transfers are rewritten the same
+    /// way, so a delivery the system kept across the upgrade is filed under
+    /// the playable name. Idempotent: matching names are left alone.
+    private func repairingUnplayableFilenames() -> Bool {
+        var repaired = false
+        for (id, var entry) in entries {
+            let expected = Self.filename(trackID: id, container: entry.track.container ?? entry.track.mediaSources?.first?.container)
+            guard entry.filename != expected else { continue }
+            let saved = directory.appending(path: entry.filename)
+            guard FileManager.default.fileExists(atPath: saved.path) else { continue }
+            let destination = directory.appending(path: expected)
+            try? FileManager.default.removeItem(at: destination)
+            do {
+                try FileManager.default.moveItem(at: saved, to: destination)
+            } catch {
+                continue
+            }
+            entry.filename = expected
+            entries[id] = entry
+            repaired = true
+        }
+        for (key, transfer) in pendingTransfers {
+            guard case let .audio(track, filename, source, batchId, albumSongCount, artistKeys) = transfer,
+                  let id = track.id
+            else { continue }
+            let expected = Self.filename(trackID: id, container: track.container ?? track.mediaSources?.first?.container)
+            guard filename != expected else { continue }
+            pendingTransfers[key] = .audio(
+                track: track,
+                filename: expected,
+                source: source,
+                batchId: batchId,
+                albumSongCount: albumSongCount,
+                artistKeys: artistKeys
+            )
+            repaired = true
+        }
+        return repaired
+    }
+
+    /// The name a track's file is saved under: its id with the extension
+    /// ``fileExtension(forContainer:)`` derives from its container.
+    private static func filename(trackID: String, container: String?) -> String {
+        "\(trackID).\(fileExtension(forContainer: container))"
     }
 
     /// Re-keys legacy artwork entries onto ``artworkPair(for:)`'s` canonical
@@ -1195,10 +1278,9 @@ final class DownloadStore: ObservableObject {
         do {
             let remote = try client.streamURL(itemId: id, mediaSourceId: track.mediaSourceID)
             // `AVURLAsset` leans on the file extension to pick a parser, so
-            // the saved name carries the track's container.
-            let ext = (track.container ?? track.mediaSources?.first?.container ?? "mp3")
-                .lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            let filename = "\(id).\(ext.isEmpty ? "mp3" : ext)"
+            // the saved name carries the track's container — reduced to the
+            // one extension it can actually open.
+            let filename = Self.filename(trackID: id, container: track.container ?? track.mediaSources?.first?.container)
             // Recorded before the transfer starts: if the process dies
             // mid-flight, the system finishes it anyway, and this record is
             // what lets the next launch file the delivered file.
