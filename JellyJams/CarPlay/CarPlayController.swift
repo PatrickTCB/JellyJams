@@ -363,6 +363,16 @@ final class CarPlayController {
     }
 
     private func loadArtwork(_ item: BaseItemDto, into listItem: CPListItem) {
+        // The saved file is authoritative, mirroring ``ArtworkImage``:
+        // downloaded artwork comes from disk and is never requested from the
+        // server, so having one ends the lookup — even when it cannot be
+        // decoded, where no image is the honest answer.
+        if let localURL = downloads?.localArtworkURL(for: item) {
+            if let image = CarPlayArtwork.image(fileAt: localURL) {
+                listItem.setImage(image)
+            }
+            return
+        }
         guard let url = session?.library.artworkURL(for: item, size: 200) else { return }
         Task {
             if let image = await CarPlayArtwork.image(from: url) {
