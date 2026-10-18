@@ -2,9 +2,23 @@ import SwiftUI
 
 /// A horizontally scrolling row of home tiles. Scrolling the row itself keeps
 /// a long pin list or ten recent albums from squeezing the tiles narrower.
-struct HomeItemRow<Item: Identifiable, Content: View>: View {
+///
+/// `trailing` rides inside the scroll, after the last tile — the home rows end
+/// with the ``BrowseMoreTile`` that opens the section they tease.
+struct HomeItemRow<Item: Identifiable, Content: View, Trailing: View>: View {
     let items: [Item]
-    @ViewBuilder var content: (Item) -> Content
+    var content: (Item) -> Content
+    var trailing: () -> Trailing
+
+    init(
+        items: [Item],
+        @ViewBuilder content: @escaping (Item) -> Content,
+        @ViewBuilder trailing: @escaping () -> Trailing
+    ) {
+        self.items = items
+        self.content = content
+        self.trailing = trailing
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -12,9 +26,16 @@ struct HomeItemRow<Item: Identifiable, Content: View>: View {
                 ForEach(items) { item in
                     content(item)
                 }
+                trailing()
             }
             .padding(.horizontal)
             .padding(.vertical, 4)
         }
+    }
+}
+
+extension HomeItemRow where Trailing == EmptyView {
+    init(items: [Item], @ViewBuilder content: @escaping (Item) -> Content) {
+        self.init(items: items, content: content) { EmptyView() }
     }
 }

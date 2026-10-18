@@ -14,20 +14,22 @@ struct RecentMusicSection: View {
                 .font(.title2.bold())
                 .padding(.horizontal)
             if !latest.albums.isEmpty {
-                row("Albums", items: latest.albums)
+                row("Albums", items: latest.albums, section: .albums)
             }
             if !latest.artists.isEmpty {
-                row("Artists", items: latest.artists)
+                row("Artists", items: latest.artists, section: .artists)
             }
         }
     }
 
-    private func row(_ title: String, items: [BaseItemDto]) -> some View {
+    private func row(_ title: String, items: [BaseItemDto], section: LibrarySection) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.headline)
                 .padding(.horizontal)
-            HomeItemRow(items: items) { HomeItemTile(item: $0) }
+            HomeItemRow(items: items) { HomeItemTile(item: $0) } trailing: {
+                BrowseMoreTile(section: section)
+            }
         }
     }
 }

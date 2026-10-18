@@ -11,7 +11,9 @@ struct AIRadioQuickLinksSection: View {
             Text("🤖 Radio")
                 .font(.title2.bold())
                 .padding(.horizontal)
-            HomeItemRow(items: stations) { StationTile(station: $0) }
+            HomeItemRow(items: stations) { StationTile(station: $0) } trailing: {
+                BrowseMoreTile(section: .aiRadio)
+            }
         }
     }
 }
