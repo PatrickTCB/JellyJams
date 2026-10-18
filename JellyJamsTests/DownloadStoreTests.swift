@@ -161,6 +161,14 @@ final class DownloadStoreTests: XCTestCase {
         XCTFail("Download batch never finished")
     }
 
+    private func waitForArtistArtworkSync(_ store: DownloadStore) async throws {
+        for _ in 0 ..< 500 {
+            if !store.isSyncingArtistArtwork { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("Artist-artwork sync never finished")
+    }
+
     private func albumStub(id: String, artistID: String? = nil, artist: String? = nil) -> BaseItemDto {
         BaseItemDto(
             albumArtist: artist,
@@ -802,6 +810,32 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertNotNil(store.artworkEntries["art-1|artist-image"])
         let synced = try XCTUnwrap(store.downloadedArtists().first)
         XCTAssertEqual(store.localArtworkURL(for: synced)?.lastPathComponent, "art-1-artist-image.jpg")
+    }
+
+    /// The Downloads artist tab's refresh button drives the same pass sign-in
+    /// does: the busy flag flips with the press so the button can spin, and
+    /// the run ends with the surfaced artist's picture saved under their own
+    /// id.
+    func testRefreshArtistArtworkRunsTheSyncOnDemand() async throws {
+        stubCollections(
+            ["al1": [trackInAlbum("a1", albumID: "al1", album: "One", artistID: "art-1", artist: "Artist", imageTag: "cover-1")]],
+            artists: ["art-1": "artist-image"]
+        )
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+
+        // The sign-in pass ran before the album landed, so the surfaced
+        // artist still borrows the album cover.
+        XCTAssertNil(store.artworkEntries.values.first { $0.ownerItemID == "art-1" })
+
+        store.refreshArtistArtwork()
+        XCTAssertTrue(store.isSyncingArtistArtwork, "The flag flips with the press, not when its task starts")
+        try await waitForArtistArtworkSync(store)
+
+        XCTAssertFalse(store.isSyncingArtistArtwork)
+        XCTAssertNotNil(store.artworkEntries["art-1|artist-image"])
     }
 
     /// An artist's picture is claimed by the artist's own id, so it outlives

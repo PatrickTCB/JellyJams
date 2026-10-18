@@ -270,6 +270,11 @@ final class DownloadStore: ObservableObject {
 
     @Published private(set) var artworkEntries: [String: ArtworkEntry] = [:]
 
+    /// Whether an artist-artwork sync is running — the sign-in one or the one
+    /// the Downloads artist tab's refresh button starts. Drives that button's
+    /// spinner and disabled state.
+    @Published private(set) var isSyncingArtistArtwork = false
+
     /// Every file transfer, feeding the throughput the downloads status bar
     /// shows.
     private let downloadSession: DownloadSession
@@ -277,6 +282,10 @@ final class DownloadStore: ObservableObject {
     /// The task running each batch, keyed by batch id, so removals can cancel
     /// them: a download the user has deleted must not keep landing tracks.
     private var batchTasks: [String: Task<Void, Never>] = [:]
+    /// The task running ``syncArtistArtwork()``, held so a manual refresh
+    /// never overlaps the sign-in sync or an earlier press, and so a wipe can
+    /// cancel a run that would otherwise keep landing pictures after it.
+    private var artistArtworkTask: Task<Void, Never>?
     /// The item each running batch was started for, persisted so a relaunch
     /// can resume batches whose process died mid-download.
     private var activeBatchItems: [String: BaseItemDto] = [:]
@@ -713,6 +722,9 @@ final class DownloadStore: ObservableObject {
     func removeAll() {
         for task in batchTasks.values { task.cancel() }
         batchTasks = [:]
+        artistArtworkTask?.cancel()
+        artistArtworkTask = nil
+        isSyncingArtistArtwork = false
         batches = []
         activeBatchItems = [:]
         pendingTransfers = [:]
@@ -750,7 +762,7 @@ final class DownloadStore: ObservableObject {
             // ones saved before pictures came with artists, reclaims the ones
             // whose artist is gone. A no-op once the pictures are in order;
             // retried at the next sign-in if it failed (offline, say).
-            Task { await syncArtistArtwork() }
+            startArtistArtworkSync()
         }
     }
 
@@ -1502,6 +1514,27 @@ final class DownloadStore: ObservableObject {
         await downloadArtwork(ownerID: id, imageTag: tag, holderID: id, via: client)
     }
 
+    /// Runs ``syncArtistArtwork()`` on demand — what the Downloads artist
+    /// tab's refresh button calls. A no-op while signed out or while a sync
+    /// is already running.
+    func refreshArtistArtwork() {
+        guard client != nil else { return }
+        startArtistArtworkSync()
+    }
+
+    /// Starts the sync pass unless one is already running. The flag flips
+    /// synchronously so a caller — or a test — watching
+    /// ``isSyncingArtistArtwork`` sees the run begin before its task does.
+    private func startArtistArtworkSync() {
+        guard artistArtworkTask == nil else { return }
+        isSyncingArtistArtwork = true
+        artistArtworkTask = Task {
+            await syncArtistArtwork()
+            isSyncingArtistArtwork = false
+            artistArtworkTask = nil
+        }
+    }
+
     /// Reconciles artist pictures with what is actually downloaded, at sign-in.
     ///
     /// Two halves, both about the artist's own picture saved under the artist's
@@ -1521,15 +1554,19 @@ final class DownloadStore: ObservableObject {
     ///   ``reclaimOrphanedArtistPictures()``.
     ///
     /// Internal rather than private so tests can drive it directly — in
-    /// production the only caller is ``configure(client:)``, at sign-in.
+    /// production the callers are ``configure(client:)``, at sign-in, and
+    /// ``refreshArtistArtwork()``, from the Downloads artist tab's button.
     func syncArtistArtwork() async {
         // Local, and worth doing even when there is nothing to fetch.
         reclaimOrphanedArtistPictures()
-        guard let client else { return }
+        guard let client, !Task.isCancelled else { return }
         let missing = downloadedArtists().map(\.id).filter { !artistPictureFileExists(for: $0) }
         guard !missing.isEmpty else { return }
         guard let found = try? await client.getItems(includeItemTypes: [.musicArtist], ids: missing).items else { return }
         for artist in found {
+            // A wipe mid-run cancels the task; pictures landing after it would
+            // resurrect artwork the user has just deleted everything of.
+            guard !Task.isCancelled else { return }
             await downloadArtistArtwork(for: artist, via: client)
         }
         persist()

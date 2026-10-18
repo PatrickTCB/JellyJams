@@ -81,6 +81,7 @@ struct DownloadsView: View {
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var preferences: PreferencesStore
+    @EnvironmentObject private var session: SessionStore
     @State private var tab: Tab = .albums
     @State private var confirmingDeleteAll = false
     /// The downloaded songs the user has selected (rows are keyed by track
@@ -225,6 +226,27 @@ struct DownloadsView: View {
                 }
             }
             if tab == .artists {
+                // A downloaded artist's picture is a snapshot: one saved
+                // before the server's current picture stays old until
+                // refreshed. This is the same pass sign-in runs — filling in
+                // missing pictures, reclaiming ones whose artist is no longer
+                // downloaded — and, like the offline playlist's refresh, a
+                // deliberate, online-only action.
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        downloads.refreshArtistArtwork()
+                    } label: {
+                        if downloads.isSyncingArtistArtwork {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(session.client == nil || downloads.isSyncingArtistArtwork)
+                    .help(session.client == nil
+                        ? "Sign in to refresh downloaded artist artwork"
+                        : "Refresh downloaded artist artwork")
+                }
                 ToolbarItem(placement: .automatic) {
                     SortMenu(sortBy: $artistSort, sortOrder: $artistSortOrder, options: artistSortOptions)
                 }
