@@ -53,17 +53,23 @@ final class DownloadStoreTests: XCTestCase {
         let id: String
         var artistID: String?
         var artist: String?
+        /// The album's display name when it differs from its id — the name a
+        /// playlist-borrowed song's album group is titled with.
+        var name: String?
+        /// The server's `ChildCount`: how many songs the album has.
+        var childCount: Int?
 
         var json: String {
             var fields = [
                 "\"Id\":\"\(id)\"",
-                "\"Name\":\"\(id)\"",
+                "\"Name\":\"\(name ?? id)\"",
                 "\"Type\":\"MusicAlbum\"",
             ]
             if let artist { fields.append("\"AlbumArtist\":\"\(artist)\"") }
             if let artistID, let artist {
                 fields.append("\"AlbumArtists\":[{\"Id\":\"\(artistID)\",\"Name\":\"\(artist)\"}]")
             }
+            if let childCount { fields.append("\"ChildCount\":\(childCount)") }
             return "{" + fields.joined(separator: ",") + "}"
         }
     }
@@ -95,17 +101,20 @@ final class DownloadStoreTests: XCTestCase {
 
     /// Serves the collection lookups the download paths make — an artist's
     /// albums, and each collection's track listing, keyed by the request's
-    /// parentId / artistIds / playlist path — the artist-picture sync's
-    /// by-ids lookup — and audio or artwork bytes for everything else.
+    /// parentId / artistIds / playlist path — the by-ids lookups (the
+    /// artist-picture sync's and a playlist download's album attribution
+    /// fetch) — and audio or artwork bytes for everything else.
     private func stubCollections(
         _ collections: [String: [TrackStub]],
         artistAlbums: [String: [AlbumStub]] = [:],
-        artists: [String: String] = [:]
+        artists: [String: String] = [:],
+        albumsById: [String: AlbumStub] = [:]
     ) {
         URLProtocolStub.handler = Self.itemsHandler(
             collections: collections,
             artistAlbums: artistAlbums,
-            artists: artists
+            artists: artists,
+            albumsById: albumsById
         )
     }
 
@@ -114,17 +123,24 @@ final class DownloadStoreTests: XCTestCase {
     nonisolated private static func itemsHandler(
         collections: [String: [TrackStub]],
         artistAlbums: [String: [AlbumStub]],
-        artists: [String: String] = [:]
+        artists: [String: String] = [:],
+        albumsById: [String: AlbumStub] = [:]
     ) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
         { request in
             let response = try emptyResponse(for: request, statusCode: 200)
             guard let url = request.url else { return (response, Data()) }
             let items = RecordedRequest(request)
 
-            // The artist-picture sync: `/Items?ids=…&IncludeItemTypes=MusicArtist`,
-            // answered with each artist's payload carrying their image tag.
+            // By-ids lookups: `/Items?ids=…`, answered from the album stubs for
+            // a playlist download's attribution fetch
+            // (`…&IncludeItemTypes=MusicAlbum`) or with each artist's payload
+            // carrying their image tag for the artist-picture sync.
             let requestedIDs = items.values(for: "ids")
             if !requestedIDs.isEmpty {
+                if items.values(for: "includeItemTypes").contains("MusicAlbum") {
+                    let found = requestedIDs.compactMap { albumsById[$0]?.json }
+                    return (response, itemsData(found))
+                }
                 let found = requestedIDs.compactMap { id in artists[id].map { tag in
                     #"{"Id":"\#(id)","Name":"\#(id)","Type":"MusicArtist","ImageTags":{"Primary":"\#(tag)"}}"#
                 } }
@@ -358,7 +374,7 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(albums.map(\.id), ["al1"])
         XCTAssertEqual(albums.first?.title, "Album One")
         XCTAssertEqual(albums.first?.downloadedSongs, 1)
-        XCTAssertNil(albums.first?.totalSongs, "Nothing fetched the album's own track list")
+        XCTAssertNil(albums.first?.totalSongs, "The album lookup served nothing to resolve the total from")
         XCTAssertFalse(albums.first?.isExplicit ?? true, "The album was borrowed from a playlist, not downloaded")
         // An unknown total cannot be claimed complete, which is what lets the
         // Downloads "complete albums only" filter hide this album.
@@ -590,6 +606,58 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.entries.count, 2)
     }
 
+    /// A playlist song whose payload lacks its album's name — a single whose
+    /// file carries no album tag, so the server reports the album's identity
+    /// but not its title — still surfaces its album under that name: the
+    /// download resolves the album items behind its songs and saves each song
+    /// with the album's attribution completed, the way an album download does.
+    func testPlaylistSongsGainTheirAlbumsNameFromTheAlbumItem() async throws {
+        stubCollections(
+            ["pl1": [TrackStub(id: "a1", albumID: "al1")]],
+            albumsById: ["al1": AlbumStub(id: "al1", name: "Album One")]
+        )
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(BaseItemDto(id: "pl1", name: "pl1", type: .playlist))
+        try await waitForBatch(store, id: "pl1")
+
+        XCTAssertEqual(store.downloadedAlbums().map(\.id), ["al1"])
+        XCTAssertEqual(store.downloadedAlbums().first?.title, "Album One")
+        XCTAssertEqual(store.entries["a1"]?.track.album, "Album One")
+    }
+
+    /// A playlist holding every song of an album reports it complete: the
+    /// download learns each album's server-side total from the album item, so
+    /// a fully covered album is not stuck "incomplete" — while one the
+    /// playlist borrows a song from honestly stays partial.
+    func testPlaylistCoveringAWholeAlbumReportsItComplete() async throws {
+        stubCollections(
+            ["pl1": [
+                TrackStub(id: "a1", albumID: "al1", album: "One"),
+                TrackStub(id: "a2", albumID: "al1", album: "One"),
+                TrackStub(id: "b1", albumID: "al2", album: "Two"),
+            ]],
+            albumsById: [
+                "al1": AlbumStub(id: "al1", childCount: 2),
+                "al2": AlbumStub(id: "al2", childCount: 5),
+            ]
+        )
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(BaseItemDto(id: "pl1", name: "pl1", type: .playlist))
+        try await waitForBatch(store, id: "pl1")
+
+        let albums = store.downloadedAlbums()
+        let one = try XCTUnwrap(albums.first { $0.id == "al1" })
+        let two = try XCTUnwrap(albums.first { $0.id == "al2" })
+        XCTAssertEqual(one.totalSongs, 2)
+        XCTAssertTrue(one.isFullyDownloaded)
+        XCTAssertEqual(two.totalSongs, 5)
+        XCTAssertFalse(two.isFullyDownloaded, "The playlist borrows one song of five")
+    }
+
     /// A borrowed album — one that surfaced because its songs arrived through a
     /// playlist — is removable like any other item: its songs go, and the
     /// playlist that brought them keeps its membership and warns it is
@@ -661,6 +729,51 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertNotNil(store.entries["a1"])
         XCTAssertEqual(store.tracks(for: playlist).compactMap(\.id).sorted(), ["a1", "a2"])
         XCTAssertFalse(store.isPlaylistIncomplete(playlist))
+    }
+
+    /// A song saved from a bare playlist payload — one that landed while the
+    /// album lookup failed — is healed by the playlist's refresh: the stored
+    /// snapshot gains its album's name and total, without its file being
+    /// downloaded again. This is the repair path for albums an older download
+    /// left titled by their id and stuck incomplete.
+    func testRefreshingAPlaylistRepairsAlbumsSavedWithoutTheirMetadata() async throws {
+        stubCollections(
+            ["pl1": [TrackStub(id: "a1", albumID: "al1")]],
+            albumsById: ["al1": AlbumStub(id: "al1", name: "Album One", childCount: 1)]
+        )
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        let playlist = BaseItemDto(id: "pl1", name: "pl1", type: .playlist)
+
+        // The album lookup fails on the first pass, so the song is saved with
+        // the bare payload the playlist sent.
+        let serving = try XCTUnwrap(URLProtocolStub.handler)
+        URLProtocolStub.handler = { request in
+            let items = RecordedRequest(request)
+            if !items.values(for: "ids").isEmpty {
+                return (try emptyResponse(for: request, statusCode: 500), Data())
+            }
+            return try serving(request)
+        }
+        store.download(playlist)
+        try await waitForBatch(store, id: "pl1")
+
+        XCTAssertEqual(store.downloadedAlbums().first?.title, "al1", "The bare payload names no album")
+        XCTAssertFalse(store.downloadedAlbums().first?.isFullyDownloaded ?? true)
+        let savedOrder = try XCTUnwrap(store.entries["a1"]).order
+        let savedFilename = try XCTUnwrap(store.entries["a1"]).filename
+
+        URLProtocolStub.handler = serving
+        store.refreshPlaylist("pl1")
+        try await waitForBatch(store, id: "pl1")
+
+        let album = try XCTUnwrap(store.downloadedAlbums().first)
+        XCTAssertEqual(album.title, "Album One")
+        XCTAssertEqual(album.totalSongs, 1)
+        XCTAssertTrue(album.isFullyDownloaded)
+        XCTAssertEqual(store.entries["a1"]?.track.album, "Album One", "The stored snapshot was healed")
+        XCTAssertEqual(store.entries["a1"]?.order, savedOrder, "The file was not re-downloaded")
+        XCTAssertEqual(store.entries["a1"]?.filename, savedFilename)
     }
 
     func testRemoveAllDeletesEverything() async throws {

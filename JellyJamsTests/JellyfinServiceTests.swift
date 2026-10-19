@@ -133,6 +133,42 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertEqual(request.values(for: "ids"), ["album-1", "album-2"])
     }
 
+    /// The album lookup a playlist download fills its songs' attribution
+    /// from: album items by id, sent in batches to stay clear of server URL
+    /// length limits, like playlist additions.
+    func testAlbumsByIdsSendsBatchedAlbumItemLookups() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let ids = (0 ..< 150).map { "album-\($0)" }
+        _ = try await makeClient().albums(byIds: ids)
+
+        let requests = recorder.all
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(Set(requests.map(\.path)), ["/jellyfin/Items"])
+        for request in requests {
+            XCTAssertEqual(request.values(for: "includeItemTypes"), ["MusicAlbum"])
+        }
+        XCTAssertEqual(requests[0].values(for: "ids").count, 100)
+        XCTAssertEqual(requests[1].values(for: "ids").count, 50)
+    }
+
+    func testAlbumsByIdsSkipsTheRequestForAnEmptySelection() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let albums = try await makeClient().albums(byIds: [])
+
+        XCTAssertTrue(albums.isEmpty)
+        XCTAssertTrue(recorder.all.isEmpty, "Nothing to look up sends nothing")
+    }
+
     func testStreamURLIncludesPlaybackSessionAndCredentials() throws {
         let url = try makeClient().streamURL(
             itemId: "track-id",
