@@ -250,11 +250,11 @@ final class DownloadStore: ObservableObject {
 
         /// Every song the group has on the server is on disk.
         ///
-        /// An unknown total — an album that surfaced because one of its songs
-        /// arrived by playlist or on its own, rather than through an album
-        /// download — cannot be claimed complete. That is what lets the
-        /// Downloads "complete albums" filter hide a one-song album rather than
-        /// present it as finished.
+        /// An unknown total — an album that surfaced from a song downloaded on
+        /// its own, or from a playlist whose album lookup never resolved —
+        /// cannot be claimed complete. That is what lets the Downloads
+        /// "complete albums" filter hide a one-song album rather than present
+        /// it as finished.
         var isFullyDownloaded: Bool {
             guard let totalSongs, totalSongs > 0 else { return false }
             return downloadedSongs >= totalSongs
@@ -1127,19 +1127,12 @@ final class DownloadStore: ObservableObject {
                     let tracks = try await client.tracks(for: item)
                     guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
                     updateBatch(id) { $0.total = tracks.count }
-                    var trackIDs: [String] = []
-                    for track in tracks {
-                        try Task.checkCancellation()
-                        if let trackId = track.id, !trackIDs.contains(trackId) { trackIDs.append(trackId) }
-                        await downloadOne(
-                            track,
-                            source: id,
-                            batchId: id,
-                            via: client,
-                            albumSongCount: nil,
-                            artistKeys: Self.artistKeys(of: track)
-                        )
-                    }
+                    let trackIDs = try await downloadPlaylistTracks(
+                        tracks,
+                        source: id,
+                        batchId: id,
+                        via: client
+                    )
                     // A removal while the tracks were landing wins over the
                     // membership: saving the record now would resurrect the
                     // playlist the user just deleted.
@@ -1197,19 +1190,12 @@ final class DownloadStore: ObservableObject {
                 let tracks = try await client.tracks(for: stub)
                 guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(existing.title) }
                 updateBatch(id) { $0.total = tracks.count }
-                var trackIDs: [String] = []
-                for track in tracks {
-                    try Task.checkCancellation()
-                    if let trackId = track.id, !trackIDs.contains(trackId) { trackIDs.append(trackId) }
-                    await downloadOne(
-                        track,
-                        source: id,
-                        batchId: id,
-                        via: client,
-                        albumSongCount: nil,
-                        artistKeys: Self.artistKeys(of: track)
-                    )
-                }
+                let trackIDs = try await downloadPlaylistTracks(
+                    tracks,
+                    source: id,
+                    batchId: id,
+                    via: client
+                )
                 try Task.checkCancellation()
                 for dropped in existing.trackIDs where !trackIDs.contains(dropped) {
                     unreference(dropped, source: id)
@@ -1327,16 +1313,82 @@ final class DownloadStore: ObservableObject {
     /// group its own download reference doesn't match — untoggleable and
     /// unremovable.
     static func completingAlbumFields(of track: BaseItemDto, from album: BaseItemDto) -> BaseItemDto {
+        // The album carries its name and image tag where a song carries its
+        // album's name and album image tag.
+        completingMissingAlbumFields(
+            of: track,
+            from: BaseItemDto(
+                album: album.name,
+                albumArtist: album.albumArtist,
+                albumArtists: album.albumArtists,
+                albumID: album.id,
+                albumPrimaryImageTag: album.primaryImageTag,
+                productionYear: album.productionYear
+            )
+        )
+    }
+
+    /// Fills the album attribution a song's snapshot lacks from another item
+    /// that carries it. Only empty fields are filled, so the richer of two
+    /// snapshots of the same song always survives.
+    static func completingMissingAlbumFields(of track: BaseItemDto, from other: BaseItemDto) -> BaseItemDto {
         var completed = track
-        if completed.albumID?.isEmpty != false { completed.albumID = album.id }
-        if completed.album?.isEmpty != false { completed.album = album.name }
-        if completed.albumPrimaryImageTag?.isEmpty != false, let tag = album.primaryImageTag {
-            completed.albumPrimaryImageTag = tag
+        if completed.albumID?.isEmpty != false { completed.albumID = other.albumID }
+        if completed.album?.isEmpty != false { completed.album = other.album }
+        if completed.albumPrimaryImageTag?.isEmpty != false {
+            completed.albumPrimaryImageTag = other.albumPrimaryImageTag
         }
-        if completed.albumArtist?.isEmpty != false { completed.albumArtist = album.albumArtist }
-        if (completed.albumArtists ?? []).isEmpty { completed.albumArtists = album.albumArtists }
-        if completed.productionYear == nil { completed.productionYear = album.productionYear }
+        if completed.albumArtist?.isEmpty != false { completed.albumArtist = other.albumArtist }
+        if (completed.albumArtists ?? []).isEmpty { completed.albumArtists = other.albumArtists }
+        if completed.productionYear == nil { completed.productionYear = other.productionYear }
         return completed
+    }
+
+    /// Saves each of a playlist's tracks under the playlist's id and returns
+    /// the deduplicated track ids in playlist order — what the membership
+    /// record names. Shared by the playlist download and its refresh.
+    ///
+    /// A playlist payload can lack a song's album attribution — a file without
+    /// album tags reports its album's id but no name — so each song is
+    /// completed from its album item, the way an album download completes its
+    /// songs, and the album's server-side song count becomes the total an
+    /// album the playlist fully covers is complete by.
+    private func downloadPlaylistTracks(
+        _ tracks: [BaseItemDto],
+        source: String,
+        batchId: String,
+        via client: JellyfinService
+    ) async throws -> [String] {
+        let albums = await albumMetadata(for: tracks, via: client)
+        var trackIDs: [String] = []
+        for track in tracks {
+            try Task.checkCancellation()
+            if let trackId = track.id, !trackIDs.contains(trackId) { trackIDs.append(trackId) }
+            let album = track.albumID.flatMap { albums[$0] }
+            let stored = album.map { Self.completingAlbumFields(of: track, from: $0) } ?? track
+            await downloadOne(
+                stored,
+                source: source,
+                batchId: batchId,
+                via: client,
+                albumSongCount: album?.childCount,
+                artistKeys: Self.artistKeys(of: stored)
+            )
+        }
+        return trackIDs
+    }
+
+    /// The album items behind a set of tracks, keyed by album id, resolved in
+    /// one batched lookup. Best effort: a failed lookup leaves the tracks
+    /// storing whatever album attribution their own payloads carried, and the
+    /// next playlist refresh tries again.
+    private func albumMetadata(
+        for tracks: [BaseItemDto],
+        via client: JellyfinService
+    ) async -> [String: BaseItemDto] {
+        let ids = Set(tracks.compactMap { $0.albumID.nonEmpty })
+        guard !ids.isEmpty, let albums = try? await client.albums(byIds: Array(ids)) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: albums.compactMap { album in album.id.map { ($0, album) } })
     }
 
     private func downloadOne(
@@ -1357,8 +1409,12 @@ final class DownloadStore: ObservableObject {
             entry.sources.insert(source)
             if entry.albumSongCount == nil { entry.albumSongCount = albumSongCount }
             entry.artistKeys.formUnion(artistKeys)
+            // A song saved from a bare payload — one that landed before its
+            // album was resolved — is healed by what this fetch knows; only
+            // the attribution its snapshot lacks is filled.
+            entry.track = Self.completingMissingAlbumFields(of: entry.track, from: track)
             entries[id] = entry
-            referenceArtwork(for: track, trackId: id)
+            referenceArtwork(for: entry.track, trackId: id)
             persist()
             updateBatch(batchId) { $0.completed += 1 }
             return

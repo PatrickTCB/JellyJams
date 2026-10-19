@@ -294,6 +294,18 @@ final class JellyfinService: Sendable {
         ).items ?? []
     }
 
+    /// Albums by id. Batched like playlist additions, which also pass their
+    /// ids as a query string. Backs playlist downloads, which fill their
+    /// songs' album attribution — and learn each album's server-side song
+    /// total — from the album items themselves.
+    func albums(byIds ids: [String]) async throws -> [BaseItemDto] {
+        var found: [BaseItemDto] = []
+        for chunk in ids.chunked(into: Self.playlistBatchSize) {
+            found.append(contentsOf: try await getItems(includeItemTypes: [.musicAlbum], ids: chunk).items ?? [])
+        }
+        return found
+    }
+
     /// Resolves every audio track belonging to a collection item (album,
     /// artist, playlist or genre) in its natural playback order. An item that
     /// is already a track resolves to itself.
