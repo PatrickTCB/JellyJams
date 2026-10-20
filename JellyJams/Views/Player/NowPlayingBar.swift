@@ -7,8 +7,10 @@ struct NowPlayingBar: View {
     /// Where the bar is hosted, which decides how much chrome it draws for
     /// itself and how tightly it lays out.
     enum Presentation {
-        /// Docked with `safeAreaInset` on macOS, iPad and iOS 18–25: draws its
-        /// own separator, background and progress line.
+        /// The default: draws its own separator, background and progress line.
+        /// The macOS shell stacks it below the tab view; the `safeAreaInset`
+        /// dock (``nowPlayingDock()``) is reachable only from the pre-iOS
+        /// 26.1 fallback, which this deployment target never hits.
         case docked
         /// Hosted by the iOS 26 tab bar accessory, which supplies the glass
         /// background behind it.

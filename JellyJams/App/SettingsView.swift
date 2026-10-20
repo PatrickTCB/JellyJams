@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The app's settings screen. Phase 1 exposes account details and sign out;
-/// playback/download preferences arrive in a later phase.
+/// The app's settings screen: the account and its sign-out, the library and
+/// AI Radio preferences, and the default-playback choice.
 ///
 /// On macOS this is the content of the `Settings` scene — the standard
 /// settings window, opened from the app menu with ⌘, or from ``AccountMenu``.

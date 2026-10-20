@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// A detail-screen header for collections shown as album grids (artists,
-/// genres): artwork, title, subtitle and Play/Shuffle actions.
+/// A detail-screen header for a collection whose page is an album grid — the
+/// artist pages, online and downloaded: artwork, title, subtitle and
+/// Play/Shuffle actions.
 struct CollectionHeader: View {
     let item: BaseItemDto
     var subtitle: String?

@@ -19,7 +19,7 @@ struct GenreChips: View {
                         // A plain Button pushing through ``LibraryNavigator``
                         // for the same reason as the tiles in
                         // ``SimilarItemsSection``: these chips render inside a
-                        // single `List` row on the album/playlist screen, where
+                        // single `List` row on the album screen, where
                         // a `NavigationLink` would make the whole row one tap
                         // target that opens only the last chip.
                         Button {

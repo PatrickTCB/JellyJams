@@ -384,8 +384,8 @@ struct TrackListDetail: View {
     /// Playlists are the only collection whose order the user owns — albums
     /// are disc/track sorted, and downloaded collections are offline copies
     /// whose order no server call would change. Only an editable,
-    /// server-backed playlist gets row selection, drag reordering and batch
-    /// removal.
+    /// server-backed playlist gets drag reordering and batch removal; row
+    /// selection itself exists on every collection.
     private var isEditablePlaylist: Bool {
         headerItem.itemType == .playlist && !downloaded
     }
@@ -393,8 +393,8 @@ struct TrackListDetail: View {
     private func removeFromPlaylist(_ track: BaseItemDto) {
         guard let entryId = track.playlistItemID else { return }
         Task {
-            // ponytail: failed removes surface as the track simply surviving
-            // the reload; no separate error UI.
+            // Failed removes surface as the track simply surviving the
+            // reload; no separate error UI.
             try? await session.library.removeFromPlaylist(playlistId: headerItem.id, entryIds: [entryId])
             await reload()
         }
@@ -438,8 +438,8 @@ struct TrackListDetail: View {
         let after = tracks
         Task {
             await replay(Self.movePlan(from: before, to: after))
-            // ponytail: the optimistic move is already on screen, so success
-            // and failure share one outcome — the reload shows the server's
+            // The optimistic move is already on screen, so success and
+            // failure share one outcome — the reload shows the server's
             // arrangement, which confirms the drag or snaps the list back if
             // a move was rejected. No separate error UI for either.
             await reload()
@@ -496,8 +496,8 @@ struct TrackListDetail: View {
         guard !entryIds.isEmpty else { return }
         selection = []
         Task {
-            // ponytail: failed removes surface as the tracks simply surviving
-            // the reload; no separate error UI.
+            // Failed removes surface as the tracks simply surviving the
+            // reload; no separate error UI.
             try? await session.library.removeFromPlaylist(playlistId: headerItem.id, entryIds: entryIds)
             await reload()
         }

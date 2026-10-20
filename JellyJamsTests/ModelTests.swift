@@ -193,8 +193,9 @@ final class SortByTests: XCTestCase {
         }
     }
 
-    /// The raw value is the comma-joined form of the SDK fields and both reach
-    /// Jellyfin, so they have to agree.
+    /// The raw value is the comma-joined form of the SDK fields; the SDK
+    /// values are what reach Jellyfin, so the two have to agree for the raw
+    /// value to keep describing the request.
     func testRawValuesMatchTheSDKFieldOrder() {
         for option in SortBy.allCases {
             XCTAssertEqual(

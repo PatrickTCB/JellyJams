@@ -67,9 +67,9 @@ struct QueueView: View {
     }
 }
 
-/// One queue row. Its inputs are plain values, so the row only re-renders
-/// when its own highlight changes — not when the player publishes state it
-/// never reads.
+/// One queue row. Its inputs are plain values rather than the player itself,
+/// so player state the row never reads cannot re-render it; the parent hands
+/// down only the highlight the row shows.
 private struct QueueRow: View {
     let item: BaseItemDto
     let isCurrent: Bool

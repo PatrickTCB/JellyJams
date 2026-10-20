@@ -67,8 +67,8 @@ struct SimilarItemsSection: View {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
                     ForEach(similar) { suggestion in
                         // A plain Button rather than a NavigationLink: this grid
-                        // renders inside a single `List` row on the album and
-                        // playlist screens, where a `List` gives every
+                        // renders inside a single `List` row on the album
+                        // screen, where a `List` gives every
                         // NavigationLink the whole-row treatment (one collapsed
                         // tap target, plus a disclosure chevron per tile on
                         // iOS). ``LibraryNavigator`` pushes imperatively, which

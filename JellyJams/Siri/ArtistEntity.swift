@@ -5,9 +5,9 @@ import Foundation
 /// An artist in the Jellyfin library, in the form Siri understands.
 ///
 /// `albums` and `songs` are deliberately empty: Siri only needs the artist's
-/// identity; ``PlayAudioIntent`` fetches (and shuffles) the catalogue itself
-/// when performing. Schema properties are computed from the stored ``item``
-/// snapshot.
+/// identity; the play intents fetch the catalogue themselves when performing,
+/// and ``SiriPlayback`` shuffles it. Schema properties are computed from the
+/// stored ``item`` snapshot.
 @AppEntity(schema: .audio.artist)
 struct ArtistEntity {
     static let defaultQuery = ArtistQuery()

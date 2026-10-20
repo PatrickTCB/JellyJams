@@ -95,8 +95,9 @@ extension PlaylistEntity: Hashable {
 /// favourited). Encoding this as a real entity means the behaviour survives
 /// the system's identifier-based rehydration, which would strip any in-memory
 /// marker. Open-ended requests now resolve through
-/// ``DefaultPlaybackPlaylist`` instead; this remains the fallback when no
-/// default is configured, and an explicit choice in the Shortcuts pickers.
+/// ``DefaultPlaybackPlaylist`` instead; this remains what an unset default
+/// plays, an explicit choice in the Shortcuts pickers, and the classic-Siri
+/// handler's fallback for a missing or unresolvable identifier.
 enum FavouriteSongsPlaylist {
     static let id = "jellyjams.favourite-songs"
     static let title = "Favourite Songs"
@@ -109,8 +110,8 @@ enum FavouriteSongsPlaylist {
 // MARK: - PlaylistQuery
 
 /// Rehydrates playlist entities from the server when Siri asks for a
-/// previously resolved playlist. The synthetic favourites playlist resolves
-/// without a server.
+/// previously resolved playlist. The synthetic playlists — the favourites
+/// shuffle and the default-playback sentinel — resolve without a server.
 struct PlaylistQuery {}
 
 extension PlaylistQuery: EntityQuery {
@@ -134,8 +135,9 @@ extension PlaylistQuery: EntityQuery {
         return entities
     }
 
-    /// The favourites shuffle plus every server playlist, prefilling the
-    /// Shortcuts parameter picker before any search text is typed.
+    /// The favourites shuffle plus the first 25 server playlists, name-sorted,
+    /// prefilling the Shortcuts parameter picker before any search text is
+    /// typed.
     func suggestedEntities() async throws -> [PlaylistEntity] {
         var entities = [FavouriteSongsPlaylist.entity()]
         let client = await AppServices.shared.session.client

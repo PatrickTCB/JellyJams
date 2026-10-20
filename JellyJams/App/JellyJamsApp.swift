@@ -14,7 +14,9 @@ final class CheckForUpdatesViewModel: ObservableObject {
 }
 
 // This is the view for the Check for Updates menu item
-// Note: this intermediate view is necessary for the disabled state on the menu item to work properly before Monterey.
+// Note: the intermediate view was necessary for the disabled state on the menu
+// item to update on pre-Monterey systems — long before this app's deployment
+// target — and is kept because Sparkle's own sample ships it this way.
 // See https://stackoverflow.com/questions/68553092/menu-not-updating-swiftui-bug for more info
 struct CheckForUpdatesView: View {
     @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
@@ -22,8 +24,6 @@ struct CheckForUpdatesView: View {
     
     init(updater: SPUUpdater) {
         self.updater = updater
-        
-        // Create our view model for our CheckForUpdatesView
         self.checkForUpdatesViewModel = CheckForUpdatesViewModel(updater: updater)
     }
     
@@ -76,8 +76,8 @@ struct JellyJamsApp: App {
         _pinnedItems = StateObject(wrappedValue: services.pinnedItems)
         _networkStatus = StateObject(wrappedValue: services.networkStatus)
         #if os(macOS)
-        // If you want to start the updater manually, pass false to startingUpdater and call .startUpdater() later
-        // This is where you can also pass an updater delegate if you need one
+        // Don't start the updater during test runs: its scheduled checks and
+        // installer services have no place in a test host.
         let runningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
         updaterController = SPUStandardUpdaterController(startingUpdater: !runningTests, updaterDelegate: nil, userDriverDelegate: nil)

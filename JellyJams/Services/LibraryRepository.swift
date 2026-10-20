@@ -3,9 +3,9 @@ import Foundation
 /// Every library read the UI performs, in one place.
 ///
 /// Views describe *what* they want — a ``LibraryQuery``, an artist's overview,
-/// a search term — and this type owns *how* it is fetched. No view builds a
-/// Jellyfin request or reaches into ``SessionStore/client``, so a new screen
-/// inherits paging, sorting and error handling instead of reimplementing them.
+/// a search term — and this type owns *how* it is fetched, so a screen that
+/// goes through it inherits paging, sorting and error handling instead of
+/// reimplementing them.
 ///
 /// The client is optional so that a repository always exists, signed in or
 /// not. A read attempted while signed out throws

@@ -118,8 +118,8 @@ final class PreferencesStoreTests: XCTestCase {
         )
     }
 
-    /// The suffix is matched as typed, not as stored: trailing whitespace from
-    /// the settings field must not decide what counts as a station.
+    /// The suffix is matched trimmed, not as stored: whitespace from the
+    /// settings field must not decide what counts as a station.
     func testAIRadioSuffixIsTrimmedBeforeItIsMatched() {
         let store = PreferencesStore(defaults: defaults)
         store.aiRadioEnabled = true

@@ -49,8 +49,9 @@ final class ArtworkDecoderTests: XCTestCase {
         XCTAssertEqual(image?.size.height ?? 0, 128, accuracy: 1)
     }
 
-    /// Undecodable bytes must come back nil — not crash — because that nil is
-    /// what sends the local-file path on to the network instead.
+    /// Undecodable bytes must come back nil — not crash — because callers
+    /// treat that nil as "no image": a saved file is authoritative, so its
+    /// placeholder is the honest answer and no network fallback follows.
     func testUndecodableDataReturnsNil() async {
         let truncatedHeader = Data([0xFF, 0xD8, 0xFF, 0xEE])
         let fromTruncated = await ArtworkDecoder.decode(data: truncatedHeader, maxPixelSize: 128)

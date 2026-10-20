@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A single track row used in album detail, songs, search and queue lists.
-/// The row follows the standard music-list model everywhere: a single tap or
-/// click belongs to the enclosing list's selection, and playback is a
+/// A single track row used in the album and playlist details, the songs,
+/// favourites and downloads lists, search results, and an artist's featured
+/// songs. The row follows the standard music-list model everywhere: a single
+/// tap or click belongs to the enclosing list's selection, and playback is a
 /// deliberate second gesture — a double-click on macOS, a tap outside edit
 /// mode on iOS. Lists that keep whole-row tap-to-play (search results, whose
 /// List is a navigation list and binds no selection) set ``tapBehavior`` to
@@ -57,8 +58,8 @@ struct TrackRow: View {
     #if os(iOS)
     /// Active while an enclosing list is in edit mode — playlist detail's
     /// selection mode. The row then stops playing on tap so the list can
-    /// select it instead. macOS has no edit mode: rows are selected there
-    /// with a click and modifier-clicks, and keep playing on a plain click.
+    /// select it instead. macOS has no edit mode: a click and modifier-clicks
+    /// select there, and a double-click plays.
     @Environment(\.editMode) private var editMode
     #endif
 

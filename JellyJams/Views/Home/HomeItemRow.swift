@@ -3,8 +3,8 @@ import SwiftUI
 /// A horizontally scrolling row of home tiles. Scrolling the row itself keeps
 /// a long pin list or ten recent albums from squeezing the tiles narrower.
 ///
-/// `trailing` rides inside the scroll, after the last tile — the home rows end
-/// with the ``BrowseMoreTile`` that opens the section they tease.
+/// `trailing` rides inside the scroll, after the last tile — the rows that
+/// tease a library section end with the ``BrowseMoreTile`` that opens it.
 struct HomeItemRow<Item: Identifiable, Content: View, Trailing: View>: View {
     let items: [Item]
     var content: (Item) -> Content

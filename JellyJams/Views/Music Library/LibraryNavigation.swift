@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// The suggestion tiles in ``SimilarItemsSection`` and the chips in
 /// ``GenreChips`` open items through this rather than a `NavigationLink`. Both
-/// sit inside a single `List` row on the album and playlist screens, and a
+/// sit inside a single `List` row on the album screen, and a
 /// `List` gives every `NavigationLink` in a row the whole-row treatment —
 /// collapsing a grid of them into one tap target and, on iOS, stamping each
 /// tile with a disclosure chevron. A plain `Button` calling ``open(_:)`` gets

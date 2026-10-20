@@ -11,8 +11,8 @@ private let downloadLog = Logger(
 /// Offline playback: saves audio files under Application Support/Downloads,
 /// keyed by track id.
 ///
-/// The song is the only thing that is ever downloaded. Everything the downloads
-/// section browses is a *view* over the songs on disk:
+/// Songs are the only content ever downloaded — artwork rides alongside them.
+/// Everything the downloads section browses is a *view* over the songs on disk:
 ///
 /// - **Albums and artists are derived**, grouped from the metadata each track
 ///   snapshot carries (`albumID`, `album`, album-artist attribution). No album
@@ -21,7 +21,7 @@ private let downloadLog = Logger(
 ///   collection behind.
 /// - **Playlists** are the one grouping a song's own metadata cannot express,
 ///   so a downloaded playlist also saves a small membership record: title,
-///   ordered track ids, cover tag.
+///   ordered track ids, cover tag, song count.
 /// - **Songs** are every file on disk, newest download first.
 ///
 /// Each file keeps the set of *source ids* that required it — the album,
@@ -66,8 +66,10 @@ private let downloadLog = Logger(
 /// just deleted.
 @MainActor
 final class DownloadStore: ObservableObject {
-    /// The kind of view the downloads section browses. Songs are not a kind:
-    /// they are what every kind is made of.
+    /// The kinds a downloaded collection can have. Albums, artists and
+    /// playlists are the views the downloads section browses; a genre is a
+    /// download source and reference key with no browsing view of its own.
+    /// Songs are not a kind: they are what every kind is made of.
     enum GroupKind: String, Codable, Sendable {
         case album, artist, playlist, genre
     }
@@ -240,7 +242,8 @@ final class DownloadStore: ObservableObject {
         /// followed by the spellings older manifests used, so artwork saved
         /// before a migration still shows.
         let artworkKeys: [String]
-        /// Artist attribution for an album group; empty for playlists.
+        /// Artist attribution for an album group, the artist's own key for an
+        /// artist group; empty for playlists.
         let artistKeys: Set<String>
         /// The newest fetch order among the group's songs on disk — what the
         /// Downloads grids' "Recently Downloaded" sort orders groups by. An
@@ -999,8 +1002,8 @@ final class DownloadStore: ObservableObject {
             // saved — it arrived with the artist download, or with the
             // sign-in sync — with the cover of one of their albums behind
             // it: the fallback for an artist surfaced by songs alone. `lead`
-            // is the first album that has anywhere to look, which after
-            // migration is every one of them.
+            // is the first album that has anywhere to look; the fallback
+            // covers an album whose songs carried no image tag at all.
             guard let lead = albums.first(where: { !$0.artworkKeys.isEmpty }) ?? albums.first else { return nil }
             let name = lead.item.artistNameForGroup ?? key
             return DownloadGroup(
@@ -1252,8 +1255,9 @@ final class DownloadStore: ObservableObject {
 
     /// Stops a running batch: the task is cancelled, the progress row goes,
     /// and a relaunch will not resume it. The cancelled task's own
-    /// ``finishBatch(_:)`` still runs when it unwinds, which is a no-op sweep
-    /// over state this already cleared.
+    /// ``finishBatch(_:)`` still runs when it unwinds: its sweep finds the
+    /// batch state already cleared, and it drops any pending-transfer records
+    /// the cancelled task did not clear itself.
     private func cancelBatch(_ id: String) {
         guard let task = batchTasks.removeValue(forKey: id) else { return }
         task.cancel()
@@ -1825,7 +1829,8 @@ final class DownloadStore: ObservableObject {
         }
     }
 
-    /// Drops a reference held by a non-track holder — a playlist's own cover.
+    /// Drops a reference held by a non-track holder — a playlist's own cover
+    /// or an artist's own picture.
     private func unreferenceArtwork(holderID: String) {
         for (key, var artworkEntry) in artworkEntries where artworkEntry.requiredBy.contains(holderID) {
             artworkEntry.requiredBy.remove(holderID)

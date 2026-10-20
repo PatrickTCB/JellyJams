@@ -8,8 +8,8 @@ import SwiftUI
 ///   portrait on iPad.
 ///
 /// The persistent ``NowPlayingBar`` is hosted as an iOS 26 tab bar accessory
-/// where available, docked inside each tab's content on earlier iOS, and docked
-/// below the tab view on macOS.
+/// on iOS — every supported version has the API — and docked below the tab
+/// view on macOS.
 struct MainShellView: View {
     @State private var selection: LibrarySection = .home
     @EnvironmentObject private var session: SessionStore
@@ -72,9 +72,9 @@ struct MainShellView: View {
     // MARK: - iPhone tabs
 
     #if os(iOS)
-    /// The mini player is docked inside each tab rather than around the tab
-    /// view so that it floats above the tab bar instead of covering it. On
-    /// iOS 26.1+ the tab bar hosts it as a bottom accessory instead.
+    /// The tab bar hosts the mini player as a bottom accessory (iOS 26.1+,
+    /// which is every supported iOS), floating it above the bar instead of
+    /// covering it.
     private var tabLayout: some View {
         TabView(selection: $selection) {
             Tab(LibrarySection.home.title, systemImage: LibrarySection.home.systemImage, value: LibrarySection.home) {
@@ -149,8 +149,8 @@ struct MainShellView: View {
     }
 
     /// One sidebar tab: the section's root wrapped in its own navigation stack.
-    /// On iOS the mini player docks inside the content on OS versions without
-    /// the tab bar accessory; on macOS the bar is docked around the tab view.
+    /// On iOS the mini player rides the tab bar accessory applied to the whole
+    /// layout; on macOS the shell docks the bar below the tab view.
     @ViewBuilder private func sectionTab(_ section: LibrarySection) -> some View {
         let content = LibraryNavigationStack {
             SectionRootView(section: section)

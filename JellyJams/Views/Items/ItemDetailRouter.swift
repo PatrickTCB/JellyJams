@@ -35,10 +35,11 @@ struct ItemDetailRouter: View {
 }
 
 extension View {
-    /// Registers the navigation destinations for library items, genres and
-    /// sections, so the values ``LibraryNavigator`` appends to a stack's path —
-    /// and the ones its value-based `NavigationLink`s carry — resolve through
-    /// ``ItemDetailRouter``, ``GenreResultsView`` and ``SectionRootView``.
+    /// Registers the navigation destinations for library items, genres,
+    /// sections and downloaded groups, so the values ``LibraryNavigator``
+    /// appends to a stack's path — and the ones its value-based
+    /// `NavigationLink`s carry — resolve through ``ItemDetailRouter``,
+    /// ``GenreResultsView``, ``SectionRootView`` and the offline details.
     /// Applied once per navigation stack by ``LibraryNavigationStack``.
     ///
     /// Every push in the app goes through one of these, which keeps the stack's
@@ -55,8 +56,8 @@ extension View {
     /// on a pushed album, playlist, artist, or genre screen.
     ///
     /// Those two push through ``LibraryNavigator`` rather than a
-    /// `NavigationLink`: both sit inside a single `List` row on the album and
-    /// playlist screens (``TrackListDetail``), and a `List` turns any row that
+    /// `NavigationLink`: both sit inside a single `List` row on the album
+    /// screen (``TrackListDetail``), and a `List` turns any row that
     /// contains a `NavigationLink` into one tap target — so a whole grid or flow
     /// of them collapses into a single button that opens whichever link is last
     /// (and, on iOS, each gets a disclosure chevron). A plain `Button` that
@@ -78,9 +79,10 @@ extension View {
 }
 
 /// Resolves a downloaded-group push through the store, which is the source of
-/// truth for what is on disk; the ref only identifies it. A group whose last
-/// song has been removed resolves to nothing, so the screen says so rather than
-/// opening an empty offline detail.
+/// truth for what is on disk; the ref only identifies it. An album or artist
+/// whose last song has been removed resolves to nothing, so the screen says so
+/// rather than opening an empty offline detail; a playlist resolves while its
+/// membership record exists, and its detail reports what is still on disk.
 private struct DownloadedGroupDestination: View {
     let ref: DownloadedGroupRef
 

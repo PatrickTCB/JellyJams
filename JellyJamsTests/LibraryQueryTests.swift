@@ -32,8 +32,9 @@ final class LibraryListTests: XCTestCase {
         XCTAssertEqual(LibraryList.aiRadioPlaylists.pageSize, 300)
     }
 
-    /// A sort menu that offered a field the list can't be sorted by would send
-    /// a query the server rejects, so every option must be a real sort field.
+    /// A menu must offer each field at most once, and the internal disc/track
+    /// ordering — which album track lists apply themselves — is not a
+    /// user-facing choice.
     func testEveryOfferedSortOptionIsSelectableAndUnique() {
         for list in LibraryList.allCases {
             let options = list.sortOptions

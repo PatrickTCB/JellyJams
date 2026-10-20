@@ -32,7 +32,7 @@ final class SessionStore: ObservableObject {
 
     var isSignedIn: Bool { client != nil && currentUser != nil }
 
-    /// Every library read the UI performs goes through here. It exists whether
+    /// The gateway the UI's library reads go through. It exists whether
     /// or not a user is signed in — reads made while signed out throw
     /// ``JellyfinError/notAuthenticated`` instead of silently doing nothing.
     var library: LibraryRepository { LibraryRepository(client: client) }

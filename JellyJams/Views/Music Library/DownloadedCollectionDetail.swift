@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// A downloaded collection opened from the Downloads section: the songs saved
-/// for it, entirely from the manifest — no server involved, and no artwork
-/// request either. Playback resolves each track to its saved file via
+/// for it, entirely from the manifest — browsing involves no server and no
+/// artwork request, the offline playlist's refresh button being the one
+/// deliberate exception. Playback resolves each track to its saved file via
 /// ``DownloadStore/localURL(forItemId:)``.
 ///
 /// Albums and playlists render the way their Library pages do: a header built
