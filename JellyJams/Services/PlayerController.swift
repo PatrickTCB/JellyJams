@@ -111,6 +111,17 @@ final class PlayerController: ObservableObject {
 
     var hasQueue: Bool { !queue.isEmpty }
 
+    /// How many already-played tracks the queue UI keeps visible above the
+    /// current one.
+    static let visibleHistoryCount = 2
+
+    /// The first queue index the queue UI shows. Older played entries stay in
+    /// ``queue`` — so Previous and Repeat All still reach them — but are hidden.
+    var visibleQueueStartIndex: Int {
+        guard let index = currentIndex, queue.indices.contains(index) else { return 0 }
+        return max(0, index - Self.visibleHistoryCount)
+    }
+
     var canGoNext: Bool {
         guard let index = currentIndex else { return false }
         return index + 1 < queue.count || (repeatMode == .repeatAll && !queue.isEmpty)

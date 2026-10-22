@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The current playback queue: reorderable, removable, and tap-to-jump.
+/// The current playback queue: reorderable, removable, and tap-to-jump. Only
+/// the two most recently played tracks are shown above the current one.
 struct QueueView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
@@ -10,9 +11,12 @@ struct QueueView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                let entries = player.queue
+                // Only the last few played tracks are shown; rows map their
+                // slice offsets back to full-queue indices.
+                let start = player.visibleQueueStartIndex
+                let entries = player.queue[start...]
                 List {
-                    ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                    ForEach(Array(zip(entries.indices, entries)), id: \.1.id) { index, entry in
                         QueueRow(
                             item: entry.item,
                             isCurrent: index == player.currentIndex,
@@ -21,8 +25,15 @@ struct QueueView: View {
                             player.play(atQueueIndex: index)
                         }
                     }
-                    .onDelete { player.removeFromQueue(atOffsets: $0) }
-                    .onMove { player.moveQueue(fromOffsets: $0, toOffset: $1) }
+                    .onDelete { offsets in
+                        player.removeFromQueue(atOffsets: IndexSet(offsets.map { $0 + start }))
+                    }
+                    .onMove { offsets, destination in
+                        player.moveQueue(
+                            fromOffsets: IndexSet(offsets.map { $0 + start }),
+                            toOffset: destination + start
+                        )
+                    }
                 }
                 .onAppear { scrollToCurrentItem(using: proxy) }
                 .onChange(of: player.currentIndex) { scrollToCurrentItem(using: proxy) }
