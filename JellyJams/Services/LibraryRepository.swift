@@ -35,6 +35,10 @@ struct LibraryRepository: Sendable {
 
     private static let genreItemLimit = 100
 
+    /// Length of an instant mix queue. Matches what Jellyfin's own web client
+    /// asks for.
+    private static let instantMixLimit = 200
+
     init(client: JellyfinService?) {
         self.client = client
     }
@@ -352,6 +356,17 @@ struct LibraryRepository: Sendable {
             result = try await client.getSimilarArtists(itemId: item.id, limit: limit)
         }
         return result.items ?? []
+    }
+
+    // MARK: - Instant mix
+
+    /// A queue of songs the server mixes from `item` — a song, album, artist
+    /// or playlist. Anything that isn't a song is dropped, so the result can
+    /// go straight to the player.
+    func instantMix(for item: BaseItemDto) async throws -> [BaseItemDto] {
+        let client = try requireClient()
+        let result = try await client.getInstantMix(itemId: item.id, limit: Self.instantMixLimit)
+        return (result.items ?? []).filter { $0.itemType == .audio }
     }
 
     // MARK: - Search

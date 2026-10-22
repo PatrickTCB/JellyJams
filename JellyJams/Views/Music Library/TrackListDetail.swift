@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Shared layout for a "collection of tracks" detail screen (an album or a
-/// playlist): a large header with artwork, metadata and Play/Shuffle actions,
-/// followed by the track list.
+/// playlist): a large header with artwork, metadata and Play/Shuffle actions
+/// (plus Instant Mix when online), followed by the track list.
 struct TrackListDetail: View {
     let headerItem: BaseItemDto
     var subtitle: String?
@@ -347,6 +347,12 @@ struct TrackListDetail: View {
             }
             .buttonStyle(.bordered)
             .disabled(tracks.isEmpty)
+
+            if !downloaded {
+                InstantMixButton(item: headerItem)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.bordered)
+            }
         }
     }
 

@@ -69,6 +69,7 @@ struct ItemContextMenu: ViewModifier {
         Button { perform(.shuffle) } label: { Label("Shuffle", systemImage: "shuffle") }
         Button { perform(.playNext) } label: { Label("Play Next", systemImage: "text.insert") }
         Button { perform(.addToQueue) } label: { Label("Add to Queue", systemImage: "text.append") }
+        InstantMixButton(item: item)
 
         Divider()
 

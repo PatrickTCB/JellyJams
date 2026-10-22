@@ -265,6 +265,27 @@ final class JellyfinService: Sendable {
         return try validated(result)
     }
 
+    // MARK: - Instant mix
+
+    /// Songs the server mixes from a seed song, album, artist or playlist
+    /// (`/Items/{id}/InstantMix`), in the order it suggests playing them.
+    func getInstantMix(itemId: String?, limit: Int) async throws -> BaseItemDtoQueryResult {
+        let userId = try requireUserId()
+        guard let itemId else { throw JellyfinError.missingItemIdentifier }
+        let request = Paths.getInstantMixFromItem(
+            itemID: itemId,
+            parameters: .init(
+                userID: userId,
+                limit: limit,
+                fields: Self.defaultFields,
+                enableImages: true,
+                enableUserData: true
+            )
+        )
+        let result = try await apiClient.send(request).value
+        return try validated(result)
+    }
+
     func getPlaylistItems(playlistId: String?) async throws -> BaseItemDtoQueryResult {
         let userId = try requireUserId()
         guard let playlistId else { throw JellyfinError.missingItemIdentifier }

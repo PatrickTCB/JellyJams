@@ -219,6 +219,10 @@ struct TrackRow: View {
         Button { onPlay() } label: { Label("Play", systemImage: "play.fill") }
         Button { player.playNext(contextTracks) } label: { Label("Play Next", systemImage: "text.insert") }
         Button { player.addToQueue(contextTracks) } label: { Label("Add to Queue", systemImage: "text.append") }
+        // Seeded by one song, so it isn't offered for a multi-row selection.
+        if contextTracks.count == 1 {
+            InstantMixButton(item: track)
+        }
 
         Menu {
             Button {

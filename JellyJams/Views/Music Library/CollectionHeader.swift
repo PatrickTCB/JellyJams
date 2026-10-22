@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A detail-screen header for a collection whose page is an album grid — the
 /// artist pages, online and downloaded: artwork, title, subtitle and
-/// Play/Shuffle actions.
+/// Play/Shuffle actions, plus Instant Mix when online.
 struct CollectionHeader: View {
     let item: BaseItemDto
     var subtitle: String?
@@ -72,6 +72,12 @@ struct CollectionHeader: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(!canPlay)
+
+                // Renders nothing for a downloaded artist: instant mix is
+                // server-only.
+                InstantMixButton(item: item)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.bordered)
 
                 FavouriteButton(item: item, size: .title2)
             }
