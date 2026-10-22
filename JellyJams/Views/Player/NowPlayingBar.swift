@@ -63,6 +63,12 @@ struct NowPlayingBar: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open Now Playing")
 
+                    #if os(macOS)
+                    VolumeSlider()
+                        .frame(width: 140)
+                        .padding(.trailing, 8)
+                    #endif
+
                     Button { player.togglePlayPause() } label: {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                             .font(isInline ? .title3 : .title2)

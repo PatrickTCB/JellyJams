@@ -120,7 +120,24 @@ struct PlayerView: View {
         }
     }
 
-    private var secondaryControls: some View {
+    @ViewBuilder private var secondaryControls: some View {
+        #if os(macOS)
+        // Equal-width flexible sides keep the buttons centred under the
+        // transport while the volume slider sits at the trailing edge.
+        HStack(spacing: 16) {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
+            secondaryButtons.fixedSize()
+            VolumeSlider()
+                .frame(minWidth: 80, maxWidth: 160)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal)
+        #else
+        secondaryButtons
+        #endif
+    }
+
+    private var secondaryButtons: some View {
         HStack(spacing: 44) {
             #if os(iOS)
             AirPlayPicker()

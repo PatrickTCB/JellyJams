@@ -68,6 +68,23 @@ final class PlayerController: ObservableObject {
     @Published var repeatMode: RepeatMode = .repeatNone {
         didSet { updateNowPlaying() }
     }
+    #if os(macOS)
+    /// The app's playback volume, from 0 to 1, remembered across launches.
+    /// iOS has no in-app volume: the hardware buttons and system controls own it.
+    @Published var volume: Float = PlayerController.storedVolume {
+        didSet {
+            let clamped = min(max(volume, 0), 1)
+            if clamped != volume { volume = clamped; return }
+            player.volume = volume
+            UserDefaults.standard.set(volume, forKey: Self.volumeKey)
+        }
+    }
+    private static let volumeKey = "jellyjams.volume"
+    private static var storedVolume: Float {
+        guard UserDefaults.standard.object(forKey: volumeKey) != nil else { return 1 }
+        return min(max(UserDefaults.standard.float(forKey: volumeKey), 0), 1)
+    }
+    #endif
 
     private let player = AVPlayer()
     private var client: JellyfinService?
@@ -131,6 +148,9 @@ final class PlayerController: ObservableObject {
 
     init() {
         player.actionAtItemEnd = .pause
+        #if os(macOS)
+        player.volume = volume
+        #endif
         setupTimeObserver()
         setupEndObserver()
         setupFailureObserver()
