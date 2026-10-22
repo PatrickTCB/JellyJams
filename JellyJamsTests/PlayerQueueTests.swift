@@ -342,6 +342,34 @@ final class PlayerQueueTests: XCTestCase {
         XCTAssertEqual(player.currentIndex, 1)
     }
 
+    // MARK: - Visible history
+
+    func testTheQueueShowsEverythingUntilMoreThanTwoTracksHavePlayed() {
+        let player = makePlayer()
+        player.play(["a", "b", "c", "d"].map { TestFixtures.item(id: $0) }, startAt: 2)
+
+        XCTAssertEqual(player.visibleQueueStartIndex, 0)
+    }
+
+    /// Playing the fourth track hides the first; it stays queued so Previous
+    /// and Repeat All can still reach it.
+    func testOnlyTheTwoMostRecentlyPlayedTracksStayVisible() {
+        let player = makePlayer()
+        let trackIds = (1 ... 10).map { "t\($0)" }
+        play(player, trackIds)
+
+        player.play(atQueueIndex: 3)
+
+        XCTAssertEqual(player.visibleQueueStartIndex, 1)
+        XCTAssertEqual(ids(player), trackIds, "Hidden tracks remain in the queue")
+    }
+
+    func testTheWholeQueueIsVisibleWhenNothingIsPlaying() {
+        let player = makePlayer()
+
+        XCTAssertEqual(player.visibleQueueStartIndex, 0)
+    }
+
     // MARK: - Clearing
 
     func testClearQueueResetsEveryPieceOfPlaybackState() {
