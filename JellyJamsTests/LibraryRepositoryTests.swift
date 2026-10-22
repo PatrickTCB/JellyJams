@@ -582,6 +582,63 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(similar.compactMap(\.id), ["album-1", "album-2"])
     }
 
+    // MARK: - Instant mix
+
+    func testInstantMixRequestsTheItemsInstantMixEndpointForTheSeed() async throws {
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        _ = try await TestFixtures.stubbedRepository().instantMix(
+            for: TestFixtures.item(id: "album-id", type: .musicAlbum)
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(recorder.all.count, 1)
+        XCTAssertEqual(request.path, "/jellyfin/Items/album-id/InstantMix")
+        XCTAssertEqual(request.value(for: "userId"), "user-id")
+        XCTAssertEqual(request.value(for: "limit"), "200")
+    }
+
+    /// The result goes straight to the player, so anything that isn't a song
+    /// must not reach the queue.
+    func testInstantMixKeepsOnlySongsInServerOrder() async throws {
+        URLProtocolStub.handler = { request in
+            let payload = itemsPayload([
+                ("song-2", "Audio"),
+                ("album-1", "MusicAlbum"),
+                ("song-1", "Audio")
+            ])
+            return (try emptyResponse(for: request, statusCode: 200), payload)
+        }
+
+        let mix = try await TestFixtures.stubbedRepository().instantMix(
+            for: TestFixtures.item(id: "artist-id", type: .musicArtist)
+        )
+
+        XCTAssertEqual(mix.compactMap(\.id), ["song-2", "song-1"])
+    }
+
+    func testInstantMixRequiresAnItemIdentifier() async {
+        do {
+            _ = try await TestFixtures.stubbedRepository().instantMix(for: BaseItemDto(name: "No ID"))
+            XCTFail("Expected missingItemIdentifier")
+        } catch {
+            XCTAssertEqual(error as? JellyfinError, .missingItemIdentifier)
+        }
+    }
+
+    func testInstantMixIsOfferedForSongsAlbumsArtistsAndPlaylistsOnly() {
+        for type in [ItemType.audio, .musicAlbum, .musicArtist, .playlist] {
+            XCTAssertTrue(TestFixtures.item(id: "id", type: type).supportsInstantMix, "\(type)")
+        }
+        for type in [ItemType.musicGenre, .genre, .folder] {
+            XCTAssertFalse(TestFixtures.item(id: "id", type: type).supportsInstantMix, "\(type)")
+        }
+        XCTAssertFalse(BaseItemDto(name: "No ID", type: .musicAlbum).supportsInstantMix)
+    }
+
     // MARK: - Home
 
     func testLatestItemsAsksTheLatestEndpointForTheRightKind() async throws {
@@ -671,6 +728,9 @@ final class LibraryRepositoryTests: XCTestCase {
         }
         await assertNotAuthenticated {
             _ = try await repository.latestItems(.albums, limit: 10)
+        }
+        await assertNotAuthenticated {
+            _ = try await repository.instantMix(for: TestFixtures.item(id: "album-id", type: .musicAlbum))
         }
         await assertNotAuthenticated {
             _ = try await repository.items(withIds: ["album-id"])
