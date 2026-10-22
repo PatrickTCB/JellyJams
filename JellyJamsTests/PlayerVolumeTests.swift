@@ -1,4 +1,7 @@
 #if os(macOS)
+import XCTest
+@testable import JellyJams
+
 /// The macOS in-app volume: clamped to 0...1 and remembered across launches.
 @MainActor
 final class PlayerVolumeTests: XCTestCase {
