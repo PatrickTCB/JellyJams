@@ -5,6 +5,7 @@ Jelly*Jams*.zip
 Jelly Jams.app
 appcast.xml
 .qwen/
+!Downloads/
 # macOS
 .DS_Store
 ._*
