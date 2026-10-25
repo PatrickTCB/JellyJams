@@ -28,6 +28,7 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .navigationTitle("Home")
         .refreshable { await load() }
+        .refreshToolbarItem { await load() }
         // Re-runs on appear and whenever the station rule itself changes, so
         // switching AI Radio on or editing its ending updates the quick links
         // without leaving the page.
