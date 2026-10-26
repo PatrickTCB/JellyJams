@@ -264,7 +264,7 @@ struct TrackRow: View {
             }
             if let album = track.albumNavigationItem {
                 Button { navigator.open(album) } label: {
-                    Label("View Album", systemImage: "musicAlbum")
+                    Label("View Album", systemImage: "record.circle.fill")
                 }
             }
         }
