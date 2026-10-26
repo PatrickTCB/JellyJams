@@ -641,14 +641,23 @@ final class LibraryRepositoryTests: XCTestCase {
 
     // MARK: - Home
 
-    func testLatestItemsAsksTheLatestEndpointForTheRightKind() async throws {
+    /// Each home row asks `/Items` for its own kind, newest first, sorted by
+    /// the date that makes the kind "new": albums by the day they joined
+    /// the library, artists by premiere date.
+    func testLatestItemsAskTheItemsEndpointSortedByTheKindsOwnDate() async throws {
         let albums = try await recordLatest(.albums)
-        XCTAssertEqual(albums.path, "/jellyfin/Items/Latest")
+        XCTAssertEqual(albums.path, "/jellyfin/Items")
         XCTAssertEqual(albums.values(for: "includeItemTypes"), ["MusicAlbum"])
+        XCTAssertEqual(albums.values(for: "sortBy"), ["DateCreated", "SortName"])
+        XCTAssertEqual(albums.value(for: "sortOrder"), "Descending")
+        XCTAssertEqual(albums.value(for: "recursive"), "true")
         XCTAssertEqual(albums.value(for: "limit"), "10")
 
         let artists = try await recordLatest(.artists)
         XCTAssertEqual(artists.values(for: "includeItemTypes"), ["MusicArtist"])
+        XCTAssertEqual(artists.values(for: "sortBy"), ["PremiereDate", "SortName"])
+        XCTAssertEqual(artists.value(for: "sortOrder"), "Descending")
+        XCTAssertEqual(artists.value(for: "recursive"), "true")
     }
 
     func testIdLookupForwardsEveryId() async throws {
@@ -789,12 +798,12 @@ final class LibraryRepositoryTests: XCTestCase {
         return try XCTUnwrap(recorder.all.first)
     }
 
-    /// Sends one latest-media request and returns what reached the network.
+    /// Sends one home latest-items request and returns what reached the network.
     private func recordLatest(_ kind: LibraryRepository.LatestKind) async throws -> RecordedRequest {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
-            return (try emptyResponse(for: request, statusCode: 200), Data("[]".utf8))
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
         }
 
         _ = try await TestFixtures.stubbedRepository().latestItems(kind, limit: 10)
