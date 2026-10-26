@@ -41,6 +41,7 @@ struct TrackRow: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var navigator: LibraryNavigator
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
@@ -248,6 +249,26 @@ struct TrackRow: View {
                 Label("Remove from Playlist", systemImage: "minus.circle")
             }
         }
+
+        // The artist and album pages load from the server, so browsing
+        // downloads doesn't offer them — the rule Instant Mix follows.
+        // Navigation always means the row's own album and artist, whatever
+        // the selection.
+        if !offlineBrowsing,
+           track.artistNavigationItem != nil || track.albumNavigationItem != nil {
+            Divider()
+            if let artist = track.artistNavigationItem {
+                Button { navigator.open(artist) } label: {
+                    Label("View Artist", systemImage: "person")
+                }
+            }
+            if let album = track.albumNavigationItem {
+                Button { navigator.open(album) } label: {
+                    Label("View Album", systemImage: "musicAlbum")
+                }
+            }
+        }
+
         Divider()
         Button { toggleFavourites() } label: {
             Label(allFavourite ? "Remove from Favourites" : "Add to Favourites",

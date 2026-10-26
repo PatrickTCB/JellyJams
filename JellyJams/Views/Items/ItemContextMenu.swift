@@ -93,6 +93,15 @@ struct ItemContextMenu: ViewModifier {
             Label("Add to Playlist", systemImage: "text.badge.plus")
         }
 
+        // The artist page loads from the server, so browsing downloads
+        // doesn't offer it — the rule Instant Mix follows.
+        if item.itemType == .musicAlbum, !offlineBrowsing, let artist = item.artistNavigationItem {
+            Divider()
+            Button { navigator.open(artist) } label: {
+                Label("View Artist", systemImage: "person")
+            }
+        }
+
         Divider()
 
         Button { favourites.toggle(item) } label: {

@@ -70,4 +70,22 @@ extension JellyfinAPI.BaseItemDto {
     var mediaSourceID: String? {
         mediaSources?.first?.id
     }
+
+    /// A minimal artist item that can be pushed to open this item's artist
+    /// page: an album's first album artist, a song's first track artist. The
+    /// id is what routing loads by, so a stub carries a full page (see
+    /// ``AlbumDetailView``). `nil` when no artist carries an id to route on.
+    var artistNavigationItem: BaseItemDto? {
+        guard let pair = itemType == .musicAlbum ? albumArtists?.first : artistItems?.first,
+              let id = pair.id
+        else { return nil }
+        return BaseItemDto(id: id, name: pair.name, type: .musicArtist)
+    }
+
+    /// A minimal album item that can be pushed to open the album this song
+    /// belongs to, or `nil` for anything without an album id.
+    var albumNavigationItem: BaseItemDto? {
+        guard let id = albumID else { return nil }
+        return BaseItemDto(id: id, name: album, type: .musicAlbum)
+    }
 }
