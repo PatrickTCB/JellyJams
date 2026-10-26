@@ -179,7 +179,7 @@ final class JellyfinServiceTests: XCTestCase {
         let query = components.queryItems ?? []
 
         XCTAssertEqual(components.path, "/jellyfin/Audio/track-id/stream")
-        XCTAssertEqual(query.last(where: { $0.name == "api_key" })?.value, "token")
+        XCTAssertEqual(query.last(where: { $0.name == "ApiKey" })?.value, "token")
         XCTAssertEqual(query.last(where: { $0.name == "deviceId" })?.value, "device-id")
         XCTAssertEqual(query.last(where: { $0.name == "mediaSourceId" })?.value, "source-id")
         XCTAssertEqual(query.last(where: { $0.name == "playSessionId" })?.value, "session-id")
@@ -407,7 +407,7 @@ final class JellyfinServiceTests: XCTestCase {
 
         let url = try XCTUnwrap(makeClient().artworkURL(for: album, size: 320))
 
-        XCTAssertEqual(queryValue(url, "api_key"), "token")
+        XCTAssertEqual(queryValue(url, "ApiKey"), "token")
     }
 
     func testArtworkForAnItemWithoutAnIdentifierIsNil() {
