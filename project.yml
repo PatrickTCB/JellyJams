@@ -20,10 +20,10 @@ settings:
 packages:
   JellyfinAPI:
     url: https://github.com/jellyfin/jellyfin-sdk-swift.git
-    exactVersion: 3.1.0
+    from: 3.1.0
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle.git
-    exactVersion: 2.9.6
+    from: 2.9.6
 
 targets:
   JellyJams:
