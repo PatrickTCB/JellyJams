@@ -25,9 +25,9 @@ final class HomeModel: ObservableObject {
     }
 
     /// How many tiles each Recent Music row asks for.
-    static let latestLimit = 10
+    static let latestLimit = 5
     /// How many AI Radio stations the quick links show.
-    static let stationLimit = 3
+    static let stationLimit = 5
 
     @Published private(set) var latest = Latest()
     @Published private(set) var stations: [BaseItemDto] = []

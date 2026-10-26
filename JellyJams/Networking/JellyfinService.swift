@@ -173,28 +173,6 @@ final class JellyfinService: Sendable {
         return try validated(result)
     }
 
-    /// The newest items of the given kinds (`/Items/Latest`).
-    ///
-    /// This endpoint answers with a bare array rather than a query result, so
-    /// it validates its own identifiers instead of going through
-    /// ``validated(_:)``.
-    func getLatestMedia(includeItemTypes: [ItemType], limit: Int) async throws -> [BaseItemDto] {
-        let userId = try requireUserId()
-        let request = Paths.getLatestMedia(
-            parameters: .init(
-                userID: userId,
-                fields: Self.defaultFields,
-                includeItemTypes: includeItemTypes,
-                enableImages: true,
-                enableUserData: true,
-                limit: limit
-            )
-        )
-        let items = try await apiClient.send(request).value
-        guard items.allSatisfy({ $0.id != nil }) else { throw JellyfinError.missingItemIdentifier }
-        return items
-    }
-
     func getAlbumArtists(
         searchTerm: String? = nil,
         sortBy: SortBy? = .sortName,

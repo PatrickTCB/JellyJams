@@ -12,6 +12,9 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
     case album = "Album,SortName"
     case artist = "Artist,SortName"
     case dateCreated = "DateCreated,SortName"
+    /// Newest by the item's own premiere date. Not shown in sort menus;
+    /// the home screen's "new artists" row is its only user.
+    case premiereDate = "PremiereDate,SortName"
     case datePlayed = "DatePlayed,SortName"
     case playCount = "PlayCount,SortName"
     case productionYear = "ProductionYear,PremiereDate,SortName"
@@ -31,6 +34,7 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
         case .album: [.album, .sortName]
         case .artist: [.artist, .sortName]
         case .dateCreated: [.dateCreated, .sortName]
+        case .premiereDate: [.premiereDate, .sortName]
         case .datePlayed: [.datePlayed, .sortName]
         case .playCount: [.playCount, .sortName]
         case .productionYear: [.productionYear, .premiereDate, .sortName]
@@ -49,6 +53,7 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
         case .album: return "Album"
         case .artist: return "Artist"
         case .dateCreated: return "Date Added"
+        case .premiereDate: return "Premiere Date"
         case .datePlayed: return "Date Played"
         case .playCount: return "Play Count"
         case .productionYear: return "Year"

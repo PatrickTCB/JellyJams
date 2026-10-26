@@ -254,17 +254,20 @@ struct TrackRow: View {
         // downloads doesn't offer them — the rule Instant Mix follows.
         // Navigation always means the row's own album and artist, whatever
         // the selection.
-        if !offlineBrowsing,
-           track.artistNavigationItem != nil || track.albumNavigationItem != nil {
-            Divider()
-            if let artist = track.artistNavigationItem {
-                Button { navigator.open(artist) } label: {
-                    Label("View Artist", systemImage: "person")
+        if !offlineBrowsing {
+            let artists = track.artistNavigationItems
+            let album = track.albumNavigationItem
+            if !artists.isEmpty || album != nil {
+                Divider()
+                ForEach(artists) { artist in
+                    Button { navigator.open(artist) } label: {
+                        Label(artist.displayName, systemImage: "person")
+                    }
                 }
-            }
-            if let album = track.albumNavigationItem {
-                Button { navigator.open(album) } label: {
-                    Label("View Album", systemImage: "record.circle.fill")
+                if let album {
+                    Button { navigator.open(album) } label: {
+                        Label(album.displayName, systemImage: "record.circle.fill")
+                    }
                 }
             }
         }

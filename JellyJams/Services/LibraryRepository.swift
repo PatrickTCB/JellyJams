@@ -135,9 +135,12 @@ struct LibraryRepository: Sendable {
 
     // MARK: - Home
 
-    /// Which of Jellyfin's "latest" streams a home row wants. Albums and
-    /// artists are requested separately because the endpoint filters by item
-    /// type, and a mixed request would let one kind crowd out the other.
+    /// Which kind of "new music" a home row wants. Albums and artists are
+    /// requested separately because each request carries its own limit, and
+    /// a mixed one would let the more numerous kind crowd the other out.
+    /// The two are also judged by different dates: an album is new when it
+    /// joins the library, while an artist surfaces through the premiere
+    /// dates of their releases.
     enum LatestKind: Sendable, Equatable {
         case albums
         case artists
@@ -148,13 +151,31 @@ struct LibraryRepository: Sendable {
             case .artists: .musicArtist
             }
         }
+
+        var sortBy: SortBy {
+            switch self {
+            case .albums: .dateCreated
+            case .artists: .premiereDate
+            }
+        }
     }
 
-    /// The newest music of one kind, newest first.
+    /// The newest music of one kind, newest first: a plain `/Items` query
+    /// sorted descending by the kind's own date. `/Items/Latest` was tried
+    /// first and proved the weaker source — it keys off when items entered
+    /// the library, so an artist only surfaces when their folder is added,
+    /// however recent their music.
     func latestItems(_ kind: LatestKind, limit: Int) async throws -> [BaseItemDto] {
         let client = try requireClient()
         guard limit > 0 else { return [] }
-        return try await client.getLatestMedia(includeItemTypes: [kind.itemType], limit: limit)
+        let result = try await client.getItems(
+            includeItemTypes: [kind.itemType],
+            recursive: true,
+            sortBy: kind.sortBy,
+            sortOrder: .descending,
+            limit: limit
+        )
+        return result.items ?? []
     }
 
     /// Resolves specific item ids, in whatever order the server answers.

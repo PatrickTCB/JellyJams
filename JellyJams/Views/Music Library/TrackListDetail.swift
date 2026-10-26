@@ -696,6 +696,8 @@ extension Array where Element == BaseItemDto {
             return compare(lhs.album ?? "", rhs.album ?? "")
         case .dateCreated:
             return compare(lhs.dateCreated ?? .distantPast, rhs.dateCreated ?? .distantPast)
+        case .premiereDate:
+            return compare(lhs.premiereDate ?? .distantPast, rhs.premiereDate ?? .distantPast)
         case .datePlayed:
             return compare(lhs.userData?.lastPlayedDate ?? .distantPast, rhs.userData?.lastPlayedDate ?? .distantPast)
         case .playCount:
