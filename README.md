@@ -16,9 +16,7 @@ the app updates itself via [Sparkle](https://sparkle-project.org).
     height="60"/>
 </a>
 
-All communication with Jellyfin is done using their official SDK [`jellyfin-sdk-swift`](https://github.com/jellyfin/jellyfin-sdk-swift). 
-I pinned the version to 3.1.0, but might change that as I work with the SDK and
-better understand what the change process is like.
+All communication with Jellyfin is done using their official SDK [`jellyfin-sdk-swift`](https://github.com/jellyfin/jellyfin-sdk-swift).
 
 As of v1.5, I think this generally usable. It's been my only music player for 3 months now and 
 I am officially not embarassed at the thought of people who know me in real life using it.
