@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// The context menus' "Ban" submenu — how a user tells the Jelly Jams
-/// Backend to keep something out of the playlists it generates. It mirrors
-/// "Add to Playlist": one drop-down whose options name what each would ban,
-/// built from the item the menu belongs to. A song offers the song, its
-/// album, and each of its artists; an album offers itself and its
+/// The "Ban" submenu — how a user tells the Jelly Jams Backend to keep
+/// something out of the playlists it generates. It serves the library
+/// context menus as a titled row and, icon-only, the player's header.
+/// It mirrors "Add to Playlist": one drop-down whose options name what each
+/// would ban, built from the item the menu belongs to. A song offers the
+/// song, its album, and each of its artists; an album offers itself and its
 /// album-artists; an artist offers itself. Nothing else — playlists, genres
 /// and the rest — has anything here to ban.
 ///

@@ -64,6 +64,12 @@ struct PlayerView: View {
             }
             Spacer()
             if let item = player.currentItem {
+                // The same submenu the song's context menu offers — the song,
+                // its album, its artists — shown icon-only, and nothing at
+                // all when the backend can't take bans.
+                BanMenu(item: item)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.bordered)
                 FavouriteButton(item: item, size: .title3)
             }
         }
