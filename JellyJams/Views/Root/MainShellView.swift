@@ -21,10 +21,10 @@ struct MainShellView: View {
     @EnvironmentObject private var settingsPresentation: SettingsPresentation
     #endif
 
-    /// The library sections the sidebar offers, AI Radio among them only while
-    /// the feature is switched on.
+    /// The library sections the sidebar offers, Mixtapes among them only while
+    /// the app is registered with a backend.
     private var librarySections: [LibrarySection] {
-        LibrarySection.libraryGroup(showingAIRadio: preferences.isAIRadioActive)
+        LibrarySection.libraryGroup(showingMixtapes: preferences.isMixtapesActive)
     }
 
     var body: some View {
@@ -33,11 +33,11 @@ struct MainShellView: View {
             .onChange(of: session.serverReachable, initial: true) { _, reachable in
                 if !reachable { selection = .downloads }
             }
-            // Turning AI Radio off removes its tab from under the selection;
-            // left alone the shell would be showing a destination that no
-            // longer exists.
-            .onChange(of: preferences.isAIRadioActive) { _, active in
-                if !active, selection == .aiRadio { selection = .albums }
+            // Losing the registration removes Mixtapes from under the
+            // selection; left alone the shell would be showing a destination
+            // that no longer exists.
+            .onChange(of: preferences.isMixtapesActive) { _, active in
+                if !active, selection == .mixtapes { selection = .albums }
             }
     }
 
