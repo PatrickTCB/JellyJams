@@ -106,11 +106,11 @@ struct BackendBans: Decodable, Sendable, Equatable {
 /// One tape the backend has been told to build: the recipe `GET /tapes`
 /// answers with, and what the composer and the configured-tapes sheet show.
 ///
-/// The four source switches come back as the strings the backend stored —
-/// `"true"` and `"false"`, lower-cased since the day the builder started
-/// comparing against them, though rows written by older builds said `"True"`
-/// — and `freshAlchemy` is a late addition a deployed backend may not echo
-/// yet, so its absence reads as off rather than as a failed decode.
+/// The four source switches arrive as the strings the backend stores them
+/// as — lower-cased `"true"` and `"false"`, which is the shape its builder
+/// reads back and compares against — and FastAPI's response model fills
+/// every field, so the reader takes the contract as it is rather than
+/// fishing for spellings this service never wrote.
 struct BackendMixtape: Decodable, Sendable, Equatable {
     let name: String
     let usesRecents: Bool
@@ -132,26 +132,19 @@ struct BackendMixtape: Decodable, Sendable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
-        usesRecents = Self.flag(container, .recents)
-        usesFavourites = Self.flag(container, .favourites)
-        usesFingerprint = Self.flag(container, .fingerprint)
-        usesFreshAlchemy = Self.flag(container, .freshAlchemy)
-        alchemyPercent = try container.decodeIfPresent(Int.self, forKey: .alchemyPercent) ?? 0
-        songCount = try container.decodeIfPresent(Int.self, forKey: .songCount) ?? 0
+        name = try container.decode(String.self, forKey: .name)
+        usesRecents = try Self.switchedOn(container, .recents)
+        usesFavourites = try Self.switchedOn(container, .favourites)
+        usesFingerprint = try Self.switchedOn(container, .fingerprint)
+        usesFreshAlchemy = try Self.switchedOn(container, .freshAlchemy)
+        alchemyPercent = try container.decode(Int.self, forKey: .alchemyPercent)
+        songCount = try container.decode(Int.self, forKey: .songCount)
     }
 
-    /// Whether a switch is on, read however this backend wrote it: a real
-    /// boolean, or the stored string in either case, with anything else —
-    /// including nothing at all — counting as off.
-    private static func flag(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Bool {
-        // `try?` flattens: a throwing read (the value is a boolean, not a
-        // string) and an absent key both land in the boolean branch, where
-        // absence answers `false` and a real boolean speaks for itself.
-        if let text = try? container.decodeIfPresent(String.self, forKey: key) {
-            return text.lowercased() == "true"
-        }
-        return (try? container.decodeIfPresent(Bool.self, forKey: key)) ?? false
+    /// Whether a switch is on, read from the stored string the backend
+    /// answers with.
+    private static func switchedOn(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) throws -> Bool {
+        try container.decode(String.self, forKey: key) == "true"
     }
 }
 
@@ -205,6 +198,19 @@ struct BackendTapeCreated: Decodable, Sendable, Equatable {
         case created = "Created"
         case updated = "Updated"
         case tape = "Details"
+    }
+}
+
+/// The backend's answer to a `DELETE /delete-tape` — which tape came off
+/// the books. The row has already left the app's list by the time this
+/// arrives, so the echo is confirmation, not news.
+struct BackendTapeDeleted: Decodable, Sendable, Equatable {
+    let deleted: Bool
+    let name: String
+
+    private enum CodingKeys: String, CodingKey {
+        case deleted = "Deleted"
+        case name = "Name"
     }
 }
 
@@ -477,6 +483,28 @@ final class JellyJamsBackend: Sendable {
             ]
         )
         return try JSONDecoder().decode(BackendTapeCreated.self, from: data)
+    }
+
+    /// `DELETE /delete-tape` — take a tape's recipe off the backend's
+    /// books, so the builder stops rebuilding it. The playlist it last
+    /// wrote stays in the library until the custodian clears it or the
+    /// user does; the recipe, which is what the tapes sheet shows, is
+    /// what this deletes. The name is matched exactly as stored — without
+    /// the suffix — so the row on screen is the name to send.
+    ///
+    /// A name the backend no longer has answers 404. Callers deleting
+    /// optimistically read that as the state they asked for rather than a
+    /// failure to roll back.
+    func deleteTape(name: String, userID: String) async throws -> BackendTapeDeleted {
+        let data = try await perform(
+            .delete,
+            path: "delete-tape",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "name", value: name),
+            ]
+        )
+        return try JSONDecoder().decode(BackendTapeDeleted.self, from: data)
     }
 
     // MARK: - The request plumbing

@@ -412,6 +412,217 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertEqual(request.value(for: "userID"), "user-id")
     }
 
+    // MARK: - Mixtapes
+
+    /// `GET /tapes` answers the account's recipes, switches and all: every
+    /// field of every tape is in the answer because the backend's response
+    /// model fills them, and the four switches arrive as the stored
+    /// strings — lower-cased `"true"` and `"false"` — that its builder
+    /// compares against. The `User` echo is not the app's business.
+    func testTheTapeListReadsTheRecipesAndTheirSwitches() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"User":{"name":"patrick","id":"user-id"},"Playlists":[{"userID":"user-id","name":"Weekend Haul","recents":"true","favourites":"false","fingerprint":"true","alchemyPercent":30,"freshAlchemy":"true","songCount":150},{"userID":"user-id","name":"Quiet Nights","recents":"false","favourites":"true","fingerprint":"false","alchemyPercent":50,"freshAlchemy":"false","songCount":80}]}"#.utf8)
+            )
+        }
+
+        let tapes = try await TestFixtures.stubbedBackend().tapes(userID: "user-id")
+
+        XCTAssertEqual(tapes.tapes.map(\.name), ["Weekend Haul", "Quiet Nights"])
+        let weekend = tapes.tapes[0]
+        XCTAssertTrue(weekend.usesRecents)
+        XCTAssertFalse(weekend.usesFavourites)
+        XCTAssertTrue(weekend.usesFingerprint)
+        XCTAssertTrue(weekend.usesFreshAlchemy)
+        XCTAssertEqual(weekend.alchemyPercent, 30)
+        XCTAssertEqual(weekend.songCount, 150)
+        // The second tape answers as off wherever it wrote "false" — the
+        // string decides, nothing else reads as on.
+        let quiet = tapes.tapes[1]
+        XCTAssertFalse(quiet.usesRecents)
+        XCTAssertTrue(quiet.usesFavourites)
+        XCTAssertFalse(quiet.usesFingerprint)
+        XCTAssertFalse(quiet.usesFreshAlchemy)
+        XCTAssertEqual(quiet.alchemyPercent, 50)
+        XCTAssertEqual(quiet.songCount, 80)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/tapes")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    /// A tape set up is eight parameters — the account, the name, and
+    /// every choice the composer made. FastAPI parses booleans from text,
+    /// so each switch travels as `"true"`/`"false"`. A drifted name here
+    /// is a 422 nobody can see until creation quietly stops working.
+    func testCreatingATapeSendsEveryChoice() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Created":true,"Updated":false,"Details":{"userID":"user-id","name":"Weekend Haul","recents":"true","favourites":"false","fingerprint":"true","alchemyPercent":30,"freshAlchemy":"true","songCount":150}}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().createTape(
+            BackendTapeDraft(
+                name: "  Weekend Haul  ",
+                recents: true,
+                favourites: false,
+                fingerprint: true,
+                freshAlchemy: true,
+                alchemyPercent: 30,
+                songCount: 150
+            ),
+            userID: "user-id"
+        )
+
+        XCTAssertTrue(answer.created)
+        XCTAssertFalse(answer.updated)
+        XCTAssertEqual(answer.tape.name, "Weekend Haul")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/new-tape")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "name"), "Weekend Haul") // trimmed before sending
+        XCTAssertEqual(request.value(for: "recents"), "true")
+        XCTAssertEqual(request.value(for: "favourites"), "false")
+        XCTAssertEqual(request.value(for: "fingerprint"), "true")
+        XCTAssertEqual(request.value(for: "alchemyPercent"), "30")
+        XCTAssertEqual(request.value(for: "freshAlchemy"), "true")
+        XCTAssertEqual(request.value(for: "songCount"), "150")
+    }
+
+    /// A second send under a name the account already uses answers
+    /// `Updated: true` with the rewrite's full details — a replacement,
+    /// not an error: the composer may well be re-setting an existing tape.
+    func testRecreatingATapeUnderItsNameIsAnUpdateNotAFailure() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Created":true,"Updated":true,"Details":{"userID":"user-id","name":"Weekend Haul","recents":"false","favourites":"false","fingerprint":"false","alchemyPercent":100,"freshAlchemy":"false","songCount":50}}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().createTape(
+            BackendTapeDraft(name: "Weekend Haul", recents: false, favourites: false, fingerprint: false, freshAlchemy: false, alchemyPercent: 100, songCount: 50),
+            userID: "user-id"
+        )
+
+        XCTAssertTrue(answer.created)
+        XCTAssertTrue(answer.updated)
+        XCTAssertEqual(answer.tape.songCount, 50)
+        XCTAssertEqual(answer.tape.alchemyPercent, 100)
+    }
+
+    /// The least a tape needs to be worth sending. The backend takes any
+    /// integers it is handed — a zero-song tape, a 120% alchemy tape — so
+    /// the form's numbers are checked here before a request spends them.
+    func testADraftMustHaveANameAndASizeToSend() {
+        func draft(
+            name: String = "Weekend Haul",
+            alchemyPercent: Int = 10,
+            songCount: Int = 100
+        ) -> BackendTapeDraft {
+            BackendTapeDraft(
+                name: name,
+                recents: true,
+                favourites: false,
+                fingerprint: false,
+                freshAlchemy: true,
+                alchemyPercent: alchemyPercent,
+                songCount: songCount
+            )
+        }
+
+        XCTAssertTrue(draft().isSendable)
+        XCTAssertFalse(draft(name: "").isSendable)
+        XCTAssertFalse(draft(name: "   ").isSendable)
+        XCTAssertFalse(draft(songCount: 0).isSendable)
+        XCTAssertFalse(draft(songCount: -1).isSendable)
+        XCTAssertFalse(draft(alchemyPercent: 101).isSendable)
+        XCTAssertFalse(draft(alchemyPercent: -1).isSendable)
+    }
+
+    /// The tapes endpoint refuses strangers with a 404 rather than the
+    /// 401 its siblings answer — a different code, the same job: the
+    /// backend's own words have to reach the sheet that showed them.
+    func testTapesForAnUnknownUserSurfaceTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 404),
+                Data(#"{"detail":"User user-id not found"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().tapes(userID: "user-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 404, detail: "User user-id not found"))
+        }
+    }
+
+    /// Retiring a tape is `DELETE /delete-tape` keyed on the user and the
+    /// recipe's own name — stored without the suffix, so what the sheet
+    /// shows is what gets sent, punctuation and all.
+    func testDeletingATapeIsADeleteKeyedOnItsName() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Deleted":true,"Name":"Weekend Haul"}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().deleteTape(name: "Weekend Haul", userID: "user-id")
+
+        XCTAssertTrue(answer.deleted)
+        XCTAssertEqual(answer.name, "Weekend Haul")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/delete-tape")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "name"), "Weekend Haul")
+    }
+
+    /// A name the backend no longer has answers 404 with its reasons —
+    /// the sheet reading it decides whether "already gone" is a failure;
+    /// the detail at least has to survive to be asked about.
+    func testDeletingAGoneTapeSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 404),
+                Data(#"{"detail":"Can't find playlist Gone Tape for user user-id"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().deleteTape(name: "Gone Tape", userID: "user-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 404, detail: "Can't find playlist Gone Tape for user user-id"))
+        }
+    }
+
+    /// The settings-screen factory for the saved address: a parseable
+    /// address builds a client, anything else is simply no client — the
+    /// screens read that as "nothing to ask", never as a failed request.
+    func testTheSavedAddressBuildsAClientOrNothing() throws {
+        let good = JellyJamsBackend.configured(address: "backend.example.com", deviceInfo: TestFixtures.deviceInfo)
+        XCTAssertEqual(good?.baseURL.absoluteString, "https://backend.example.com")
+        XCTAssertNil(JellyJamsBackend.configured(address: "", deviceInfo: TestFixtures.deviceInfo))
+        XCTAssertNil(JellyJamsBackend.configured(address: "not a url", deviceInfo: TestFixtures.deviceInfo))
+    }
+
     // MARK: - Address normalisation
 
     /// The backend is an internet service by design, so a bare host gets
