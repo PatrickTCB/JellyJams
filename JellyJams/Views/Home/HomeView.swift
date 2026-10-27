@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Home tab: pinned items, recent music and AI Radio quick links.
+/// The Home tab: pinned items, recent music and Mixtapes quick links.
 ///
 /// Each section hides itself when it has nothing to show, so the page grows by
 /// adding a view to the stack here and a fetch to ``HomeModel``.
@@ -16,8 +16,8 @@ struct HomeView: View {
                 if !pinnedItems.entries.isEmpty {
                     PinnedItemsSection(entries: pinnedItems.entries)
                 }
-                if !model.stations.isEmpty {
-                    AIRadioQuickLinksSection(stations: model.stations)
+                if !model.mixtapes.isEmpty {
+                    MixtapesQuickLinksSection(mixtapes: model.mixtapes)
                 }
                 if !model.latest.isEmpty {
                     RecentMusicSection(heading: model.recentHeading, latest: model.latest)
@@ -29,10 +29,10 @@ struct HomeView: View {
         .navigationTitle("Home")
         .refreshable { await load() }
         .refreshToolbarItem { await load() }
-        // Re-runs on appear and whenever the station rule itself changes, so
-        // switching AI Radio on or editing its ending updates the quick links
-        // without leaving the page.
-        .task(id: preferences.playlistNameFilter(for: .aiRadioPlaylists)) { await load() }
+        // Re-runs on appear and whenever the mixtape rule itself changes, so
+        // registering with a backend (or moving to one that names things
+        // differently) updates the quick links without leaving the page.
+        .task(id: preferences.playlistNameFilter(for: .mixtapePlaylists)) { await load() }
     }
 
     private func load() async {

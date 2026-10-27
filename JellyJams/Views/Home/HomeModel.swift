@@ -26,11 +26,11 @@ final class HomeModel: ObservableObject {
 
     /// How many tiles each Recent Music row asks for.
     static let latestLimit = 5
-    /// How many AI Radio stations the quick links show.
-    static let stationLimit = 5
+    /// How many mixtapes the quick links show.
+    static let mixtapeLimit = 5
 
     @Published private(set) var latest = Latest()
-    @Published private(set) var stations: [BaseItemDto] = []
+    @Published private(set) var mixtapes: [BaseItemDto] = []
     @Published private(set) var recentHeading = RecentMusicHeading.random()
 
     /// Reloads every section, keeping the last good data when a request fails:
@@ -41,12 +41,12 @@ final class HomeModel: ObservableObject {
         if let loaded = try? await fetchLatest(using: library) {
             latest = loaded
         }
-        if let filter = preferences.playlistNameFilter(for: .aiRadioPlaylists) {
-            if let loaded = try? await library.aiRadioStations(nameFilter: filter, limit: Self.stationLimit) {
-                stations = loaded
+        if let filter = preferences.playlistNameFilter(for: .mixtapePlaylists) {
+            if let loaded = try? await library.mixtapes(nameFilter: filter, limit: Self.mixtapeLimit) {
+                mixtapes = loaded
             }
         } else {
-            stations = []
+            mixtapes = []
         }
     }
 

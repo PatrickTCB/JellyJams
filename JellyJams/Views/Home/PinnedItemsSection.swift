@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Pinned row: what the user marked from any album, artist, playlist or
-/// station's context menu.
+/// mixtape's context menu.
 ///
 /// Pins are resolved against the server by ``PinnedItemsStore`` before they
 /// reach here, and they never disappear on their own: an item deleted
@@ -51,8 +51,8 @@ struct PinnedItemsSection: View {
     private func tile(for entry: PinnedItemsStore.Entry) -> some View {
         switch entry.state {
         case .resolved(let item):
-            if preferences.isAIRadioStation(item) {
-                StationTile(station: item)
+            if preferences.isMixtape(item) {
+                MixtapeTile(mixtape: item)
             } else {
                 HomeItemTile(item: item)
             }
@@ -67,16 +67,16 @@ struct PinnedItemsSection: View {
     }
 
     /// The tap on an unresolved or missing pin: ask the server about it now.
-    /// Answered present, the item opens — or plays, for a station; answered
+    /// Answered present, the item opens — or plays, for a mixtape; answered
     /// gone, the removal is offered; failed to answer, the error surfaces and
     /// the pin stays.
     private func use(_ entry: PinnedItemsStore.Entry) async {
         switch await pinnedItems.use(entry, using: session.library) {
         case .resolved(let item):
-            if preferences.isAIRadioStation(item) {
-                StationPlayback.play(
+            if preferences.isMixtape(item) {
+                MixtapePlayback.play(
                     item,
-                    stationName: preferences.aiRadioStationName(for: item),
+                    mixtapeName: preferences.mixtapeName(for: item),
                     library: session.library,
                     player: player,
                     playlistStore: playlistStore

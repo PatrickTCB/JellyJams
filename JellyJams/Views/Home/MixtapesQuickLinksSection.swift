@@ -1,18 +1,18 @@
 import SwiftUI
 
-/// Quick links to the first few AI Radio stations, for starting one without
-/// going through the AI Radio tab. The section is only rendered while the
-/// feature is active and there are stations to show.
-struct AIRadioQuickLinksSection: View {
-    let stations: [BaseItemDto]
+/// Quick links to the first few backend-built mixtapes, for starting one
+/// without going through the Mixtapes tab. The section is only rendered while
+/// the app is registered with a backend and there are mixtapes to show.
+struct MixtapesQuickLinksSection: View {
+    let mixtapes: [BaseItemDto]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("🤖 Radio")
+            Text("Mixtapes")
                 .font(.title2.bold())
                 .padding(.horizontal)
-            HomeItemRow(items: stations) { StationTile(station: $0) } trailing: {
-                BrowseMoreTile(section: .aiRadio)
+            HomeItemRow(items: mixtapes) { MixtapeTile(mixtape: $0) } trailing: {
+                BrowseMoreTile(section: .mixtapes)
             }
         }
     }
