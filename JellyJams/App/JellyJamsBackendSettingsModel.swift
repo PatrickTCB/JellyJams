@@ -26,12 +26,25 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
     /// A refused Family Blend change, shown until the next refresh or retry.
     @Published private(set) var familyBlendError: String?
     @Published private(set) var isApplyingFamilyBlendChange = false
+    /// A refused limits save, shown until the next refresh or retry. The
+    /// typed numbers stay put beside it — the address above keeps a failed
+    /// registration's text for the same reason: fixing it should not mean
+    /// retyping everything.
+    @Published private(set) var limitsError: String?
+    @Published private(set) var isApplyingLimitsChange = false
 
     /// Whether the Family Blend switch takes input now: the backend is
     /// answering, it knows this account, and no change of its own is
     /// already in flight.
     var canEditFamilyBlend: Bool {
         connection == .online && !isApplyingFamilyBlendChange
+    }
+
+    /// Whether the mixtape-limit steppers and their Save take input now:
+    /// the same gate as the Family Blend switch, counting the limits' own
+    /// change in flight rather than the blend's.
+    var canEditLimits: Bool {
+        connection == .online && !isApplyingLimitsChange
     }
 
     /// The whole open-the-sheet ritual: ask the backend whether it lives,
@@ -51,6 +64,7 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
         preferences: PreferencesStore
     ) async {
         familyBlendError = nil
+        limitsError = nil
         connection = .checking
 
         guard let backend else {
@@ -78,6 +92,7 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
 
         connection = .online
         await refreshFamilyBlend(backend: backend, userID: userID, preferences: preferences)
+        await refreshLimits(backend: backend, userID: userID, preferences: preferences)
     }
 
     /// Flip the Family Blend membership. The switch has already moved (this
@@ -126,6 +141,60 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
             return
         } catch {
             familyBlendError = error.userFacingMessage
+        }
+    }
+
+    /// Save the mixtape limits the steppers settled on. The pair is one
+    /// setting — the backend's `/limits` always takes both numbers — so
+    /// Save sends what both steppers show together. Like the address
+    /// above, a refused save keeps the typed numbers where they can be
+    /// fixed and retried; the backend's own answer, not the tap, is what
+    /// the memory keeps, and the next refresh replaces the draft with it
+    /// if this save never agreed.
+    func setLimits(
+        backend: JellyJamsBackend?,
+        userID: String?,
+        preferences: PreferencesStore
+    ) async {
+        guard canEditLimits, let backend, let userID else { return }
+
+        limitsError = nil
+        isApplyingLimitsChange = true
+        defer { isApplyingLimitsChange = false }
+
+        do {
+            let answer = try await backend.setLimits(
+                userID: userID,
+                sameAlbumLimit: preferences.sameAlbumLimit,
+                sameArtistLimit: preferences.sameArtistLimit
+            )
+            preferences.sameAlbumLimit = answer.sameAlbumLimit
+            preferences.sameArtistLimit = answer.sameArtistLimit
+        } catch let error where error.isCancellation {
+            return
+        } catch {
+            limitsError = error.userFacingMessage
+        }
+    }
+
+    /// Asks the backend what limits it currently keeps for this account,
+    /// and lets that answer replace the remembered one — including for a
+    /// draft a refused Save left behind, which this is what corrects. The
+    /// same grace as the blend's refresh: a failure leaves the memory in
+    /// place and says why beside the steppers.
+    private func refreshLimits(
+        backend: JellyJamsBackend,
+        userID: String,
+        preferences: PreferencesStore
+    ) async {
+        do {
+            let answer = try await backend.limits(userID: userID)
+            preferences.sameAlbumLimit = answer.sameAlbumLimit
+            preferences.sameArtistLimit = answer.sameArtistLimit
+        } catch let error where error.isCancellation {
+            return
+        } catch {
+            limitsError = error.userFacingMessage
         }
     }
 }

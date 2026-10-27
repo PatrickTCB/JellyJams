@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Jelly Jams Backend settings sheet: the server address and its
 /// registration, and beneath it the features the backend runs for this
-/// account — Family Blend and the user's bans.
+/// account — Family Blend, the mixtape limits and the user's bans.
 ///
 /// The sheet speaks the backend's pattern: opening it pings the backend, and
 /// only while that ping answers do the feature switches take input. The
@@ -44,6 +44,7 @@ struct JellyJamsBackendSettingsView: View {
             List {
                 addressSection
                 familyBlendSection
+                limitsSection
                 bansSection
             }
             .navigationTitle("Jelly Jams Backend")
@@ -242,6 +243,76 @@ struct JellyJamsBackendSettingsView: View {
         case .online:
             Text("Connected — the backend confirms what it knows about this account.")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Mixtape limits
+
+    /// How many tracks from one album, and from one artist, may share a
+    /// generated tape. The pair is one setting — the backend's `/limits`
+    /// always takes both numbers — so the steppers settle a draft in the
+    /// memory and Save sends the pair together. The backend's answer, not
+    /// the tap, is what the memory keeps: a refused save keeps the draft
+    /// where it can be fixed and retried, the same grace the address above
+    /// gives a typo, and the next refresh replaces it if the retry never
+    /// agreed.
+    private var limitsSection: some View {
+        Section {
+            Stepper(value: $preferences.sameAlbumLimit, in: 1...20) {
+                HStack {
+                    Text("Same album limit")
+                    Spacer()
+                    Text("\(preferences.sameAlbumLimit)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .disabled(!model.canEditLimits)
+
+            Stepper(value: $preferences.sameArtistLimit, in: 1...20) {
+                HStack {
+                    Text("Same artist limit")
+                    Spacer()
+                    Text("\(preferences.sameArtistLimit)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .disabled(!model.canEditLimits)
+
+            Button("Save") { saveLimits() }
+                .disabled(!model.canEditLimits)
+        } header: {
+            Text("Mixtape Limits")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Use these values to limit how many tracks from the same artist or album can appear in one of the mix tapes you specified")
+                if model.isApplyingLimitsChange {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Saving…")
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                if let error = model.limitsError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    /// Send the pair the steppers settled, straight from the memory the
+    /// steppers edit. The gate lives with the request: offline, nothing
+    /// is accepted and the draft waits.
+    private func saveLimits() {
+        Task {
+            await model.setLimits(
+                backend: backendClient(),
+                userID: session.currentUser?.id,
+                preferences: preferences
+            )
         }
     }
 

@@ -52,6 +52,20 @@ struct BackendFamilyBlend: Codable, Sendable, Equatable {
     let inFamilyBlend: Bool
 }
 
+/// The repeat limits the backend applies to one account's tapes: the most
+/// tracks from a single album, and from a single artist, that may share a
+/// generated mixtape.
+///
+/// Like ``BackendFamilyBlend``, this model's fields arrive lower-cased
+/// first, so the default coding keys fit as they are. An account that has
+/// never set limits is answered with the backend's own defaults — album 3,
+/// artist 5 — so there is no first-read mystery for the app to paper over.
+struct BackendLimits: Codable, Sendable, Equatable {
+    let id: String
+    let sameAlbumLimit: Int
+    let sameArtistLimit: Int
+}
+
 /// The backend's answer to a `POST /ban`.
 ///
 /// `Success` says the ban was recorded just now, `AlreadyBanned` that it was
@@ -373,6 +387,48 @@ final class JellyJamsBackend: Sendable {
             // backend drops this one.
             URLQueryItem(name: "itemID", value: ""),
         ]
+    }
+
+    // MARK: - Repeat limits
+
+    /// `GET /limits` — the repeat limits the backend keeps for this
+    /// account: how many tracks from one album, and from one artist, may
+    /// share a generated mixtape.
+    ///
+    /// An account that never set limits is answered with the backend's own
+    /// defaults — album 3, artist 5 — rather than zeros, and the read
+    /// comes back 201 like the blend status: copied from the write
+    /// endpoint, so any 2xx is success as far as the app is concerned.
+    func limits(userID: String) async throws -> BackendLimits {
+        let data = try await perform(
+            .get,
+            path: "limits",
+            queryItems: [URLQueryItem(name: "userID", value: userID)]
+        )
+        return try JSONDecoder().decode(BackendLimits.self, from: data)
+    }
+
+    /// `POST /limits` — the pair of limits to keep for this account. The
+    /// backend always takes both numbers, so the number that did not
+    /// change rides along as it was remembered; the integers travel as
+    /// strings like everything else in the query. The answer is what the
+    /// backend stored — clamped on read — so the app learns the standing
+    /// numbers rather than assuming them.
+    func setLimits(
+        userID: String,
+        sameAlbumLimit: Int,
+        sameArtistLimit: Int
+    ) async throws -> BackendLimits {
+        let data = try await perform(
+            .post,
+            path: "limits",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "sameAlbumLimit", value: String(sameAlbumLimit)),
+                URLQueryItem(name: "sameArtistLimit", value: String(sameArtistLimit)),
+            ]
+        )
+        return try JSONDecoder().decode(BackendLimits.self, from: data)
     }
 
     // MARK: - Bans

@@ -44,6 +44,8 @@ final class PreferencesStore: ObservableObject {
         static let jellyJamsBackendAddress = "jellyJamsBackendAddress"
         static let mixtapeSuffix = "mixtapeSuffix"
         static let familyBlendJoined = "familyBlendJoined"
+        static let sameAlbumLimit = "sameAlbumLimit"
+        static let sameArtistLimit = "sameArtistLimit"
         static let defaultPlayback = "defaultPlayback"
     }
 
@@ -108,6 +110,22 @@ final class PreferencesStore: ObservableObject {
         didSet { defaults.set(familyBlendJoined, forKey: Key.familyBlendJoined) }
     }
 
+    /// The most tracks from one album that the backend may put into a single
+    /// generated mixtape for this account, as last known: the backend's own
+    /// answer when it could be reached, this memory when it could not. The
+    /// defaults are the backend's own — album 3 — so an account that never
+    /// set limits is remembered the way the backend would answer it.
+    @Published var sameAlbumLimit: Int {
+        didSet { defaults.set(sameAlbumLimit, forKey: Key.sameAlbumLimit) }
+    }
+
+    /// The most tracks from one artist that the backend may put into a single
+    /// generated mixtape for this account — the artist twin of
+    /// ``sameAlbumLimit``, defaulting to the backend's own 5.
+    @Published var sameArtistLimit: Int {
+        didSet { defaults.set(sameArtistLimit, forKey: Key.sameArtistLimit) }
+    }
+
     /// What "play some music" starts. `nil` is the built-in favourites
     /// shuffle; a value names the item and transport settings the user chose.
     @Published var defaultPlayback: DefaultPlaybackSetting? {
@@ -133,6 +151,8 @@ final class PreferencesStore: ObservableObject {
         jellyJamsBackendAddress = defaults.string(forKey: Key.jellyJamsBackendAddress) ?? ""
         mixtapeSuffix = defaults.string(forKey: Key.mixtapeSuffix) ?? ""
         familyBlendJoined = defaults.object(forKey: Key.familyBlendJoined) as? Bool ?? false
+        sameAlbumLimit = defaults.object(forKey: Key.sameAlbumLimit) as? Int ?? 3
+        sameArtistLimit = defaults.object(forKey: Key.sameArtistLimit) as? Int ?? 5
         defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {
             try? JSONDecoder().decode(DefaultPlaybackSetting.self, from: $0)
         }
