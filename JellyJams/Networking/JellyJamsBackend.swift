@@ -43,6 +43,15 @@ struct BackendRegistration: Codable, Sendable, Equatable {
     }
 }
 
+/// The backend's answer about one account's Family Blend membership.
+///
+/// Unlike `/register`, this model's fields arrive lower-cased-first, so the
+/// default coding keys fit as they are.
+struct BackendFamilyBlend: Codable, Sendable, Equatable {
+    let id: String
+    let inFamilyBlend: Bool
+}
+
 enum BackendError: LocalizedError, Sendable, Equatable {
     case invalidServerURL
     case notSignedIn
@@ -56,22 +65,21 @@ enum BackendError: LocalizedError, Sendable, Equatable {
             return "Registration hands your Jellyfin sign-in to the backend to be checked, so you need to be signed in first."
         case .rejected(let status, let detail):
             if let detail, !detail.isEmpty {
-                return "The backend refused the registration (\(status)): \(detail)"
+                return "The backend refused the request (\(status)): \(detail)"
             }
-            return "The backend refused the registration (status \(status))."
+            return "The backend refused the request (status \(status))."
         }
     }
 }
 
 /// App-level access to the Jelly Jams Backend — the companion service for
-/// the app, whose first feature is building Mixtapes and which will later
-/// extend queues, offer AI instant mixes, and take bans.
+/// the app, whose features so far are building Mixtapes and the Family
+/// Blend, and which will later extend queues, offer AI instant mixes, and
+/// take bans.
 ///
-/// Deliberately small for now: `/register` is the only endpoint the app
-/// speaks. The other routes (`/tapes`, `/new-tape`, `/delete-tape`,
-/// `/extend-queue`, `/ban`, `/instant-mix`) all key off the `userID` this
-/// one hands over, so registration is the seam the rest of the integration
-/// grows from.
+/// Every endpoint but `/ping` keys off the `userID` that `/register` hands
+/// over, so registration is the seam the rest of the integration grows
+/// from — the app is not a backend account until a Save says so.
 final class JellyJamsBackend: Sendable {
     let baseURL: URL
     private let session: URLSession
@@ -137,20 +145,89 @@ final class JellyJamsBackend: Sendable {
     /// storing anything, so a failure here means the sign-in was rejected
     /// or the backend could not reach the server — never a silent half-save.
     func register(_ account: JellyfinAccount) async throws -> BackendRegistration {
+        let data = try await perform(
+            .post,
+            path: "register",
+            queryItems: [
+                URLQueryItem(name: "userName", value: account.userName),
+                URLQueryItem(name: "userID", value: account.userID),
+                URLQueryItem(name: "userToken", value: account.userToken),
+                URLQueryItem(name: "jellyfinHost", value: account.jellyfinHost.absoluteString),
+            ]
+        )
+        return try JSONDecoder().decode(BackendRegistration.self, from: data)
+    }
+
+    /// `GET /ping` — is this backend instance awake?
+    ///
+    /// Only the status is of interest: it answers 200 or it does not, and
+    /// the settings sheet gates its feature switches on "it does". The
+    /// body (a `PingPong`) is read and discarded.
+    func ping() async throws {
+        _ = try await perform(.get, path: "ping")
+    }
+
+    // MARK: - Family Blend
+
+    /// `GET /family-blend` — whether this account is in the blend right now.
+    ///
+    /// The backend answers a read with 201 (it was copied from the write
+    /// endpoints); any 2xx is success as far as the app is concerned.
+    func familyBlendStatus(userID: String) async throws -> BackendFamilyBlend {
+        let data = try await perform(.get, path: "family-blend", queryItems: familyBlendQuery(userID: userID))
+        return try JSONDecoder().decode(BackendFamilyBlend.self, from: data)
+    }
+
+    /// `POST /family-blend` — join the blend, and the shared playlist that
+    /// comes from it being built out of every member's listening.
+    func joinFamilyBlend(userID: String) async throws -> BackendFamilyBlend {
+        let data = try await perform(.post, path: "family-blend", queryItems: familyBlendQuery(userID: userID))
+        return try JSONDecoder().decode(BackendFamilyBlend.self, from: data)
+    }
+
+    /// `DELETE /family-blend` — leave the blend.
+    func leaveFamilyBlend(userID: String) async throws -> BackendFamilyBlend {
+        let data = try await perform(.delete, path: "family-blend", queryItems: familyBlendQuery(userID: userID))
+        return try JSONDecoder().decode(BackendFamilyBlend.self, from: data)
+    }
+
+    private func familyBlendQuery(userID: String) -> [URLQueryItem] {
+        [
+            URLQueryItem(name: "userID", value: userID),
+            // The endpoint insists on an `itemID` because it was copied from
+            // `/ban`'s signature; its handler never reads the value, but
+            // FastAPI refuses the request without it — so an empty one goes
+            // along, and FastAPI ignores unknown parameters whenever the
+            // backend drops this one.
+            URLQueryItem(name: "itemID", value: ""),
+        ]
+    }
+
+    // MARK: - The request plumbing
+
+    private enum Method: String {
+        case get = "GET"
+        case post = "POST"
+        case delete = "DELETE"
+    }
+
+    /// One request against the backend: query items in, JSON out, with
+    /// anything outside 2xx turned into a `BackendError` carrying the
+    /// backend's own human-readable refusal when it bothers to send one.
+    private func perform(
+        _ method: Method,
+        path: String,
+        queryItems: [URLQueryItem] = []
+    ) async throws -> Data {
         var components = URLComponents(
-            url: baseURL.appendingPathComponent("register"),
+            url: baseURL.appendingPathComponent(path),
             resolvingAgainstBaseURL: false
         )
-        components?.queryItems = [
-            URLQueryItem(name: "userName", value: account.userName),
-            URLQueryItem(name: "userID", value: account.userID),
-            URLQueryItem(name: "userToken", value: account.userToken),
-            URLQueryItem(name: "jellyfinHost", value: account.jellyfinHost.absoluteString),
-        ]
+        if !queryItems.isEmpty { components?.queryItems = queryItems }
         guard let url = components?.url else { throw BackendError.invalidServerURL }
 
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        request.httpMethod = method.rawValue
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -163,7 +240,7 @@ final class JellyJamsBackend: Sendable {
             }
             throw BackendError.rejected(status: http.statusCode, detail: detail)
         }
-        return try JSONDecoder().decode(BackendRegistration.self, from: data)
+        return data
     }
 }
 

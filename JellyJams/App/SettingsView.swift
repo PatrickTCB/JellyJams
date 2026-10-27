@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The app's settings screen: the account and its sign-out, the library and
-/// Jelly Jams Backend settings, and the default-playback choice.
+/// The app's settings screen: the account and its sign-out, the library,
+/// the Jelly Jams Backend sheet, and the default-playback choice.
 ///
 /// On macOS this is the content of the `Settings` scene — the standard
 /// settings window, opened from the app menu with ⌘, or from ``AccountMenu``.
@@ -14,6 +14,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     #endif
     @State private var isChoosingDefaultPlayback = false
+    @State private var isShowingBackendSettings = false
 
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -74,7 +75,15 @@ struct SettingsView: View {
                 Text("Suggests similar music at the foot of album and artist screens. Turning this off skips the lookup rather than hiding its results, so your server is never asked.")
             }
 
-            JellyJamsBackendSettingsSection()
+            Section {
+                Button {
+                    isShowingBackendSettings = true
+                } label: {
+                    LabeledContent("Jelly Jams Backend", value: backendSettingsSummary)
+                }
+            } footer: {
+                Text("The companion service behind generated features like Mixtapes and Family Blend. Its settings check in with the backend as they open — unreachable, they show what was last saved.")
+            }
 
             Section {
                 Button {
@@ -93,6 +102,15 @@ struct SettingsView: View {
         .sheet(isPresented: $isChoosingDefaultPlayback) {
             DefaultPlaybackSettingsView()
         }
+        .sheet(isPresented: $isShowingBackendSettings) {
+            JellyJamsBackendSettingsView()
+        }
+    }
+
+    /// One glance at how far the backend relationship got: an address alone
+    /// is ambition, registration is the fact.
+    private var backendSettingsSummary: String {
+        preferences.isMixtapesActive ? "Registered" : "Not registered"
     }
 
     private var defaultPlaybackSummary: String {

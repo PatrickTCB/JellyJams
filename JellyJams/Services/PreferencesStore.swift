@@ -43,6 +43,7 @@ final class PreferencesStore: ObservableObject {
         static let showsCompleteAlbumsOnly = "showsCompleteAlbumsOnly"
         static let jellyJamsBackendAddress = "jellyJamsBackendAddress"
         static let mixtapeSuffix = "mixtapeSuffix"
+        static let familyBlendJoined = "familyBlendJoined"
         static let defaultPlayback = "defaultPlayback"
     }
 
@@ -97,6 +98,16 @@ final class PreferencesStore: ObservableObject {
         mixtapeSuffix = suffix
     }
 
+    /// Whether this account is in the backend's Family Blend, as last known:
+    /// the backend's own answer when it could be reached, this memory when it
+    /// could not. The settings sheet writes a change through to the backend
+    /// first and only settles it here once the backend agrees — which is also
+    /// why joining is opt-in: the blend gathers a real account's listening
+    /// for everyone in it, so nobody should be in it before asking to be.
+    @Published var familyBlendJoined: Bool {
+        didSet { defaults.set(familyBlendJoined, forKey: Key.familyBlendJoined) }
+    }
+
     /// What "play some music" starts. `nil` is the built-in favourites
     /// shuffle; a value names the item and transport settings the user chose.
     @Published var defaultPlayback: DefaultPlaybackSetting? {
@@ -121,6 +132,7 @@ final class PreferencesStore: ObservableObject {
         showsCompleteAlbumsOnly = defaults.object(forKey: Key.showsCompleteAlbumsOnly) as? Bool ?? true
         jellyJamsBackendAddress = defaults.string(forKey: Key.jellyJamsBackendAddress) ?? ""
         mixtapeSuffix = defaults.string(forKey: Key.mixtapeSuffix) ?? ""
+        familyBlendJoined = defaults.object(forKey: Key.familyBlendJoined) as? Bool ?? false
         defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {
             try? JSONDecoder().decode(DefaultPlaybackSetting.self, from: $0)
         }
