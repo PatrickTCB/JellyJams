@@ -90,7 +90,7 @@ struct LibraryRepository: Sendable {
     }
 
     /// A page of playlists, split by name when the query asks for one half of
-    /// the AudioMuse-AI partition.
+    /// the Mixtapes partition.
     ///
     /// The split is applied here rather than by the server. Jellyfin's only
     /// name query is `searchTerm`, which matches anywhere in a name and would
@@ -104,7 +104,7 @@ struct LibraryRepository: Sendable {
     /// Deliberately no cap on the whole-list fetch: unlike ``JellyfinService``'s
     /// `getPlaylists()`, which feeds a menu that nobody scrolls past a few
     /// hundred entries, this response *is* the screen's content, so a limit
-    /// would quietly leave stations out of a large library.
+    /// would quietly leave mixtapes out of a large library.
     private func playlistPage(
         _ query: LibraryQuery,
         startIndex: Int,
@@ -190,15 +190,15 @@ struct LibraryRepository: Sendable {
         return result.items ?? []
     }
 
-    /// The first `limit` AudioMuse-AI stations, by name.
+    /// The first `limit` backend-built mixtapes, by name.
     ///
-    /// Reuses the same whole-list fetch and name split as the AI Radio screen:
+    /// Reuses the same whole-list fetch and name split as the Mixtapes screen:
     /// Jellyfin cannot filter by name ending, so a window applied server-side
     /// could hide matches beyond it.
-    func aiRadioStations(nameFilter: PlaylistNameFilter, limit: Int) async throws -> [BaseItemDto] {
+    func mixtapes(nameFilter: PlaylistNameFilter, limit: Int) async throws -> [BaseItemDto] {
         guard limit > 0 else { return [] }
         let result = try await page(
-            LibraryQuery(list: .aiRadioPlaylists, nameFilter: nameFilter),
+            LibraryQuery(list: .mixtapePlaylists, nameFilter: nameFilter),
             startIndex: 0,
             limit: limit
         )

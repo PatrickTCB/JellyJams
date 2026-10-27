@@ -48,9 +48,9 @@ final class PagedItems: ObservableObject {
     var query: LibraryQuery { query(nameFilter: nil) }
 
     /// ``query`` narrowed to one side of the playlist-name split. The playlist
-    /// and AI Radio screens key their load task on this, so switching AI Radio
-    /// on, or editing the ending it matches, re-keys the query and refetches —
-    /// the same mechanism a sort change already uses.
+    /// and Mixtapes screens key their load task on this, so registering with
+    /// the backend, or a change to the ending it reports, re-keys the query
+    /// and refetches — the same mechanism a sort change already uses.
     func query(nameFilter: PlaylistNameFilter?) -> LibraryQuery {
         LibraryQuery(list: list, sortBy: sortBy, sortOrder: sortOrder, nameFilter: nameFilter)
     }
@@ -73,8 +73,8 @@ final class PagedItems: ObservableObject {
     }
 
     /// ``load(from:)`` for a list the caller described itself — one narrowed by
-    /// a name filter, which only the screen that knows the user's AI Radio
-    /// setting can build.
+    /// a name filter, which only the screen that knows the app's backend
+    /// registration can build.
     func load(_ query: LibraryQuery, from repository: LibraryRepository) async {
         await load(query) { startIndex, limit in
             try await repository.page(query, startIndex: startIndex, limit: limit)

@@ -152,6 +152,17 @@ final class SessionStore: ObservableObject {
 
     // MARK: - Helpers
 
+    /// The signed-in user's access token, read from the Keychain on demand.
+    ///
+    /// This exists so a sign-in can be handed to a service that checks it
+    /// for itself — the Jelly Jams Backend registration. Everywhere else the
+    /// token stays where it lives: the SDK client holds its own copy, and no
+    /// published state carries it. Returns nil while nobody is signed in.
+    func currentAccessToken() throws -> String? {
+        guard let user = currentUser else { return nil }
+        return try Keychain.get(account: user.id)
+    }
+
     /// Normalises user-entered server addresses: trims whitespace, adds a
     /// scheme if missing (defaults to `http` for LAN servers), and removes a
     /// trailing slash or `/web` suffix.
