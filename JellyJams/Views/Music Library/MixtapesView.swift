@@ -18,6 +18,9 @@ struct MixtapesView: View {
     @EnvironmentObject private var playlistStore: PlaylistStore
     @ObservedObject var model: PagedItems
 
+    @State private var isComposingTape = false
+    @State private var isShowingConfiguredTapes = false
+
     /// The split that picks the backend's mixtapes out of the library: what
     /// the list fetches with, and what takes the backend's ending back off
     /// the names it shows.
@@ -39,6 +42,25 @@ struct MixtapesView: View {
         )
         .navigationTitle(LibrarySection.mixtapes.title)
         .refreshToolbarItem { await model.reload() }
+        .toolbar {
+            // The backend's own controls, beside the playlists they manage:
+            // what tapes are set up (a read), and a new one (a write) —
+            // the plus last, as on Playlists, with the tape list to its
+            // left.
+            ToolbarItem {
+                Button { isShowingConfiguredTapes = true } label: {
+                    Label("Configured Tapes", systemImage: "recordingtape.circle")
+                }
+            }
+            ToolbarItem {
+                Button { isComposingTape = true } label: {
+                    Label("New Mixtape", systemImage: "plus")
+                }
+                .keyboardShortcut("n", modifiers: .command)
+            }
+        }
+        .sheet(isPresented: $isComposingTape) { MixtapeComposer() }
+        .sheet(isPresented: $isShowingConfiguredTapes) { ConfiguredTapes() }
         .task(id: query) { await model.load(query, from: session.library) }
         .refreshable { Task { await model.reload() } }
     }

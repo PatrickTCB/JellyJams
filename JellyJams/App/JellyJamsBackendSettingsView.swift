@@ -284,9 +284,6 @@ struct JellyJamsBackendSettingsView: View {
     /// text will not parse. The model reads the address text itself to say
     /// which of those it was.
     private func backendClient() -> JellyJamsBackend? {
-        guard let url = try? JellyJamsBackend.normalizeAddress(preferences.jellyJamsBackendAddress) else {
-            return nil
-        }
-        return JellyJamsBackend(baseURL: url, deviceInfo: session.deviceInfo)
+        JellyJamsBackend.configured(address: preferences.jellyJamsBackendAddress, deviceInfo: session.deviceInfo)
     }
 }

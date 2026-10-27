@@ -103,6 +103,111 @@ struct BackendBans: Decodable, Sendable, Equatable {
     }
 }
 
+/// One tape the backend has been told to build: the recipe `GET /tapes`
+/// answers with, and what the composer and the configured-tapes sheet show.
+///
+/// The four source switches come back as the strings the backend stored —
+/// `"true"` and `"false"`, lower-cased since the day the builder started
+/// comparing against them, though rows written by older builds said `"True"`
+/// — and `freshAlchemy` is a late addition a deployed backend may not echo
+/// yet, so its absence reads as off rather than as a failed decode.
+struct BackendMixtape: Decodable, Sendable, Equatable {
+    let name: String
+    let usesRecents: Bool
+    let usesFavourites: Bool
+    let usesFingerprint: Bool
+    let usesFreshAlchemy: Bool
+    let alchemyPercent: Int
+    let songCount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case recents
+        case favourites
+        case fingerprint
+        case freshAlchemy
+        case alchemyPercent
+        case songCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        usesRecents = Self.flag(container, .recents)
+        usesFavourites = Self.flag(container, .favourites)
+        usesFingerprint = Self.flag(container, .fingerprint)
+        usesFreshAlchemy = Self.flag(container, .freshAlchemy)
+        alchemyPercent = try container.decodeIfPresent(Int.self, forKey: .alchemyPercent) ?? 0
+        songCount = try container.decodeIfPresent(Int.self, forKey: .songCount) ?? 0
+    }
+
+    /// Whether a switch is on, read however this backend wrote it: a real
+    /// boolean, or the stored string in either case, with anything else —
+    /// including nothing at all — counting as off.
+    private static func flag(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Bool {
+        // `try?` flattens: a throwing read (the value is a boolean, not a
+        // string) and an absent key both land in the boolean branch, where
+        // absence answers `false` and a real boolean speaks for itself.
+        if let text = try? container.decodeIfPresent(String.self, forKey: key) {
+            return text.lowercased() == "true"
+        }
+        return (try? container.decodeIfPresent(Bool.self, forKey: key)) ?? false
+    }
+}
+
+/// The whole `GET /tapes` answer. The `User` echo is dropped: the sheet
+/// shows the account's own tapes and already knows whose they are.
+struct BackendTapes: Decodable, Sendable, Equatable {
+    let tapes: [BackendMixtape]
+
+    private enum CodingKeys: String, CodingKey {
+        case tapes = "Playlists"
+    }
+
+    init(tapes: [BackendMixtape] = []) {
+        self.tapes = tapes
+    }
+}
+
+/// A tape to ask the backend to build, as the composer form settles it.
+struct BackendTapeDraft: Sendable, Equatable {
+    var name: String
+    var recents: Bool
+    var favourites: Bool
+    var fingerprint: Bool
+    var freshAlchemy: Bool
+    var alchemyPercent: Int
+    var songCount: Int
+
+    /// The least a tape needs to be worth sending: a name to build under,
+    /// and songs to build of. The backend takes any integers it is handed,
+    /// so the form's numbers are checked here rather than trusted there —
+    /// a zero-song tape is a recipe for nothing.
+    var isSendable: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (0...100).contains(alchemyPercent)
+            && songCount >= 1
+    }
+}
+
+/// The backend's answer to a `POST /new-tape`.
+///
+/// `Created` says the recipe is on the books; `Updated` says it replaced a
+/// same-named one rather than joining fresh company — the backend deletes
+/// and rewrites either way, and the tape itself lands in the library when
+/// the builder next runs, not in this answer.
+struct BackendTapeCreated: Decodable, Sendable, Equatable {
+    let created: Bool
+    let updated: Bool
+    let tape: BackendMixtape
+
+    private enum CodingKeys: String, CodingKey {
+        case created = "Created"
+        case updated = "Updated"
+        case tape = "Details"
+    }
+}
+
 enum BackendError: LocalizedError, Sendable, Equatable {
     case invalidServerURL
     case notSignedIn
@@ -186,6 +291,16 @@ final class JellyJamsBackend: Sendable {
 
         guard let url = components.url else { throw BackendError.invalidServerURL }
         return url
+    }
+
+    /// A client for the address the settings hold — nil when there is none,
+    /// or the text will not parse. Every screen that only *uses* the
+    /// backend asks here instead of re-doing the normalisation dance; a
+    /// refusal's *why* (no address, bad address) is for the settings sheet,
+    /// which reads the raw text beside this to say it.
+    static func configured(address: String, deviceInfo: DeviceInfo) -> JellyJamsBackend? {
+        guard let url = try? normalizeAddress(address) else { return nil }
+        return JellyJamsBackend(baseURL: url, deviceInfo: deviceInfo)
     }
 
     /// `POST /register` — save (or refresh) this sign-in with the backend,
@@ -315,6 +430,53 @@ final class JellyJamsBackend: Sendable {
             path: "reset-bans",
             queryItems: [URLQueryItem(name: "userID", value: userID)]
         )
+    }
+
+    // MARK: - Mixtapes
+
+    /// `GET /tapes` — the tapes this account has set up: the recipes the
+    /// builder turns into playlists, not the playlists themselves (those
+    /// live in the library, where the Mixtapes screen lists them).
+    func tapes(userID: String) async throws -> BackendTapes {
+        let data = try await perform(
+            .get,
+            path: "tapes",
+            queryItems: [URLQueryItem(name: "userID", value: userID)]
+        )
+        return try JSONDecoder().decode(BackendTapes.self, from: data)
+    }
+
+    /// `POST /new-tape` — set a tape up (or re-set one under a name the
+    /// account already uses, which the backend takes as a rewrite).
+    ///
+    /// The switches travel as `"true"`/`"false"` because FastAPI parses its
+    /// booleans from text; the name carries whatever punctuation the user
+    /// typed and rides the query string, where `URLComponents` escapes it.
+    func createTape(_ draft: BackendTapeDraft, userID: String) async throws -> BackendTapeCreated {
+        let trimmed = BackendTapeDraft(
+            name: draft.name.trimmingCharacters(in: .whitespacesAndNewlines),
+            recents: draft.recents,
+            favourites: draft.favourites,
+            fingerprint: draft.fingerprint,
+            freshAlchemy: draft.freshAlchemy,
+            alchemyPercent: draft.alchemyPercent,
+            songCount: draft.songCount
+        )
+        let data = try await perform(
+            .post,
+            path: "new-tape",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "name", value: trimmed.name),
+                URLQueryItem(name: "recents", value: trimmed.recents ? "true" : "false"),
+                URLQueryItem(name: "favourites", value: trimmed.favourites ? "true" : "false"),
+                URLQueryItem(name: "fingerprint", value: trimmed.fingerprint ? "true" : "false"),
+                URLQueryItem(name: "alchemyPercent", value: String(trimmed.alchemyPercent)),
+                URLQueryItem(name: "freshAlchemy", value: trimmed.freshAlchemy ? "true" : "false"),
+                URLQueryItem(name: "songCount", value: String(trimmed.songCount)),
+            ]
+        )
+        return try JSONDecoder().decode(BackendTapeCreated.self, from: data)
     }
 
     // MARK: - The request plumbing
