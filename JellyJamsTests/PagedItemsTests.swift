@@ -260,7 +260,7 @@ final class PagedItemsTests: XCTestCase {
         XCTAssertEqual(model.items.compactMap(\.id), ["a", "b"])
     }
 
-    /// Switching AI Radio on or off — or editing the ending it matches —
+    /// Registering with a backend — or a change to the ending it reports —
     /// re-keys the query. The model has to treat that as a new question rather
     /// than keep serving the playlists it already holds.
     func testAChangedNameFilterRefetches() async {
@@ -326,7 +326,7 @@ final class PagedItemsTests: XCTestCase {
              playlistsPayload(ids: ["Chill_automatic", "Road Trip"]))
         }
 
-        let model = PagedItems(list: .aiRadioPlaylists)
+        let model = PagedItems(list: .mixtapePlaylists)
         await model.load(model.query(nameFilter: .endsWith("_automatic")),
                          from: TestFixtures.stubbedRepository())
 

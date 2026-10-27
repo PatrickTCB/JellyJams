@@ -9,10 +9,10 @@ final class LibraryListTests: XCTestCase {
         XCTAssertEqual(LibraryList.favouriteArtists.content, LibraryList.artists.content)
     }
 
-    /// AI Radio is the same item type as the playlist list — the two are split
+    /// Mixtapes is the same item type as the playlist list — the two are split
     /// by name, not by what they ask the server for.
-    func testAIRadioListHoldsPlaylists() {
-        XCTAssertEqual(LibraryList.aiRadioPlaylists.content, LibraryList.playlists.content)
+    func testMixtapeListHoldsPlaylists() {
+        XCTAssertEqual(LibraryList.mixtapePlaylists.content, LibraryList.playlists.content)
     }
 
     func testOnlyFavouriteListsCarryAFilter() {
@@ -29,7 +29,7 @@ final class LibraryListTests: XCTestCase {
         XCTAssertEqual(LibraryList.albums.pageSize, 300)
         XCTAssertEqual(LibraryList.artists.pageSize, 300)
         XCTAssertEqual(LibraryList.playlists.pageSize, 300)
-        XCTAssertEqual(LibraryList.aiRadioPlaylists.pageSize, 300)
+        XCTAssertEqual(LibraryList.mixtapePlaylists.pageSize, 300)
     }
 
     /// A menu must offer each field at most once, and the internal disc/track
@@ -60,7 +60,7 @@ final class LibraryListTests: XCTestCase {
         XCTAssertEqual(LibraryList.songs.defaultSortBy, .artist)
         XCTAssertEqual(LibraryList.artists.defaultSortBy, .sortName)
         XCTAssertEqual(LibraryList.playlists.defaultSortBy, .sortName)
-        XCTAssertEqual(LibraryList.aiRadioPlaylists.defaultSortBy, .sortName)
+        XCTAssertEqual(LibraryList.mixtapePlaylists.defaultSortBy, .sortName)
     }
 
     /// Favourite songs are the songs list narrowed by a filter, so they offer
@@ -96,8 +96,9 @@ final class LibraryQueryTests: XCTestCase {
         XCTAssertNotEqual(base, LibraryQuery(list: .albums, sortBy: .sortName, sortOrder: .descending))
     }
 
-    /// Turning AI Radio on, or editing the ending it matches, has to re-key the
-    /// query — that is the only thing telling a playlist list to refetch.
+    /// Registering with a backend, or a change to the ending it reports, has
+    /// to re-key the query — that is the only thing telling a playlist list
+    /// to refetch.
     func testQueriesDifferByNameFilter() {
         let base = LibraryQuery(list: .playlists)
 
@@ -114,9 +115,9 @@ final class LibraryQueryTests: XCTestCase {
     }
 }
 
-/// The rule that splits AudioMuse-AI's generated playlists out of the library.
-/// Getting it wrong either hides playlists the user made or shows stations that
-/// aren't there, and neither is visible from the screen that broke.
+/// The rule that splits the backend's mixtapes out of the library.
+/// Getting it wrong either hides playlists the user made or shows mixtapes
+/// that aren't there, and neither is visible from the screen that broke.
 final class PlaylistNameFilterTests: XCTestCase {
     func testEndsWithKeepsOnlyNamesCarryingTheEnding() {
         let filter = PlaylistNameFilter.endsWith("_automatic")
@@ -128,7 +129,7 @@ final class PlaylistNameFilterTests: XCTestCase {
     }
 
     /// The ending is the generator's convention rather than something the user
-    /// typed to match it, so case must not decide what counts as a station.
+    /// typed to match it, so case must not decide what counts as a mixtape.
     func testTheEndingIsMatchedWithoutRegardToCase() {
         let filter = PlaylistNameFilter.endsWith("_automatic")
 
@@ -138,7 +139,7 @@ final class PlaylistNameFilterTests: XCTestCase {
     }
 
     /// A name that merely contains the ending is a playlist the user made —
-    /// AudioMuse-AI appends it, so only a name ending in it is a station.
+    /// the backend appends it, so only a name ending in it is a mixtape.
     func testTheEndingMustActuallyEndTheName() {
         let filter = PlaylistNameFilter.endsWith("_automatic")
 
@@ -167,9 +168,9 @@ final class PlaylistNameFilterTests: XCTestCase {
         XCTAssertFalse(filter.matches("Chill_automatic"))
     }
 
-    /// The ending identified the playlist as a station; on the station's own
+    /// The ending identified the playlist as a mixtape; on the mixtape's own
     /// screen it is noise repeated on every tile.
-    func testTrimmingTakesTheEndingOffAStationName() {
+    func testTrimmingTakesTheEndingOffAMixtapeName() {
         let filter = PlaylistNameFilter.endsWith("_automatic")
 
         XCTAssertEqual(filter.trimmingMatchedEnding(from: "Chill_automatic"), "Chill")
@@ -196,7 +197,7 @@ final class PlaylistNameFilterTests: XCTestCase {
         XCTAssertEqual(filter.trimmingMatchedEnding(from: "  _automatic"), "  _automatic")
     }
 
-    /// The ending is appended to whatever the generator called the station, so
+    /// The ending is appended to whatever the backend called the mixtape, so
     /// a space before it belongs to the name's spacing rather than to it.
     func testTrimmingTakesTheWhitespaceLeftBehindWithTheEnding() {
         XCTAssertEqual(

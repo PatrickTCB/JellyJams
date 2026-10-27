@@ -56,80 +56,87 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertFalse(PreferencesStore(defaults: defaults).showsCompleteAlbumsOnly)
     }
 
-    // MARK: - AI Radio
+    // MARK: - Mixtapes
 
-    /// Off until asked for: switching it on hides playlists from the library,
-    /// which must never happen to somebody who didn't choose it.
-    func testAIRadioIsOffBeforeTheUserHasChosen() {
-        XCTAssertFalse(PreferencesStore(defaults: defaults).aiRadioEnabled)
-        XCTAssertFalse(PreferencesStore(defaults: defaults).isAIRadioActive)
-    }
-
-    /// The field arrives pre-filled with AudioMuse-AI's own convention, so
-    /// switching the feature on is enough for it to work.
-    func testAIRadioSuffixDefaultsToTheAudioMuseEnding() {
-        XCTAssertEqual(
-            PreferencesStore(defaults: defaults).aiRadioSuffix,
-            PreferencesStore.defaultAIRadioSuffix
-        )
-        XCTAssertEqual(PreferencesStore.defaultAIRadioSuffix, "_automatic")
-    }
-
-    func testTurningAIRadioOnAndEditingItsSuffixSurvivesRelaunch() {
+    /// Nothing to gather by until a registration says otherwise: an app that
+    /// read as active before anyone registered would split the library on a
+    /// rule the backend never handed out.
+    func testMixtapesAreInactiveBeforeRegistration() {
         let store = PreferencesStore(defaults: defaults)
-        store.aiRadioEnabled = true
-        store.aiRadioSuffix = "_ai"
+        XCTAssertEqual(store.mixtapesBackendAddress, "")
+        XCTAssertEqual(store.mixtapeSuffix, "")
+        XCTAssertFalse(store.isMixtapesActive)
+    }
+
+    /// The settings field edits the address directly, so a half-typed host
+    /// survives a relaunch rather than vanishing; only a save turns anything
+    /// on.
+    func testEditingTheBackendAddressSurvivesRelaunch() {
+        PreferencesStore(defaults: defaults).mixtapesBackendAddress = "http://192.168.0.10:8000"
+
+        XCTAssertEqual(
+            PreferencesStore(defaults: defaults).mixtapesBackendAddress,
+            "http://192.168.0.10:8000"
+        )
+    }
+
+    /// A successful save records both halves of what the backend said — the
+    /// address it was reached at and the ending its mixtapes carry — and the
+    /// feature runs on them from then on.
+    func testRegistrationSurvivesRelaunch() {
+        let store = PreferencesStore(defaults: defaults)
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_jams")
 
         let reloaded = PreferencesStore(defaults: defaults)
-        XCTAssertTrue(reloaded.aiRadioEnabled)
-        XCTAssertEqual(reloaded.aiRadioSuffix, "_ai")
-        XCTAssertTrue(reloaded.isAIRadioActive)
+        XCTAssertEqual(reloaded.mixtapesBackendAddress, "https://backend.example.net")
+        XCTAssertEqual(reloaded.mixtapeSuffix, "_jams")
+        XCTAssertTrue(reloaded.isMixtapesActive)
+        XCTAssertEqual(reloaded.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_jams"))
+        XCTAssertEqual(reloaded.playlistNameFilter(for: .playlists), .notEndsWith("_jams"))
     }
 
     /// An empty ending matches every name, which would hand the whole playlist
-    /// library to AI Radio and leave the ordinary list empty. A blank field has
-    /// to stand the feature down instead, including mid-edit.
-    func testABlankSuffixLeavesAIRadioInactive() {
+    /// library to Mixtapes and leave the ordinary list empty. A backend that
+    /// answers with nothing has to stand the feature down.
+    func testABlankSuffixLeavesMixtapesInactive() {
         for blank in ["", "   "] {
             let store = PreferencesStore(defaults: defaults)
-            store.aiRadioEnabled = true
-            store.aiRadioSuffix = blank
+            store.recordRegistration(address: "https://backend.example.net", suffix: blank)
 
-            XCTAssertFalse(store.isAIRadioActive, "\(blank.debugDescription)")
-            XCTAssertNil(store.playlistNameFilter(for: .aiRadioPlaylists))
+            XCTAssertFalse(store.isMixtapesActive, "\(blank.debugDescription)")
+            XCTAssertNil(store.playlistNameFilter(for: .mixtapePlaylists))
             XCTAssertNil(store.playlistNameFilter(for: .playlists))
         }
     }
 
     /// The two playlist lists sit on opposite sides of one split, and nothing
-    /// else is split at all — hiding a station from favourites or from an "Add
-    /// to Playlist" menu would make it unreachable rather than tidier.
-    func testAIRadioSplitsOnlyTheTwoPlaylistLists() {
+    /// else is split at all — hiding a mixtape from favourites or from an
+    /// "Add to Playlist" menu would make it unreachable rather than tidier.
+    func testMixtapesSplitsOnlyTheTwoPlaylistLists() {
         let store = PreferencesStore(defaults: defaults)
-        store.aiRadioEnabled = true
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic")
 
-        XCTAssertEqual(store.playlistNameFilter(for: .aiRadioPlaylists), .endsWith("_automatic"))
+        XCTAssertEqual(store.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_automatic"))
         XCTAssertEqual(store.playlistNameFilter(for: .playlists), .notEndsWith("_automatic"))
         XCTAssertEqual(
             Set(LibraryList.allCases.compactMap { list -> LibraryList? in
                 store.playlistNameFilter(for: list) == nil ? nil : list
             }),
-            [.aiRadioPlaylists, .playlists]
+            [.mixtapePlaylists, .playlists]
         )
     }
 
-    /// The suffix is matched trimmed, not as stored: whitespace from the
-    /// settings field must not decide what counts as a station.
-    func testAIRadioSuffixIsTrimmedBeforeItIsMatched() {
+    /// The suffix is matched trimmed, not as stored: whitespace from a sloppy
+    /// backend setting must not decide what counts as a mixtape.
+    func testMixtapeSuffixIsTrimmedBeforeItIsMatched() {
         let store = PreferencesStore(defaults: defaults)
-        store.aiRadioEnabled = true
-        store.aiRadioSuffix = "  _automatic  "
+        store.recordRegistration(address: "https://backend.example.net", suffix: "  _automatic  ")
 
-        XCTAssertEqual(store.playlistNameFilter(for: .aiRadioPlaylists), .endsWith("_automatic"))
+        XCTAssertEqual(store.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_automatic"))
     }
 
-    func testNoSplitIsAppliedWhileTheFeatureIsOff() {
-        XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .aiRadioPlaylists))
+    func testNoSplitIsAppliedBeforeRegistration() {
+        XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .mixtapePlaylists))
         XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .playlists))
     }
 
@@ -191,37 +198,38 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: "defaultPlayback"))
     }
 
-    // MARK: - Station recognition
+    // MARK: - Mixtape recognition
 
-    func testOnlyPlaylistsEndingWithTheSuffixAreStations() {
+    func testOnlyPlaylistsEndingWithTheSuffixAreMixtapes() {
+        // Built before the registration below writes it through: a store that
+        // shares the defaults suite would otherwise reload the very
+        // registration this test is trying to contrast against.
+        let off = PreferencesStore(defaults: defaults)
+
         let store = PreferencesStore(defaults: defaults)
-        store.aiRadioEnabled = true
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic")
 
-        let station = TestFixtures.item(id: "station", name: "Chill_automatic", type: .playlist)
+        let mixtape = TestFixtures.item(id: "mixtape", name: "Chill_automatic", type: .playlist)
         let playlist = TestFixtures.item(id: "playlist", name: "Road Trip", type: .playlist)
         let album = TestFixtures.item(id: "album", name: "Chill_automatic", type: .musicAlbum)
 
-        let off = PreferencesStore(defaults: defaults)
-        off.aiRadioEnabled = false
-
-        XCTAssertTrue(store.isAIRadioStation(station))
-        XCTAssertFalse(store.isAIRadioStation(playlist))
-        XCTAssertFalse(store.isAIRadioStation(album), "Only playlists can be stations")
-        XCTAssertFalse(off.isAIRadioStation(station), "With the feature off nothing is a station")
+        XCTAssertTrue(store.isMixtape(mixtape))
+        XCTAssertFalse(store.isMixtape(playlist))
+        XCTAssertFalse(store.isMixtape(album), "Only playlists can be mixtapes")
+        XCTAssertFalse(off.isMixtape(mixtape), "Before registration nothing is a mixtape")
     }
 
-    func testStationNamesDropTheMatchedEnding() {
-        let store = PreferencesStore(defaults: defaults)
-        store.aiRadioEnabled = true
+    func testMixtapeNamesDropTheMatchedEnding() {
         let off = PreferencesStore(defaults: defaults)
-        off.aiRadioEnabled = false
-        let station = TestFixtures.item(id: "station", name: "Chill_automatic", type: .playlist)
+        let store = PreferencesStore(defaults: defaults)
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic")
+        let mixtape = TestFixtures.item(id: "mixtape", name: "Chill_automatic", type: .playlist)
 
-        XCTAssertEqual(store.aiRadioStationName(for: station), "Chill")
+        XCTAssertEqual(store.mixtapeName(for: mixtape), "Chill")
         XCTAssertEqual(
-            off.aiRadioStationName(for: station),
+            off.mixtapeName(for: mixtape),
             "Chill_automatic",
-            "With the feature off the name is shown as the server has it"
+            "Before registration the name is shown as the server has it"
         )
     }
 }

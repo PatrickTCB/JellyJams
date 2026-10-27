@@ -63,6 +63,17 @@ enum TestFixtures {
         LibraryRepository(client: nil)
     }
 
+    /// A Jelly Jams Backend whose requests are served by ``URLProtocolStub``.
+    static func stubbedBackend() -> JellyJamsBackend {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [URLProtocolStub.self]
+        return JellyJamsBackend(
+            baseURL: URL(string: "https://backend.example.com")!,
+            deviceInfo: deviceInfo,
+            sessionConfiguration: configuration
+        )
+    }
+
     static let deviceInfo = DeviceInfo(
         clientName: "JellyJamsTests",
         version: "1",

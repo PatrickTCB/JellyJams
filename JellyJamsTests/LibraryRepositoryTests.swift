@@ -95,20 +95,20 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(request.value(for: "sortOrder"), "Ascending")
     }
 
-    // MARK: - AI Radio playlist split
+    // MARK: - Mixtape playlist split
 
-    /// AudioMuse-AI's playlists are recognised by their name, which Jellyfin
+    /// The backend's mixtapes are recognised by their name, which Jellyfin
     /// cannot query for, so the split is applied to what the server returns.
-    func testAIRadioPlaylistsKeepOnlyTheGeneratedNames() async throws {
+    func testMixtapePlaylistsKeepOnlyTheGeneratedNames() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
 
-        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+        let result = try await splitPage(of: .mixtapePlaylists, .endsWith("_automatic"))
 
         XCTAssertEqual(result.items?.compactMap(\.id), ["Chill_automatic", "Focus_AUTOMATIC"])
     }
 
     /// The ordinary playlist list is the other half of the same split: a
-    /// station shown in both places is a station the user cannot find.
+    /// mixtape shown in both places is a mixtape the user cannot find.
     func testPlaylistListGivesUpTheGeneratedNames() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
 
@@ -123,7 +123,7 @@ final class LibraryRepositoryTests: XCTestCase {
     func testASplitListReportsTheNumberOfPlaylistsItKept() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
 
-        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+        let result = try await splitPage(of: .mixtapePlaylists, .endsWith("_automatic"))
 
         XCTAssertEqual(result.totalRecordCount, 2)
         XCTAssertEqual(result.startIndex, 0)
@@ -133,7 +133,7 @@ final class LibraryRepositoryTests: XCTestCase {
     func testASplitListWithNoMatchesIsEmpty() async throws {
         stubPlaylists(["Road Trip", "Gym"])
 
-        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+        let result = try await splitPage(of: .mixtapePlaylists, .endsWith("_automatic"))
 
         XCTAssertEqual(result.items, [])
         XCTAssertEqual(result.totalRecordCount, 0)
@@ -143,7 +143,7 @@ final class LibraryRepositoryTests: XCTestCase {
     /// match beyond it: a split list is fetched whole, in one request.
     func testASplitListIsFetchedWhole() async throws {
         let request = try await recordPage(
-            for: LibraryQuery(list: .aiRadioPlaylists, nameFilter: .endsWith("_automatic")),
+            for: LibraryQuery(list: .mixtapePlaylists, nameFilter: .endsWith("_automatic")),
             startIndex: 40,
             limit: 20
         )
@@ -695,15 +695,15 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertTrue(recorder.all.isEmpty)
     }
 
-    func testAIRadioStationsKeepOnlyStationsAndStopAtTheLimit() async throws {
+    func testMixtapesKeepOnlyMixtapesAndStopAtTheLimit() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_automatic", "Workout_automatic"])
 
-        let stations = try await TestFixtures.stubbedRepository().aiRadioStations(
+        let mixtapes = try await TestFixtures.stubbedRepository().mixtapes(
             nameFilter: .endsWith("_automatic"),
             limit: 3
         )
 
-        XCTAssertEqual(stations.compactMap(\.id), ["Chill_automatic", "Focus_automatic", "Workout_automatic"])
+        XCTAssertEqual(mixtapes.compactMap(\.id), ["Chill_automatic", "Focus_automatic", "Workout_automatic"])
     }
 
     // MARK: - Signed out
@@ -745,7 +745,7 @@ final class LibraryRepositoryTests: XCTestCase {
             _ = try await repository.items(withIds: ["album-id"])
         }
         await assertNotAuthenticated {
-            _ = try await repository.aiRadioStations(nameFilter: .endsWith("_automatic"), limit: 3)
+            _ = try await repository.mixtapes(nameFilter: .endsWith("_automatic"), limit: 3)
         }
     }
 
