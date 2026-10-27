@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Jelly Jams Backend settings sheet: the server address and its
 /// registration, and beneath it the features the backend runs for this
-/// account — Family Blend today.
+/// account — Family Blend and the user's bans.
 ///
 /// The sheet speaks the backend's pattern: opening it pings the backend, and
 /// only while that ping answers do the feature switches take input. The
@@ -18,9 +18,15 @@ import SwiftUI
 struct JellyJamsBackendSettingsView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var preferences: PreferencesStore
+    @EnvironmentObject private var bans: BanStore
     @Environment(\.dismiss) private var dismiss
 
     @StateObject private var model = JellyJamsBackendSettingsModel()
+    /// Owns the sheet's push stack so the bans screen can open banned
+    /// artists, albums and the albums behind banned songs — the same
+    /// value-based routing the library columns run, hosted here (see
+    /// ``libraryNavigationDestinations(navigator:)``).
+    @StateObject private var navigator = LibraryNavigator()
     @State private var saveStatus: SaveStatus?
 
     /// Where the last Save got to. Transient by design: a retry is a fresh
@@ -34,10 +40,11 @@ struct JellyJamsBackendSettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigator.path) {
             List {
                 addressSection
                 familyBlendSection
+                bansSection
             }
             .navigationTitle("Jelly Jams Backend")
             #if os(iOS)
@@ -47,6 +54,11 @@ struct JellyJamsBackendSettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .environmentObject(navigator)
+            .libraryNavigationDestinations(navigator: navigator)
+            .navigationDestination(for: BansScreen.self) { _ in
+                BannedItemsView().environmentObject(navigator)
             }
         }
         .frame(minWidth: 380, minHeight: 420)
@@ -230,6 +242,27 @@ struct JellyJamsBackendSettingsView: View {
         case .online:
             Text("Connected — the backend confirms what it knows about this account.")
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Bans
+
+    /// The door to the user's ban list. It opens only when there is a
+    /// backend to open it against — signed in, an address, and a
+    /// registration (``BanStore/canBan``) — because the screen behind it
+    /// reads, unbans and resets against the live service; an unreachable
+    /// backend has nothing to say about bans.
+    @ViewBuilder private var bansSection: some View {
+        if bans.canBan {
+            Section {
+                NavigationLink(value: BansScreen()) {
+                    Label("Banned items", systemImage: "nosign")
+                }
+            } header: {
+                Text("Bans")
+            } footer: {
+                Text("Songs, albums and artists banned from their menus are kept out of the playlists the backend generates. Here they can be unbanned, one at a time or all at once.")
+            }
         }
     }
 

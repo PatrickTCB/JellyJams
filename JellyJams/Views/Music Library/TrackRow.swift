@@ -244,6 +244,11 @@ struct TrackRow: View {
             Label("Add to Playlist", systemImage: "text.badge.plus")
         }
 
+        // The song option covers the selection the row belongs to; the
+        // album and artist options stay the row's own, as its navigation
+        // buttons do.
+        BanMenu(item: track, selectedSongIds: contextTracks.compactMap(\.id))
+
         if let onRemoveFromPlaylist {
             Button(role: .destructive, action: onRemoveFromPlaylist) {
                 Label("Remove from Playlist", systemImage: "minus.circle")

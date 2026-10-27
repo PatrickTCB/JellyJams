@@ -52,6 +52,57 @@ struct BackendFamilyBlend: Codable, Sendable, Equatable {
     let inFamilyBlend: Bool
 }
 
+/// The backend's answer to a `POST /ban`.
+///
+/// `Success` says the ban was recorded just now, `AlreadyBanned` that it was
+/// on the books before — either way the item is banned from here on, and the
+/// app reads the answer without acting on it. The echo in `Items` carries
+/// the one banned item under its type; the bans screen reads the whole list
+/// from ``BackendBans`` instead of leaning on this echo.
+struct BackendBan: Codable, Sendable, Equatable {
+    let success: Bool
+    let alreadyBanned: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case success = "Success"
+        case alreadyBanned = "AlreadyBanned"
+    }
+}
+
+/// The banned items as `GET /bans` sorts them: three lists, by the kind of
+/// Jellyfin item that was banned.
+///
+/// `Items` keys each category by its Jellyfin type name — `MusicArtist`,
+/// `MusicAlbum`, `Audio` — and the entries are complete server DTOs, the
+/// backend having fetched each ban from the user's own server; they arrive
+/// as the app's own ``BaseItemDto``. A kind nobody has banned simply has no
+/// entry in the dictionary. Other keys (a genre ban, say) are ignored: the
+/// app's screens and menus only reach songs, albums and artists, so there
+/// is nothing to show or unbannable from here for anything else.
+struct BackendBans: Decodable, Sendable, Equatable {
+    let artists: [BaseItemDto]
+    let albums: [BaseItemDto]
+    let songs: [BaseItemDto]
+
+    init(artists: [BaseItemDto] = [], albums: [BaseItemDto] = [], songs: [BaseItemDto] = []) {
+        self.artists = artists
+        self.albums = albums
+        self.songs = songs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case items = "Items"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let items = try container.decodeIfPresent([String: [BaseItemDto]].self, forKey: .items) ?? [:]
+        artists = items["MusicArtist"] ?? []
+        albums = items["MusicAlbum"] ?? []
+        songs = items["Audio"] ?? []
+    }
+}
+
 enum BackendError: LocalizedError, Sendable, Equatable {
     case invalidServerURL
     case notSignedIn
@@ -73,9 +124,9 @@ enum BackendError: LocalizedError, Sendable, Equatable {
 }
 
 /// App-level access to the Jelly Jams Backend — the companion service for
-/// the app, whose features so far are building Mixtapes and the Family
-/// Blend, and which will later extend queues, offer AI instant mixes, and
-/// take bans.
+/// the app, whose features so far are building Mixtapes, the Family Blend,
+/// and taking bans, and which will later extend queues and offer AI
+/// instant mixes.
 ///
 /// Every endpoint but `/ping` keys off the `userID` that `/register` hands
 /// over, so registration is the seam the rest of the integration grows
@@ -203,7 +254,111 @@ final class JellyJamsBackend: Sendable {
         ]
     }
 
+    // MARK: - Bans
+
+    /// `POST /ban` — tell the backend to keep one item out of every playlist
+    /// it generates for this user.
+    ///
+    /// The endpoint takes a bare Jellyfin item id and works out the kind for
+    /// itself: stored bans are matched against the ids each candidate song
+    /// carries — the song's own, its album's, its artists', its genres' — so
+    /// a song, album or artist id bans exactly what it names, and the app
+    /// never resolves a collection into song ids just to keep it out.
+    func ban(userID: String, itemID: String) async throws -> BackendBan {
+        let data = try await perform(
+            .post,
+            path: "ban",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "itemID", value: itemID),
+            ]
+        )
+        return try JSONDecoder().decode(BackendBan.self, from: data)
+    }
+
+    /// `GET /bans` — everything the backend currently keeps out of the
+    /// playlists it generates for this user, sorted into banned artists,
+    /// albums and songs.
+    func bans(userID: String) async throws -> BackendBans {
+        let data = try await perform(
+            .get,
+            path: "bans",
+            queryItems: [URLQueryItem(name: "userID", value: userID)]
+        )
+        return try Self.itemsDecoder().decode(BackendBans.self, from: data)
+    }
+
+    /// `DELETE /ban` — undo one ban, keyed on the item id it was made with.
+    ///
+    /// The backend answers whether the item had been banned (`AlreadyBanned`)
+    /// and echoes it one more time; the app has already taken the row out of
+    /// its own list, so the echo is read for success and discarded.
+    func unban(userID: String, itemID: String) async throws -> BackendBan {
+        let data = try await perform(
+            .delete,
+            path: "ban",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "itemID", value: itemID),
+            ]
+        )
+        return try JSONDecoder().decode(BackendBan.self, from: data)
+    }
+
+    /// `DELETE /reset-bans` — undo every ban the user has, in one sweep.
+    ///
+    /// Success is the status: the cleared list is whatever the screen reads
+    /// back from `GET /bans` next time it opens.
+    func resetBans(userID: String) async throws {
+        _ = try await perform(
+            .delete,
+            path: "reset-bans",
+            queryItems: [URLQueryItem(name: "userID", value: userID)]
+        )
+    }
+
     // MARK: - The request plumbing
+
+    /// A decoder for answers that carry whole Jellyfin items — the ban
+    /// list today. Every item's timestamps arrive exactly as the user's
+    /// server wrote them, and Jellyfin gives fractional seconds as many
+    /// digits as it has non-zero ones: three, seven, none. The SDK's own
+    /// parser (which it sets on every `JellyfinClient`) handles that with
+    /// two forms; these are the same two, and a bare `JSONDecoder` would
+    /// fail the whole read on the first date.
+    private static func itemsDecoder() -> JSONDecoder {
+        // `ISO8601DateFormatter` is not marked `Sendable`, but this pair
+        // is built per decoder and a decoder decodes one document at a
+        // time, so the closure's capture is safe whatever the annotation.
+        struct Forms: @unchecked Sendable {
+            let fractional = {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                return formatter
+            }()
+            let plain = {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime]
+                return formatter
+            }()
+        }
+        let forms = Forms()
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            guard let date = forms.fractional.date(from: text) ?? forms.plain.date(from: text) else {
+                throw DecodingError.dataCorrupted(
+                    DecodingError.Context(
+                        codingPath: decoder.codingPath,
+                        debugDescription: "Unrecognised date: \(text)"
+                    )
+                )
+            }
+            return date
+        }
+        return decoder
+    }
 
     private enum Method: String {
         case get = "GET"

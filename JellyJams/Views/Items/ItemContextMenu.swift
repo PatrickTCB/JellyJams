@@ -93,6 +93,10 @@ struct ItemContextMenu: ViewModifier {
             Label("Add to Playlist", systemImage: "text.badge.plus")
         }
 
+        // Bans only appear for the kinds that can be banned, and only while
+        // the backend can take them; playlists offer neither.
+        BanMenu(item: item)
+
         // The artist page loads from the server, so browsing downloads
         // doesn't offer it — the rule Instant Mix follows.
         if item.itemType == .musicAlbum, !offlineBrowsing, let artist = item.artistNavigationItem {

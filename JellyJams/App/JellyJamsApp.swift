@@ -50,6 +50,7 @@ struct JellyJamsApp: App {
     @StateObject private var playlistStore: PlaylistStore
     @StateObject private var libraryCache: LibraryCache
     @StateObject private var favourites: FavouriteStore
+    @StateObject private var bans: BanStore
     @StateObject private var settingsPresentation: SettingsPresentation
     @StateObject private var preferences: PreferencesStore
     @StateObject private var downloads: DownloadStore
@@ -70,6 +71,7 @@ struct JellyJamsApp: App {
         _playlistStore = StateObject(wrappedValue: services.playlistStore)
         _libraryCache = StateObject(wrappedValue: services.libraryCache)
         _favourites = StateObject(wrappedValue: services.favourites)
+        _bans = StateObject(wrappedValue: services.bans)
         _settingsPresentation = StateObject(wrappedValue: services.settingsPresentation)
         _preferences = StateObject(wrappedValue: services.preferences)
         _downloads = StateObject(wrappedValue: services.downloads)
@@ -94,6 +96,7 @@ struct JellyJamsApp: App {
                 .environmentObject(playlistStore)
                 .environmentObject(libraryCache)
                 .environmentObject(favourites)
+                .environmentObject(bans)
                 .environmentObject(settingsPresentation)
                 .environmentObject(preferences)
                 .environmentObject(downloads)
@@ -119,10 +122,24 @@ struct JellyJamsApp: App {
 
         #if os(macOS)
         Settings {
+            // The backend settings sheet browses — the bans screen opens
+            // real album and artist pages, whose rows reach every store a
+            // library screen uses — so the settings scene carries the same
+            // service graph as the main window rather than the handful the
+            // settings forms once needed alone.
             SettingsView()
                 .environmentObject(session)
                 .environmentObject(preferences)
                 .environmentObject(downloads)
+                .environmentObject(player)
+                .environmentObject(player.clock)
+                .environmentObject(playerPresentation)
+                .environmentObject(playlistStore)
+                .environmentObject(libraryCache)
+                .environmentObject(favourites)
+                .environmentObject(bans)
+                .environmentObject(pinnedItems)
+                .environmentObject(networkStatus)
         }
         // A settings scene is fixed to its content's size by default, which
         // leaves no way to widen the window when a long server address or a

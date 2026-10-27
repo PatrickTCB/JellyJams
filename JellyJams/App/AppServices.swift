@@ -20,6 +20,7 @@ final class AppServices {
     let playlistStore = PlaylistStore()
     let libraryCache = LibraryCache()
     let favourites = FavouriteStore()
+    let bans = BanStore()
     let settingsPresentation = SettingsPresentation()
     let preferences = PreferencesStore()
     let downloads = DownloadStore()
@@ -63,6 +64,32 @@ final class AppServices {
             .sink { [weak self] _ in
                 guard let self, session.isSignedIn else { return }
                 Task { await session.checkServerReachability() }
+            }
+            .store(in: &cancellables)
+
+        // Bans follow the backend rather than the session alone: whether a
+        // "Ban" menu may offer itself depends on who is signed in, where the
+        // backend lives, and whether it knows this account yet — and the
+        // settings sheet edits the address live, so every value comes from
+        // the publisher rather than being read back (`@Published` announces
+        // before the change lands, and mid-registration the suffix the store
+        // holds can still be the old one). The `registered` check is the
+        // same rule `PreferencesStore.isMixtapesActive` reads: a
+        // registration recorded a playlist-name ending.
+        Publishers.CombineLatest3(
+            session.$currentUser,
+            preferences.$jellyJamsBackendAddress,
+            preferences.$mixtapeSuffix
+        )
+            .sink { [weak self] user, address, suffix in
+                guard let self else { return }
+                let registered = !suffix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                self.bans.configure(
+                    userID: user?.id,
+                    address: address,
+                    registered: registered,
+                    deviceInfo: self.session.deviceInfo
+                )
             }
             .store(in: &cancellables)
 
