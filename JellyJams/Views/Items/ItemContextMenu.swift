@@ -149,7 +149,7 @@ struct ItemContextMenu: ViewModifier {
 
         if isPlaylist {
             Divider()
-            // Opening a playlist's contents. AI Radio stations play on a tap
+            // Opening a playlist's contents. Mixtapes play on a tap
             // instead, so this is their only way in; ordinary playlists get it
             // too, so the action lives in one place whatever the list.
             Button { navigator.open(item) } label: {
