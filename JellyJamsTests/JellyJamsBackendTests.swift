@@ -141,6 +141,119 @@ final class JellyJamsBackendTests: XCTestCase {
         }
     }
 
+    // MARK: - Ping
+
+    /// The settings sheet gates everything on a 200 from /ping. The body is
+    /// decoration; the status is the answer.
+    func testPingIsSatisfiedWithAPlain200() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"message":"pong","now":1234}"#.utf8)
+            )
+        }
+
+        try await TestFixtures.stubbedBackend().ping()
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/ping")
+    }
+
+    func testPingRefusesAnythingButSuccess() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 500), Data())
+        }
+
+        do {
+            try await TestFixtures.stubbedBackend().ping()
+            XCTFail("Expected a failure")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 500, detail: nil))
+        }
+    }
+
+    // MARK: - Family Blend
+
+    /// The blend endpoints insist on an `itemID` they never read — copied
+    /// from `/ban`'s signature — so the client sends the empty one FastAPI
+    /// accepts, and this is where dropping it would show up.
+    func testFamilyBlendStatusReadsTheLowerCasedAnswer() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            // The deployed backend answers this read with 201 (copied status
+            // code); any 2xx has to do.
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","inFamilyBlend":true}"#.utf8)
+            )
+        }
+
+        let status = try await TestFixtures.stubbedBackend().familyBlendStatus(userID: "user-id")
+
+        XCTAssertEqual(status.id, "user-id")
+        XCTAssertTrue(status.inFamilyBlend)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/family-blend")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "itemID"), "")
+    }
+
+    func testJoiningTheBlendIsAPostTheBackendConfirms() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","inFamilyBlend":true}"#.utf8)
+            )
+        }
+
+        let status = try await TestFixtures.stubbedBackend().joinFamilyBlend(userID: "user-id")
+
+        XCTAssertTrue(status.inFamilyBlend)
+        XCTAssertEqual(recorder.all.first?.method, "POST")
+    }
+
+    func testLeavingTheBlendIsADeleteTheBackendConfirms() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+            )
+        }
+
+        let status = try await TestFixtures.stubbedBackend().leaveFamilyBlend(userID: "user-id")
+
+        XCTAssertFalse(status.inFamilyBlend)
+        XCTAssertEqual(recorder.all.first?.method, "DELETE")
+    }
+
+    /// Blend endpoints only know registered users; the 401 they answer for
+    /// everybody else has to read as the backend's refusal, not a mystery.
+    func testBlendForAnUnknownUserSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User user-id does not seem to exist"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().familyBlendStatus(userID: "user-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User user-id does not seem to exist"))
+        }
+    }
+
     // MARK: - Address normalisation
 
     /// The backend is an internet service by design, so a bare host gets

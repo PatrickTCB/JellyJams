@@ -63,7 +63,7 @@ final class PreferencesStoreTests: XCTestCase {
     /// rule the backend never handed out.
     func testMixtapesAreInactiveBeforeRegistration() {
         let store = PreferencesStore(defaults: defaults)
-        XCTAssertEqual(store.mixtapesBackendAddress, "")
+        XCTAssertEqual(store.jellyJamsBackendAddress, "")
         XCTAssertEqual(store.mixtapeSuffix, "")
         XCTAssertFalse(store.isMixtapesActive)
     }
@@ -72,10 +72,10 @@ final class PreferencesStoreTests: XCTestCase {
     /// survives a relaunch rather than vanishing; only a save turns anything
     /// on.
     func testEditingTheBackendAddressSurvivesRelaunch() {
-        PreferencesStore(defaults: defaults).mixtapesBackendAddress = "http://192.168.0.10:8000"
+        PreferencesStore(defaults: defaults).jellyJamsBackendAddress = "http://192.168.0.10:8000"
 
         XCTAssertEqual(
-            PreferencesStore(defaults: defaults).mixtapesBackendAddress,
+            PreferencesStore(defaults: defaults).jellyJamsBackendAddress,
             "http://192.168.0.10:8000"
         )
     }
@@ -88,7 +88,7 @@ final class PreferencesStoreTests: XCTestCase {
         store.recordRegistration(address: "https://backend.example.net", suffix: "_jams")
 
         let reloaded = PreferencesStore(defaults: defaults)
-        XCTAssertEqual(reloaded.mixtapesBackendAddress, "https://backend.example.net")
+        XCTAssertEqual(reloaded.jellyJamsBackendAddress, "https://backend.example.net")
         XCTAssertEqual(reloaded.mixtapeSuffix, "_jams")
         XCTAssertTrue(reloaded.isMixtapesActive)
         XCTAssertEqual(reloaded.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_jams"))
@@ -138,6 +138,22 @@ final class PreferencesStoreTests: XCTestCase {
     func testNoSplitIsAppliedBeforeRegistration() {
         XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .mixtapePlaylists))
         XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .playlists))
+    }
+
+    // MARK: - Family Blend
+
+    /// Off until opted in: the blend gathers a real account's listening for
+    /// everybody in it, so nobody should be in before they have asked.
+    func testFamilyBlendIsOffBeforeTheUserHasChosen() {
+        XCTAssertFalse(PreferencesStore(defaults: defaults).familyBlendJoined)
+    }
+
+    /// The remembered membership outlives a relaunch — and an offline spell:
+    /// it is what the settings sheet shows when the backend cannot answer.
+    func testFamilyBlendMembershipSurvivesRelaunch() {
+        PreferencesStore(defaults: defaults).familyBlendJoined = true
+
+        XCTAssertTrue(PreferencesStore(defaults: defaults).familyBlendJoined)
     }
 
     // MARK: - Default playback
