@@ -60,12 +60,14 @@ final class URLProtocolStub: URLProtocol, @unchecked Sendable {
 /// A snapshot of an outgoing request. `URLProtocol` moves bodies onto a
 /// one-shot stream, so the payload is captured eagerly at record time.
 struct RecordedRequest: Sendable {
+    let url: URL?
     let path: String
     let method: String
     let body: Data
     private let query: [URLQueryItem]
 
     init(_ request: URLRequest) {
+        url = request.url
         let components = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
         path = components?.path ?? ""
         method = request.httpMethod ?? ""
@@ -158,6 +160,31 @@ func playlistsPayload(ids: [String]) -> Data {
         .joined(separator: ",")
     return Data(#"{"Items":[\#(items)],"TotalRecordCount":\#(ids.count),"StartIndex":0}"#.utf8)
 }
+
+/// A `GET /bans` body in the backend's own shape: whole Jellyfin DTOs keyed
+/// by the type that was banned. The artists arrive out of order for sorting
+/// to fix, the dates carry three- and seven-digit fractionals for the
+/// SDK-lenient decoder to chew, and `MusicGenre` stands for the kinds the
+/// app ignores rather than chokes on.
+let bansPayload = Data(
+    """
+    {"Items":{
+      "MusicArtist":[
+        {"Id":"artist-2","Name":"Zara","Type":"MusicArtist","SortName":"zara"},
+        {"Id":"artist-1","Name":"alpha","Type":"MusicArtist","SortName":"alpha"}
+      ],
+      "MusicAlbum":[
+        {"Id":"album-1","Name":"Bad Songs","Type":"MusicAlbum","AlbumArtist":"Bad Artist","DateCreated":"2026-02-12T13:49:07.876Z"}
+      ],
+      "Audio":[
+        {"Id":"song-1","Name":"Ban Me Too","Type":"Audio","Album":"Bad Songs","AlbumId":"album-1","Artists":["Bad Artist","Worse Artist"],"ArtistItems":[{"Id":"artist-1","Name":"Bad Artist"},{"Id":"artist-2","Name":"Worse Artist"}],"DateCreated":"2026-03-17T16:54:16.2284331Z"}
+      ],
+      "MusicGenre":[
+        {"Id":"genre-1","Name":"Shoegaze","Type":"MusicGenre"}
+      ]},
+     "Success":true,"AlreadyBanned":true}
+    """.utf8
+)
 
 func emptyResponse(for request: URLRequest, statusCode: Int) throws -> HTTPURLResponse {
     try XCTUnwrap(

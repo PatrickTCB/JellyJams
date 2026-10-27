@@ -254,6 +254,164 @@ final class JellyJamsBackendTests: XCTestCase {
         }
     }
 
+    // MARK: - Bans
+
+    /// `/ban` is a POST keyed on `userID` and `itemID` alone — the kind of
+    /// the banned item is the backend's business, not the app's, because
+    /// stored bans are matched against the ids each candidate song carries.
+    /// Drift here is a 422 nobody sees until banning silently does nothing.
+    func testBanningPostsOneItemIDAndReadsTheAnswer() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Items":{},"Success":true,"AlreadyBanned":false}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().ban(userID: "user-id", itemID: "song-id")
+
+        XCTAssertTrue(answer.success)
+        XCTAssertFalse(answer.alreadyBanned)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/ban")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "itemID"), "song-id")
+    }
+
+    /// Re-banning answers `Success: false, AlreadyBanned: true` with a 201
+    /// — the state the user asked for holds either way, so the flags must
+    /// decode as an accepted ban, not a failure. The item echo in `Items`
+    /// arrives as whole Jellyfin DTOs in a shape `GET /bans` is still
+    /// settling; it must not take the answer down with it.
+    func testAnAlreadyBannedItemStillReadsAsASuccessfulBan() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Items":{"Audio":[{"Id":"song-id","Name":"Ban Me","Type":"Audio"}]},"Success":false,"AlreadyBanned":true}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().ban(userID: "user-id", itemID: "song-id")
+
+        XCTAssertFalse(answer.success)
+        XCTAssertTrue(answer.alreadyBanned)
+    }
+
+    /// A backend that doesn't know this account answers 401 for bans just
+    /// as it does for the blend — its `detail` has to reach the alert.
+    func testBanningForAnUnknownUserSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User user-id does not seem to exist"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().ban(userID: "user-id", itemID: "song-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User user-id does not seem to exist"))
+        }
+    }
+
+    /// `GET /bans` answers with whole server DTOs under the type that was
+    /// banned, and the screen needs them as real items — names to show, ids
+    /// to navigate and unban by. The SDK's lenient date parser is part of
+    /// this contract: Jellyfin timestamps carry fractional seconds that a
+    /// plain `JSONDecoder` trips over, which would fail the entire read.
+    func testTheBanListGroupsWholeServerItemsByKind() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), bansPayload)
+        }
+
+        let bans = try await TestFixtures.stubbedBackend().bans(userID: "user-id")
+
+        XCTAssertEqual(bans.artists.map(\.id), ["artist-2", "artist-1"])
+        XCTAssertEqual(bans.albums.map(\.displayName), ["Bad Songs"])
+        XCTAssertEqual(bans.songs.map(\.displayName), ["Ban Me Too"])
+        // The fields the rows read arrive with the items.
+        XCTAssertEqual(bans.songs.first?.album, "Bad Songs")
+        XCTAssertEqual(bans.songs.first?.albumID, "album-1")
+        XCTAssertEqual(bans.songs.first?.artists, ["Bad Artist", "Worse Artist"])
+        XCTAssertEqual(bans.albums.first?.albumArtist, "Bad Artist")
+        // A kind the app neither shows nor bans from here is ignored, not fatal.
+        XCTAssertFalse(bans.artists.contains { $0.id == "genre-1" })
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/bans")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    /// A kind nobody has banned has no entry in `Items` at all — that reads
+    /// as an empty section, not a failed decode.
+    func testTheBanListToleratesMissingCategories() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Items":{"Audio":[{"Id":"song-1","Name":"Ban Me","Type":"Audio"}]},"Success":true,"AlreadyBanned":true}"#.utf8)
+            )
+        }
+
+        let bans = try await TestFixtures.stubbedBackend().bans(userID: "user-id")
+
+        XCTAssertEqual(bans.songs.map(\.id), ["song-1"])
+        XCTAssertTrue(bans.artists.isEmpty)
+        XCTAssertTrue(bans.albums.isEmpty)
+    }
+
+    /// Unbanning is `DELETE /ban` keyed on the same two parameters the ban
+    /// was made with.
+    func testUnbanningDeletesTheItemIDForTheUser() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Items":{},"Success":true,"AlreadyBanned":true}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().unban(userID: "user-id", itemID: "song-id")
+
+        XCTAssertTrue(answer.success)
+        XCTAssertTrue(answer.alreadyBanned)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/ban")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "itemID"), "song-id")
+    }
+
+    /// `DELETE /reset-bans` takes the user alone — the whole list is the
+    /// unit, and the 201 the handler declares (copied status codes being
+    /// this backend's style) is success like any other 2xx.
+    func testResettingBansIsOneDeleteForTheWholeUser() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Items":{},"Success":true,"AlreadyBanned":false}"#.utf8)
+            )
+        }
+
+        try await TestFixtures.stubbedBackend().resetBans(userID: "user-id")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/reset-bans")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
     // MARK: - Address normalisation
 
     /// The backend is an internet service by design, so a bare host gets
