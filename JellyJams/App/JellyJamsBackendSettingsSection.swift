@@ -1,15 +1,18 @@
 import SwiftUI
 
-/// The Mixtapes part of Settings: the Jelly Jams Backend address, and the
+/// The Jelly Jams Backend part of Settings: the server address, and the
 /// "Save" that registers this sign-in with it.
 ///
-/// Saving sends the current Jellyfin credentials to the backend's
-/// `/register`, which checks them against the server before storing the
-/// account and answers with the name ending its mixtapes carry. That ending
-/// is what turns the Mixtapes section on — there is no separate switch,
-/// because a feature that cannot tell its playlists apart from everyone
-/// else's is not a feature worth a toggle.
-struct MixtapesSettingsSection: View {
+/// The backend is a companion service for the app as a whole — Mixtapes are
+/// just the first of its features — so this screen speaks to the backend in
+/// its own terms, and reports the mixtape rule as the current consequence of
+/// registering. Saving sends the current Jellyfin credentials to `/register`,
+/// which checks them against the server before storing the account and
+/// answers with the name ending its mixtapes carry. That ending is what
+/// turns the Mixtapes section on — there is no separate switch, because a
+/// feature that cannot tell its playlists apart from everyone else's is not
+/// a feature worth a toggle.
+struct JellyJamsBackendSettingsSection: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var preferences: PreferencesStore
 
@@ -29,7 +32,7 @@ struct MixtapesSettingsSection: View {
         Section {
             TextField(
                 "Server address",
-                text: $preferences.mixtapesBackendAddress,
+                text: $preferences.jellyJamsBackendAddress,
                 prompt: Text("https://jellyjams.example.net")
             )
             #if os(iOS)
@@ -42,10 +45,10 @@ struct MixtapesSettingsSection: View {
             Button("Save") { register() }
                 .disabled(!canRegister)
         } header: {
-            Text("Mixtapes")
+            Text("Jelly Jams Backend")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("The Jelly Jams Backend builds mixtapes from your listening and saves them to your server as playlists. Saving registers this sign-in with the backend; it answers with the ending its mixtapes carry, and the Mixtapes section gathers exactly those playlists.")
+                Text("The Jelly Jams Backend is the companion service behind Jelly Jams' generated features — Mixtapes being the first. Saving registers this sign-in with it: the backend checks your credentials against your server, then answers with the name ending its mixtapes carry, and the Mixtapes section gathers exactly those playlists.")
                 if !session.isSignedIn {
                     Text("Registration checks your Jellyfin credentials with the backend, so there must be someone signed in.")
                         .foregroundStyle(.secondary)
@@ -61,7 +64,7 @@ struct MixtapesSettingsSection: View {
     }
 
     private var canRegister: Bool {
-        let address = preferences.mixtapesBackendAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = preferences.jellyJamsBackendAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         return session.isSignedIn && !address.isEmpty && !isSaving
     }
 
@@ -103,7 +106,7 @@ struct MixtapesSettingsSection: View {
         status = .saving
         Task {
             do {
-                let baseURL = try JellyJamsBackend.normalizeAddress(preferences.mixtapesBackendAddress)
+                let baseURL = try JellyJamsBackend.normalizeAddress(preferences.jellyJamsBackendAddress)
                 let backend = JellyJamsBackend(baseURL: baseURL, deviceInfo: session.deviceInfo)
                 let registration = try await backend.register(try currentJellyfinAccount())
                 preferences.recordRegistration(

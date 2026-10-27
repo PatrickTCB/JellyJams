@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The app's settings screen: the account and its sign-out, the library and
-/// Mixtapes settings, and the default-playback choice.
+/// Jelly Jams Backend settings, and the default-playback choice.
 ///
 /// On macOS this is the content of the `Settings` scene — the standard
 /// settings window, opened from the app menu with ⌘, or from ``AccountMenu``.
@@ -74,7 +74,7 @@ struct SettingsView: View {
                 Text("Suggests similar music at the foot of album and artist screens. Turning this off skips the lookup rather than hiding its results, so your server is never asked.")
             }
 
-            MixtapesSettingsSection()
+            JellyJamsBackendSettingsSection()
 
             Section {
                 Button {

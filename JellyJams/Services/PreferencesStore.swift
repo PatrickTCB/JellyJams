@@ -41,7 +41,7 @@ final class PreferencesStore: ObservableObject {
     private enum Key {
         static let showsSimilarItems = "showsSimilarItems"
         static let showsCompleteAlbumsOnly = "showsCompleteAlbumsOnly"
-        static let mixtapesBackendAddress = "mixtapesBackendAddress"
+        static let jellyJamsBackendAddress = "jellyJamsBackendAddress"
         static let mixtapeSuffix = "mixtapeSuffix"
         static let defaultPlayback = "defaultPlayback"
     }
@@ -67,12 +67,13 @@ final class PreferencesStore: ObservableObject {
         didSet { defaults.set(showsCompleteAlbumsOnly, forKey: Key.showsCompleteAlbumsOnly) }
     }
 
-    /// The address of the Jelly Jams Backend, exactly as it was entered —
-    /// a successful registration replaces it with the normalised form. The
+    /// The address of the Jelly Jams Backend — the companion service whose
+    /// first feature is Mixtapes — exactly as it was entered, with a
+    /// successful registration replacing it with the normalised form. The
     /// settings field edits this directly; it alone decides nothing about the
     /// feature, because an address nobody registered with has no rules yet.
-    @Published var mixtapesBackendAddress: String {
-        didSet { defaults.set(mixtapesBackendAddress, forKey: Key.mixtapesBackendAddress) }
+    @Published var jellyJamsBackendAddress: String {
+        didSet { defaults.set(jellyJamsBackendAddress, forKey: Key.jellyJamsBackendAddress) }
     }
 
     /// The name ending that marks a playlist as a mixtape the backend built,
@@ -92,7 +93,7 @@ final class PreferencesStore: ObservableObject {
     /// turns Mixtapes on — the section appears with the first registration
     /// and stays until a registration reports an ending that matches nothing.
     func recordRegistration(address: String, suffix: String) {
-        mixtapesBackendAddress = address
+        jellyJamsBackendAddress = address
         mixtapeSuffix = suffix
     }
 
@@ -118,7 +119,7 @@ final class PreferencesStore: ObservableObject {
         // false for an absent key, which would ship the feature switched off.
         showsSimilarItems = defaults.object(forKey: Key.showsSimilarItems) as? Bool ?? true
         showsCompleteAlbumsOnly = defaults.object(forKey: Key.showsCompleteAlbumsOnly) as? Bool ?? true
-        mixtapesBackendAddress = defaults.string(forKey: Key.mixtapesBackendAddress) ?? ""
+        jellyJamsBackendAddress = defaults.string(forKey: Key.jellyJamsBackendAddress) ?? ""
         mixtapeSuffix = defaults.string(forKey: Key.mixtapeSuffix) ?? ""
         defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {
             try? JSONDecoder().decode(DefaultPlaybackSetting.self, from: $0)

@@ -63,9 +63,9 @@ enum BackendError: LocalizedError, Sendable, Equatable {
     }
 }
 
-/// App-level access to the Jelly Jams Backend — the service that builds
-/// Mixtapes, and later will extend queues, offer AI instant mixes, and take
-/// bans.
+/// App-level access to the Jelly Jams Backend — the companion service for
+/// the app, whose first feature is building Mixtapes and which will later
+/// extend queues, offer AI instant mixes, and take bans.
 ///
 /// Deliberately small for now: `/register` is the only endpoint the app
 /// speaks. The other routes (`/tapes`, `/new-tape`, `/delete-tape`,
