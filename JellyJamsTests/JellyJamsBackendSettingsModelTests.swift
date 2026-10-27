@@ -22,15 +22,26 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         URLProtocolStub.handler = nil
     }
 
-    /// A backend that lives: pong for `/ping`, and the supplied membership
-    /// answer for every `/family-blend` method.
-    private func stubAwakeBackend(joined: Bool) {
+    /// A backend that lives: pong for `/ping`, the supplied membership
+    /// answer for every `/family-blend` method, and the supplied pair for
+    /// every `/limits` one.
+    private func stubAwakeBackend(
+        joined: Bool,
+        albumLimit: Int = 3,
+        artistLimit: Int = 5
+    ) {
         URLProtocolStub.handler = { request in
             let path = request.url?.path ?? ""
             if path == "/ping" {
                 return (
                     try emptyResponse(for: request, statusCode: 200),
                     Data(#"{"message":"pong","now":1}"#.utf8)
+                )
+            }
+            if path == "/limits" {
+                return (
+                    try emptyResponse(for: request, statusCode: 201),
+                    Data(#"{"id":"user-id","sameAlbumLimit":\#(albumLimit),"sameArtistLimit":\#(artistLimit)}"#.utf8)
                 )
             }
             let answer = joined ? "true" : "false"
@@ -156,6 +167,7 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         XCTAssertEqual(model.connection, .needsRegistration)
         XCTAssertFalse(model.canEditFamilyBlend)
         XCTAssertEqual(recorder.count(forPath: "/family-blend"), 0)
+        XCTAssertEqual(recorder.count(forPath: "/limits"), 0)
     }
 
     // MARK: - Writing the membership
@@ -190,6 +202,12 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             let path = request.url?.path ?? ""
             if path == "/ping" {
                 return (try emptyResponse(for: request, statusCode: 200), Data(#"{"message":"pong","now":1}"#.utf8))
+            }
+            if path == "/limits" {
+                return (
+                    try emptyResponse(for: request, statusCode: 201),
+                    Data(#"{"id":"user-id","sameAlbumLimit":3,"sameArtistLimit":5}"#.utf8)
+                )
             }
             switch request.httpMethod {
             case "DELETE":
@@ -270,6 +288,172 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         XCTAssertTrue(model.familyBlendError?.contains("does not seem to exist") == true)
     }
 
+    // MARK: - Mixtape limits
+
+    /// The limits join the ritual the sheet runs when it opens: while the
+    /// backend is speaking it is asked for its pair, and what it answers
+    /// replaces what the app remembered.
+    func testTheAnswerFromTheBackendReplacesTheRememberedLimits() async {
+        stubAwakeBackend(joined: false, albumLimit: 7, artistLimit: 2)
+        let preferences = PreferencesStore(defaults: defaults)
+        preferences.sameAlbumLimit = 3
+        preferences.sameArtistLimit = 5
+
+        let model = JellyJamsBackendSettingsModel()
+        await model.refresh(
+            backend: TestFixtures.stubbedBackend(),
+            addressText: "https://backend.example.com",
+            userID: "user-id",
+            registered: true,
+            preferences: preferences
+        )
+
+        XCTAssertEqual(model.connection, .online)
+        XCTAssertEqual(preferences.sameAlbumLimit, 7, "The server's answer wins over the app's memory")
+        XCTAssertEqual(preferences.sameArtistLimit, 2)
+        XCTAssertTrue(model.canEditLimits)
+        XCTAssertNil(model.limitsError)
+    }
+
+    /// The pair is one setting: Save sends both numbers — the touched one
+    /// and the one that rode along — and the answer the backend echoes
+    /// back is what the memory keeps, draft notwithstanding.
+    func testSavingLimitsSendsTheWholePairAndKeepsTheAnswer() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            let path = request.url?.path ?? ""
+            if path == "/ping" {
+                return (try emptyResponse(for: request, statusCode: 200), Data(#"{"message":"pong","now":1}"#.utf8))
+            }
+            if path == "/family-blend" {
+                return (
+                    try emptyResponse(for: request, statusCode: 201),
+                    Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                )
+            }
+            if request.httpMethod == "POST" {
+                return (
+                    try emptyResponse(for: request, statusCode: 201),
+                    Data(#"{"id":"user-id","sameAlbumLimit":4,"sameArtistLimit":6}"#.utf8)
+                )
+            }
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","sameAlbumLimit":3,"sameArtistLimit":5}"#.utf8)
+            )
+        }
+
+        let preferences = PreferencesStore(defaults: defaults)
+
+        let model = JellyJamsBackendSettingsModel()
+        await model.refresh(
+            backend: TestFixtures.stubbedBackend(),
+            addressText: "https://backend.example.com",
+            userID: "user-id",
+            registered: true,
+            preferences: preferences
+        )
+        XCTAssertEqual(preferences.sameAlbumLimit, 3)
+
+        // The draft the steppers settle writes straight into the memory:
+        // (4, 5) — only the album number was touched.
+        preferences.sameAlbumLimit = 4
+        await model.setLimits(
+            backend: TestFixtures.stubbedBackend(),
+            userID: "user-id",
+            preferences: preferences
+        )
+
+        let post = try XCTUnwrap(
+            recorder.all.first { $0.method == "POST" && $0.path == "/limits" }
+        )
+        XCTAssertEqual(post.value(for: "userID"), "user-id")
+        XCTAssertEqual(post.value(for: "sameAlbumLimit"), "4")
+        XCTAssertEqual(post.value(for: "sameArtistLimit"), "5")
+        XCTAssertEqual(preferences.sameAlbumLimit, 4)
+        XCTAssertEqual(preferences.sameArtistLimit, 6, "The echoed answer settles over the draft")
+        XCTAssertNil(model.limitsError)
+        XCTAssertFalse(model.isApplyingLimitsChange)
+    }
+
+    /// A refused save keeps the numbers where they can be fixed and
+    /// retried — the grace the address field gives a typed value — and
+    /// says its reason beside the steppers.
+    func testADeniedSaveKeepsTheNumbersAndReportsWhy() async {
+        URLProtocolStub.handler = { request in
+            let path = request.url?.path ?? ""
+            if path == "/ping" {
+                return (try emptyResponse(for: request, statusCode: 200), Data(#"{"message":"pong","now":1}"#.utf8))
+            }
+            if path == "/family-blend" {
+                return (
+                    try emptyResponse(for: request, statusCode: 201),
+                    Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                )
+            }
+            if request.httpMethod == "POST" {
+                return (
+                    try emptyResponse(for: request, statusCode: 401),
+                    Data(#"{"detail":"User user-id not valid"}"#.utf8)
+                )
+            }
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","sameAlbumLimit":3,"sameArtistLimit":5}"#.utf8)
+            )
+        }
+
+        let preferences = PreferencesStore(defaults: defaults)
+
+        let model = JellyJamsBackendSettingsModel()
+        await model.refresh(
+            backend: TestFixtures.stubbedBackend(),
+            addressText: "https://backend.example.com",
+            userID: "user-id",
+            registered: true,
+            preferences: preferences
+        )
+
+        preferences.sameArtistLimit = 8
+        await model.setLimits(
+            backend: TestFixtures.stubbedBackend(),
+            userID: "user-id",
+            preferences: preferences
+        )
+
+        XCTAssertEqual(preferences.sameArtistLimit, 8, "The refused draft stays where it can be fixed")
+        XCTAssertEqual(preferences.sameAlbumLimit, 3)
+        XCTAssertNotNil(model.limitsError)
+        XCTAssertTrue(model.limitsError?.contains("not valid") == true)
+    }
+
+    /// Offline is offline: the remembered numbers stand, and the gate
+    /// refuses the write whatever client a caller hands over.
+    func testSetLimitsRefusesWhileUnreachable() async {
+        let preferences = PreferencesStore(defaults: defaults)
+        preferences.sameAlbumLimit = 9
+
+        let model = JellyJamsBackendSettingsModel()
+        await model.refresh(
+            backend: nil,
+            addressText: "",
+            userID: "user-id",
+            registered: true,
+            preferences: preferences
+        )
+
+        await model.setLimits(
+            backend: TestFixtures.stubbedBackend(),
+            userID: "user-id",
+            preferences: preferences
+        )
+
+        XCTAssertEqual(preferences.sameAlbumLimit, 9, "The remembered numbers stand until the backend corrects them")
+        XCTAssertEqual(preferences.sameArtistLimit, 5)
+        XCTAssertFalse(model.canEditLimits)
+    }
+
     /// A ping that answers, a `/family-blend` that answers by method: POST
     /// says the account is in, DELETE says it is out, reads say not yet.
     private func stubJoinableBackend() {
@@ -277,6 +461,12 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             let path = request.url?.path ?? ""
             if path == "/ping" {
                 return (try emptyResponse(for: request, statusCode: 200), Data(#"{"message":"pong","now":1}"#.utf8))
+            }
+            if path == "/limits" {
+                return (
+                    try emptyResponse(for: request, statusCode: 201),
+                    Data(#"{"id":"user-id","sameAlbumLimit":3,"sameArtistLimit":5}"#.utf8)
+                )
             }
             switch request.httpMethod {
             case "POST":

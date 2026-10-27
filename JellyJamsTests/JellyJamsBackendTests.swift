@@ -254,6 +254,87 @@ final class JellyJamsBackendTests: XCTestCase {
         }
     }
 
+    // MARK: - Mixtape limits
+
+    /// The limits read arrives 201 like the blend status — a copied status
+    /// code — with fields lower-cased-first, and the numbers are the
+    /// backend's own defaults (album 3, artist 5) for an account that
+    /// never set any.
+    func testLimitsReadsTheLowerCasedAnswer() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","sameAlbumLimit":3,"sameArtistLimit":5}"#.utf8)
+            )
+        }
+
+        let limits = try await TestFixtures.stubbedBackend().limits(userID: "user-id")
+
+        XCTAssertEqual(limits.id, "user-id")
+        XCTAssertEqual(limits.sameAlbumLimit, 3)
+        XCTAssertEqual(limits.sameArtistLimit, 5)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/limits")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    /// `/limits` takes the pair as one setting: both numbers travel even
+    /// when only one was touched, and the answer echoes what the backend
+    /// stored. A drifted parameter name is a silent 422, so the query
+    /// shape is asserted as it rides.
+    func testSettingLimitsSendsTheWholePair() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","sameAlbumLimit":4,"sameArtistLimit":7}"#.utf8)
+            )
+        }
+
+        let limits = try await TestFixtures.stubbedBackend().setLimits(
+            userID: "user-id",
+            sameAlbumLimit: 4,
+            sameArtistLimit: 7
+        )
+
+        XCTAssertEqual(limits.sameAlbumLimit, 4)
+        XCTAssertEqual(limits.sameArtistLimit, 7)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/limits")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "sameAlbumLimit"), "4")
+        XCTAssertEqual(request.value(for: "sameArtistLimit"), "7")
+    }
+
+    /// Limits belong to a backend account like everything else here: an
+    /// unknown user gets the 401, and its words have to reach the sheet.
+    func testLimitsForAnUnknownUserSurfaceTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User user-id not valid"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().setLimits(
+                userID: "user-id",
+                sameAlbumLimit: 3,
+                sameArtistLimit: 5
+            )
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User user-id not valid"))
+        }
+    }
+
     // MARK: - Bans
 
     /// `/ban` is a POST keyed on `userID` and `itemID` alone — the kind of
