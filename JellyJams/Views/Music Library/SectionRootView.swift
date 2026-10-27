@@ -18,8 +18,8 @@ struct SectionRootView: View {
             SongsView(model: libraryCache.items(for: .songs))
         case .playlists:
             PlaylistsView(model: libraryCache.items(for: .playlists))
-        case .aiRadio:
-            AIRadioView(model: libraryCache.items(for: .aiRadioPlaylists))
+        case .mixtapes:
+            MixtapesView(model: libraryCache.items(for: .mixtapePlaylists))
         case .downloads:
             DownloadsView()
         case .favorites:
@@ -48,7 +48,7 @@ struct LibraryHubView: View {
 
     var body: some View {
         List {
-            ForEach(LibrarySection.libraryGroup(showingAIRadio: preferences.isAIRadioActive)) { section in
+            ForEach(LibrarySection.libraryGroup(showingMixtapes: preferences.isMixtapesActive)) { section in
                 NavigationLink(value: section) {
                     Label(section.title, systemImage: section.systemImage)
                 }

@@ -3,7 +3,7 @@ import SwiftUI
 /// Top-level navigation destinations, shared between the macOS/iPadOS sidebar
 /// and the iPhone tab bar.
 enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
-    /// The app's landing screen: pinned items, recent music and AI Radio
+    /// The app's landing screen: pinned items, recent music and Mixtapes
     /// quick links. Not part of ``libraryGroup`` — it is the shell's own
     /// destination rather than one of the library's browsing sections.
     case home
@@ -11,10 +11,10 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
     case artists
     case songs
     case playlists
-    /// The playlists AudioMuse-AI generates, where a tap plays the station
-    /// rather than opening it. Only offered while the feature is switched on —
-    /// see ``libraryGroup(showingAIRadio:)``.
-    case aiRadio
+    /// The mixtapes the Jelly Jams Backend builds, where a tap plays the
+    /// mixtape rather than opening it. Only offered while the app is
+    /// registered with a backend — see ``libraryGroup(showingMixtapes:)``.
+    case mixtapes
     case downloads
     case favorites
     case search
@@ -28,7 +28,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
         case .artists: return "Artists"
         case .songs: return "Songs"
         case .playlists: return "Playlists"
-        case .aiRadio: return "AI Radio"
+        case .mixtapes: return "Mixtapes"
         case .downloads: return "Downloads"
         case .favorites: return "Favourites"
         case .search: return "Search"
@@ -42,7 +42,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
         case .artists: return "music.mic"
         case .songs: return "music.note"
         case .playlists: return "music.note.list"
-        case .aiRadio: return "radio"
+        case .mixtapes: return "recordingtape.circle.fill"
         case .downloads: return "arrow.down.circle"
         case .favorites: return "heart"
         case .search: return "magnifyingglass"
@@ -53,11 +53,13 @@ enum LibrarySection: String, CaseIterable, Identifiable, Hashable {
     /// their own top-level tabs rather than living here.
     static let libraryGroup: [LibrarySection] = [.albums, .artists, .songs, .playlists]
 
-    /// ``libraryGroup`` with AI Radio appended when the user has switched it on.
+    /// ``libraryGroup`` with Mixtapes appended when the app has a backend
+    /// registration to work from.
     ///
-    /// A section nobody can fill is worse than no section: with the feature off
-    /// there are no stations to show, so the destination is not offered at all.
-    static func libraryGroup(showingAIRadio: Bool) -> [LibrarySection] {
-        showingAIRadio ? libraryGroup + [.aiRadio] : libraryGroup
+    /// A section nobody can fill is worse than no section: with no
+    /// registration there is no name rule to gather by, so the destination is
+    /// not offered at all.
+    static func libraryGroup(showingMixtapes: Bool) -> [LibrarySection] {
+        showingMixtapes ? libraryGroup + [.mixtapes] : libraryGroup
     }
 }
