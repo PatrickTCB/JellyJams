@@ -69,7 +69,7 @@ struct PlayerView: View {
                 // all when the backend can't take bans.
                 BanMenu(item: item)
                     .labelStyle(.iconOnly)
-                    .buttonStyle(.bordered)
+                    .foregroundStyle(Color.secondary)
                 FavouriteButton(item: item, size: .title3)
             }
         }
