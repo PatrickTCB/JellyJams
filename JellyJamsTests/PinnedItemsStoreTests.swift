@@ -183,6 +183,86 @@ final class PinnedItemsStoreTests: XCTestCase {
         XCTAssertEqual(store.pins.map(\.itemId), ["album-1"])
     }
 
+    // MARK: - Reordering
+
+    func testDraggingAPinToAnIndexReordersPinsAndEntriesTogether() {
+        let store = makeStore()
+        store.pin(album("album-1"), kind: .album)
+        store.pin(album("album-2"), kind: .album)
+        store.pin(album("album-3"), kind: .album)
+
+        XCTAssertTrue(store.move(store.pins[0], to: 2))
+
+        XCTAssertEqual(store.pins.map(\.itemId), ["album-2", "album-1", "album-3"])
+        XCTAssertEqual(store.entries.map(\.pin.itemId), ["album-2", "album-1", "album-3"])
+    }
+
+    func testDraggingPastTheLastPinMovesItToTheEnd() {
+        let store = makeStore()
+        store.pin(album("album-1"), kind: .album)
+        store.pin(album("album-2"), kind: .album)
+        store.pin(album("album-3"), kind: .album)
+
+        XCTAssertTrue(store.move(store.pins[0], to: 3))
+
+        XCTAssertEqual(store.pins.map(\.itemId), ["album-2", "album-3", "album-1"])
+    }
+
+    func testTheMovedOrderIsPersisted() {
+        let store = makeStore()
+        store.pin(album("album-1"), kind: .album)
+        store.pin(album("album-2"), kind: .album)
+
+        XCTAssertTrue(store.move(store.pins[1], to: 0))
+
+        XCTAssertEqual(makeStore().pins.map(\.itemId), ["album-2", "album-1"])
+    }
+
+    /// The row shuffles; what the server answered for each pin stays with
+    /// that pin.
+    func testMoveCarriesEachEntryWithItsPin() {
+        let store = makeStore()
+        store.pin(album("album-1"), kind: .album)
+        store.pin(album("album-2"), kind: .album)
+
+        XCTAssertTrue(store.move(store.pins[1], to: 0))
+
+        XCTAssertEqual(store.entries.first?.pin.itemId, "album-2")
+        XCTAssertEqual(resolvedItem(ofPin: "album-2", in: store)?.id, "album-2")
+        XCTAssertEqual(resolvedItem(ofPin: "album-1", in: store)?.id, "album-1")
+    }
+
+    /// A pin dropped back onto its own tile — or onto the gap it already
+    /// fills — is refused: nothing moved, nothing rewrote, and the drag
+    /// can snap the tile home.
+    func testADropThatChangesNothingIsRefused() {
+        let store = makeStore()
+        store.pin(album("album-1"), kind: .album)
+        store.pin(album("album-2"), kind: .album)
+        store.pin(album("album-3"), kind: .album)
+
+        XCTAssertFalse(store.move(store.pins[0], to: 0))
+        XCTAssertFalse(store.move(store.pins[0], to: 1))
+        XCTAssertFalse(store.move(store.pins[1], to: 1))
+        XCTAssertFalse(store.move(store.pins[1], to: 2))
+        XCTAssertFalse(store.move(store.pins[2], to: 3))
+
+        XCTAssertEqual(store.pins.map(\.itemId), ["album-1", "album-2", "album-3"])
+    }
+
+    func testMovingAPinTheRowNoLongerHoldsIsRefused() {
+        let store = makeStore()
+        store.pin(album("album-1"), kind: .album)
+        store.pin(album("album-2"), kind: .album)
+        store.unpin(album("album-1"))
+
+        XCTAssertFalse(store.move(
+            PinnedItemsStore.PinnedItem(itemId: "album-1", name: "album-1", kind: .album),
+            to: 0
+        ))
+        XCTAssertEqual(store.pins.map(\.itemId), ["album-2"])
+    }
+
     // MARK: - Resolution
 
     func testRefreshResolvesPinsInPinOrder() async {

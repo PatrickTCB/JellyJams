@@ -39,3 +39,54 @@ extension HomeItemRow where Trailing == EmptyView {
         self.init(items: items, content: content) { EmptyView() }
     }
 }
+
+/// The same row, made drag-to-reorder: every tile lifts the payload built
+/// from its item, and one drop destination over the row resolves a drop to
+/// the index it lands at — long-press and drag on iOS, click and drag on
+/// macOS, with the system shifting tiles out of the way and animating the
+/// moved tile into its new place. `drop` asks the model to move the payload
+/// and reports whether the order changed; a drop that changes nothing just
+/// lets the tile spring back.
+///
+/// It is a sibling of ``HomeItemRow`` rather than a mode of it because the
+/// reordering modifiers must sit on the `ForEach` itself — SwiftUI's list
+/// identity only survives the chain when the modifier is unconditional —
+/// so rows that do not reorder keep the plain type untouched. Keep both
+/// bodies' layout in step.
+struct ReorderableHomeItemRow<Item: Identifiable, Payload: Transferable, Content: View>: View {
+    let items: [Item]
+    var payload: (Item) -> Payload
+    var drop: (Payload, Int) -> Bool
+    var content: (Item) -> Content
+
+    init(
+        items: [Item],
+        payload: @escaping (Item) -> Payload,
+        drop: @escaping (Payload, Int) -> Bool,
+        @ViewBuilder content: @escaping (Item) -> Content
+    ) {
+        self.items = items
+        self.payload = payload
+        self.drop = drop
+        self.content = content
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: 16) {
+                ForEach(items) { item in
+                    content(item)
+                        .draggable(payload(item))
+                }
+                .dropDestination(for: Payload.self) { payloads, index in
+                    guard let payload = payloads.first else { return }
+                    _ = withAnimation(.snappy) {
+                        drop(payload, index)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+        }
+    }
+}

@@ -170,6 +170,41 @@ final class PinnedItemsStore: ObservableObject {
         persist()
     }
 
+    /// The order after the dragged pin lands at `index` — counted against
+    /// the pins as the row showed them when the drag began, so it means
+    /// "before the pin currently there", and past the last pin means the
+    /// end of the row. Nil when the dragged pin is not one of the row's,
+    /// or when the drop changes nothing: a pin back onto its own slot, or
+    /// onto the gap it already fills.
+    static func reordered(_ pins: [PinnedItem], moving dragged: PinnedItem, to index: Int) -> [PinnedItem]? {
+        guard let from = pins.firstIndex(where: { $0.itemId == dragged.itemId }) else { return nil }
+        var moved = pins
+        moved.remove(at: from)
+        // Removing the dragged pin shifted everything after it one place
+        // left; the requested index, counted before that shift, follows.
+        let destination = min(max(index > from ? index - 1 : index, 0), moved.count)
+        moved.insert(dragged, at: destination)
+        return moved == pins ? nil : moved
+    }
+
+    /// Reorders the row after a drag: the pin lands at `index`, its entry
+    /// travelling with it and keeping its resolved state — the row
+    /// shuffles, the server answers stay put. Returns false, changing
+    /// neither order nor storage, when the drop changes nothing or names
+    /// a pin the row does not hold.
+    @discardableResult
+    func move(_ dragged: PinnedItem, to index: Int) -> Bool {
+        guard let order = Self.reordered(pins, moving: dragged, to: index) else { return false }
+        let entryByID = Dictionary(
+            entries.map { ($0.pin.itemId, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        pins = order
+        entries = order.compactMap { entryByID[$0.itemId] }
+        persist()
+        return true
+    }
+
     /// Resolves every pin against the server in one request, upgrading the
     /// entries with fresh items and marking pins the answer no longer carries
     /// as missing — not removing them. A failed request changes nothing and

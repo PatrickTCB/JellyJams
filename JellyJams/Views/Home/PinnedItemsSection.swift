@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Pinned row: what the user marked from any album, artist, playlist or
 /// mixtape's context menu.
@@ -8,6 +9,11 @@ import SwiftUI
 /// server-side keeps its tile, shown from the stored name alone, and tapping
 /// it asks the server again — present, the item opens; gone, the removal of
 /// the pin is offered.
+///
+/// The user sets the row's order themselves: with more than one pin every
+/// tile lifts its pin for a drag — long-press on iOS, click-drag on macOS —
+/// and dropping it at an index of the row moves it there, order and all,
+/// persisted with the pins.
 struct PinnedItemsSection: View {
     let entries: [PinnedItemsStore.Entry]
 
@@ -26,8 +32,21 @@ struct PinnedItemsSection: View {
             Text("Pinned")
                 .font(.title2.bold())
                 .padding(.horizontal)
-            HomeItemRow(items: entries) { entry in
-                tile(for: entry)
+            // A single pin has no order to change, and a lone draggable
+            // tile would only fight its long-press menu — so the row
+            // rearranges while it holds two or more.
+            if entries.count > 1 {
+                ReorderableHomeItemRow(
+                    items: entries,
+                    payload: \.pin,
+                    drop: { pin, index in pinnedItems.move(pin, to: index) }
+                ) { entry in
+                    tile(for: entry)
+                }
+            } else {
+                HomeItemRow(items: entries) { entry in
+                    tile(for: entry)
+                }
             }
         }
         .confirmationDialog(
@@ -91,6 +110,15 @@ struct PinnedItemsSection: View {
         case .cancelled:
             break
         }
+    }
+}
+
+extension PinnedItemsStore.PinnedItem: Transferable {
+    /// The payload a pinned tile carries when it is dragged. A drop only
+    /// ever moves a pin the row still holds, so a payload decoded from
+    /// anywhere else changes nothing.
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .data)
     }
 }
 
