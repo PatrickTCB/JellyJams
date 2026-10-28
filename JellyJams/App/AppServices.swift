@@ -21,6 +21,7 @@ final class AppServices {
     let libraryCache = LibraryCache()
     let favourites = FavouriteStore()
     let bans = BanStore()
+    let queueExtender = QueueExtender()
     let settingsPresentation = SettingsPresentation()
     let preferences = PreferencesStore()
     let downloads = DownloadStore()
@@ -67,9 +68,10 @@ final class AppServices {
             }
             .store(in: &cancellables)
 
-        // Bans follow the backend rather than the session alone: whether a
-        // "Ban" menu may offer itself depends on who is signed in, where the
-        // backend lives, and whether it knows this account yet — and the
+        // Bans and Infinite Queue follow the backend rather than the session
+        // alone: whether a "Ban" menu may offer itself — and whether a
+        // running queue can be extended — depends on who is signed in, where
+        // the backend lives, and whether it knows this account yet. The
         // settings sheet edits the address live, so every value comes from
         // the publisher rather than being read back (`@Published` announces
         // before the change lands, and mid-registration the suffix the store
@@ -85,6 +87,12 @@ final class AppServices {
                 guard let self else { return }
                 let registered = !suffix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 self.bans.configure(
+                    userID: user?.id,
+                    address: address,
+                    registered: registered,
+                    deviceInfo: self.session.deviceInfo
+                )
+                self.queueExtender.configure(
                     userID: user?.id,
                     address: address,
                     registered: registered,
@@ -113,6 +121,7 @@ final class AppServices {
 
         player.configure(downloads: downloads)
         player.configure(preferences: preferences)
+        player.configure(queueExtender: queueExtender)
         #if os(iOS)
         CarPlayController.shared.configure(session: session, player: player, downloads: downloads)
         #endif

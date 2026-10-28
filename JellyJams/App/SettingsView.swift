@@ -86,6 +86,14 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Infinite Queue", isOn: $preferences.infiniteQueueEnabled)
+            } header: {
+                Text("Playback")
+            } footer: {
+                Text("Keep adding new songs to the end of the queue forever")
+            }
+
+            Section {
                 Button {
                     isChoosingDefaultPlayback = true
                 } label: {

@@ -47,6 +47,7 @@ final class PreferencesStore: ObservableObject {
         static let sameAlbumLimit = "sameAlbumLimit"
         static let sameArtistLimit = "sameArtistLimit"
         static let defaultPlayback = "defaultPlayback"
+        static let infiniteQueueEnabled = "infiniteQueueEnabled"
     }
 
     /// Whether album and artist screens look up similar music.
@@ -140,6 +141,21 @@ final class PreferencesStore: ObservableObject {
         }
     }
 
+    /// Whether Infinite Queue keeps the running queue topped up from the
+    /// Jelly Jams Backend: when the listener nears the end of the queue, the
+    /// backend is asked for more tracks — the next album's when the listen is
+    /// an album in order, alchemy picks otherwise — and they are appended.
+    ///
+    /// Off by default: it grows every queue forever and leans on a companion
+    /// service, so it should start when the user asks for it, not before.
+    /// Unlike the backend's own feature settings, this one is purely local —
+    /// the backend keeps no copy of it — so it is editable whether or not the
+    /// backend can be reached; an unreachable backend simply means nothing
+    /// extends.
+    @Published var infiniteQueueEnabled: Bool {
+        didSet { defaults.set(infiniteQueueEnabled, forKey: Key.infiniteQueueEnabled) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -156,6 +172,8 @@ final class PreferencesStore: ObservableObject {
         defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {
             try? JSONDecoder().decode(DefaultPlaybackSetting.self, from: $0)
         }
+        // Off until asked for: an absent key must not switch the feature on.
+        infiniteQueueEnabled = defaults.object(forKey: Key.infiniteQueueEnabled) as? Bool ?? false
     }
 
     /// The ending to match, or nil when there is nothing to match with.

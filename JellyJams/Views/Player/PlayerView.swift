@@ -9,6 +9,7 @@ struct PlayerView: View {
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var clock: PlaybackClock
     @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var preferences: PreferencesStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var isScrubbing = false
@@ -158,6 +159,16 @@ struct PlayerView: View {
             Button { player.cycleRepeatMode() } label: {
                 Image(systemName: player.repeatMode.systemImage)
                     .foregroundStyle(player.repeatMode == .repeatNone ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+            }
+            .buttonStyle(.plain)
+
+            // The same preference the Settings toggle edits — Infinite Queue
+            // is one switch with two handles. Lit while on; when the backend
+            // cannot be reached it simply does nothing rather than refusing
+            // the tap.
+            Button { preferences.infiniteQueueEnabled.toggle() } label: {
+                Image(systemName: "infinity")
+                    .foregroundStyle(preferences.infiniteQueueEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
             .buttonStyle(.plain)
 

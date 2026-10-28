@@ -228,6 +228,23 @@ struct BackendTapeDeleted: Decodable, Sendable, Equatable {
     }
 }
 
+/// The backend's answer to both queue-extension endpoints: the ids of the
+/// tracks to append, in the order they should play, and how many that is.
+///
+/// The field names are capitalised because that is how the backend writes
+/// them. `Count` always agrees with the list beside it — the backend fills
+/// both from the same songs — so the app reads the list and treats the count
+/// as confirmation, not as a second source of truth.
+struct BackendExtendedQueue: Decodable, Sendable, Equatable {
+    let newTrackIDs: [String]
+    let count: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case newTrackIDs = "NewTrackIDs"
+        case count = "Count"
+    }
+}
+
 enum BackendError: LocalizedError, Sendable, Equatable {
     case invalidServerURL
     case notSignedIn
@@ -250,7 +267,7 @@ enum BackendError: LocalizedError, Sendable, Equatable {
 
 /// App-level access to the Jelly Jams Backend — the companion service for
 /// the app, whose features so far are building Mixtapes, the Family Blend,
-/// and taking bans, and which will later extend queues and offer AI
+/// taking bans, and extending running queues, and which will later offer AI
 /// instant mixes.
 ///
 /// Every endpoint but `/ping` keys off the `userID` that `/register` hands
@@ -563,6 +580,45 @@ final class JellyJamsBackend: Sendable {
         return try JSONDecoder().decode(BackendTapeDeleted.self, from: data)
     }
 
+    // MARK: - Infinite Queue
+
+    /// `GET /extend-queue` — the tracks to append to a queue that is running
+    /// short, chosen by the backend's alchemy from the songs handed over.
+    ///
+    /// The endpoint is a GET that carries its payload as a JSON body rather
+    /// than query parameters — the shape FastAPI gives a list parameter — so
+    /// the existing queue travels as an array of Jellyfin item ids in the
+    /// request body. An empty answer is possible and is not an error: there
+    /// is simply nothing to append.
+    func extendQueue(userID: String, existingQueue: [String]) async throws -> BackendExtendedQueue {
+        let data = try await perform(
+            .get,
+            path: "extend-queue",
+            queryItems: [URLQueryItem(name: "userID", value: userID)],
+            body: JSONEncoder().encode(existingQueue)
+        )
+        return try JSONDecoder().decode(BackendExtendedQueue.self, from: data)
+    }
+
+    /// `GET /extend-queue-by-album` — the tracks to append for a listener who
+    /// is playing an album in track order and is about to run off its end.
+    ///
+    /// The backend works out what comes next itself: the album's artist's
+    /// next release, or an album by a similar artist, or — failing all of
+    /// that — alchemy seeded from the album being listened to. The app only
+    /// names the album the queue currently ends with.
+    func extendQueueByAlbum(userID: String, currentAlbumID: String) async throws -> BackendExtendedQueue {
+        let data = try await perform(
+            .get,
+            path: "extend-queue-by-album",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "currentAlbumID", value: currentAlbumID),
+            ]
+        )
+        return try JSONDecoder().decode(BackendExtendedQueue.self, from: data)
+    }
+
     // MARK: - The request plumbing
 
     /// A decoder for answers that carry whole Jellyfin items — the ban
@@ -615,10 +671,15 @@ final class JellyJamsBackend: Sendable {
     /// One request against the backend: query items in, JSON out, with
     /// anything outside 2xx turned into a `BackendError` carrying the
     /// backend's own human-readable refusal when it bothers to send one.
+    ///
+    /// `body` exists for the one endpoint that needs it — `GET /extend-queue`,
+    /// whose song list travels as JSON because FastAPI reads a list parameter
+    /// from the body rather than the query string.
     private func perform(
         _ method: Method,
         path: String,
-        queryItems: [URLQueryItem] = []
+        queryItems: [URLQueryItem] = [],
+        body: Data? = nil
     ) async throws -> Data {
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
@@ -629,6 +690,10 @@ final class JellyJamsBackend: Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {

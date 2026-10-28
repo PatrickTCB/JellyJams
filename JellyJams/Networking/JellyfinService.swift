@@ -305,6 +305,23 @@ final class JellyfinService: Sendable {
         return found
     }
 
+    /// Tracks by id, in the order the ids were given. The server answers an
+    /// ids query in its own order, so the result is re-sorted against the
+    /// request — the caller's order is the whole point: it is the order the
+    /// backend picked queue extensions in, which is the order they play in.
+    /// Ids nothing resolves to are dropped rather than failing the batch.
+    func tracks(byIds ids: [String]) async throws -> [BaseItemDto] {
+        var found: [BaseItemDto] = []
+        for chunk in ids.chunked(into: Self.playlistBatchSize) {
+            found.append(contentsOf: try await getItems(includeItemTypes: [.audio], ids: chunk).items ?? [])
+        }
+        var byId: [String: BaseItemDto] = [:]
+        for item in found {
+            if let id = item.id { byId[id] = item }
+        }
+        return ids.compactMap { byId[$0] }
+    }
+
     /// Resolves every audio track belonging to a collection item (album,
     /// artist, playlist or genre) in its natural playback order. An item that
     /// is already a track resolves to itself.
