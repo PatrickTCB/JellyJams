@@ -683,9 +683,10 @@ final class PlayerQueueTests: XCTestCase {
         XCTAssertEqual(request.path, "/extend-queue")
         XCTAssertEqual(request.value(for: "userID"), "user-id")
         XCTAssertEqual(
-            try JSONDecoder().decode([String].self, from: request.body),
-            ["s1", "s2", "s3", "s4", "s5", "s6"]
+            request.value(for: "existingQueue"),
+            "s1,s2,s3,s4,s5,s6"
         )
+        XCTAssertTrue(request.body.isEmpty)
     }
 
     /// The album path: an in-order album listen about to run off its end
