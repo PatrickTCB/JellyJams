@@ -585,17 +585,19 @@ final class JellyJamsBackend: Sendable {
     /// `GET /extend-queue` — the tracks to append to a queue that is running
     /// short, chosen by the backend's alchemy from the songs handed over.
     ///
-    /// The endpoint is a GET that carries its payload as a JSON body rather
-    /// than query parameters — the shape FastAPI gives a list parameter — so
-    /// the existing queue travels as an array of Jellyfin item ids in the
-    /// request body. An empty answer is possible and is not an error: there
-    /// is simply nothing to append.
+    /// The existing queue travels as one `existingQueue` query parameter
+    /// formatted as a normal comma-separated string — the Jellyfin item ids
+    /// joined in order — because a GET has no payload of its own to carry
+    /// them in. An empty queue sends an empty value; an empty answer is
+    /// possible and is not an error: there is simply nothing to append.
     func extendQueue(userID: String, existingQueue: [String]) async throws -> BackendExtendedQueue {
         let data = try await perform(
             .get,
             path: "extend-queue",
-            queryItems: [URLQueryItem(name: "userID", value: userID)],
-            body: JSONEncoder().encode(existingQueue)
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "existingQueue", value: existingQueue.joined(separator: ",")),
+            ]
         )
         return try JSONDecoder().decode(BackendExtendedQueue.self, from: data)
     }
@@ -672,14 +674,12 @@ final class JellyJamsBackend: Sendable {
     /// anything outside 2xx turned into a `BackendError` carrying the
     /// backend's own human-readable refusal when it bothers to send one.
     ///
-    /// `body` exists for the one endpoint that needs it — `GET /extend-queue`,
-    /// whose song list travels as JSON because FastAPI reads a list parameter
-    /// from the body rather than the query string.
+    /// Every endpoint the app calls puts all of its input in the query
+    /// string; none of them carries a request body.
     private func perform(
         _ method: Method,
         path: String,
-        queryItems: [URLQueryItem] = [],
-        body: Data? = nil
+        queryItems: [URLQueryItem] = []
     ) async throws -> Data {
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
@@ -690,10 +690,6 @@ final class JellyJamsBackend: Sendable {
 
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
-        if let body {
-            request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        }
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {

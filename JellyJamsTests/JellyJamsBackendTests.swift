@@ -762,11 +762,12 @@ final class JellyJamsBackendTests: XCTestCase {
         }
     }
 
-    /// `/extend-queue` is a GET whose song list travels as a JSON body — the
-    /// shape FastAPI gives a list parameter. A drift on either side (the body
-    /// in the query, a POST instead) is a 422 nobody sees until Infinite
-    /// Queue quietly stops extending.
-    func testExtendingTheQueueSendsTheExistingQueueAsABody() async throws {
+    /// `/extend-queue` carries its song list as one `existingQueue` query
+    /// parameter formatted as a comma-separated string — a GET has no body to
+    /// put it in. A drift on either side (a list in the query instead, a body,
+    /// a POST) is a 422 nobody sees until Infinite Queue quietly stops
+    /// extending.
+    func testExtendingTheQueueSendsTheExistingQueueAsACommaSeparatedQueryParameter() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
@@ -782,10 +783,8 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertEqual(request.method, "GET")
         XCTAssertEqual(request.path, "/extend-queue")
         XCTAssertEqual(request.value(for: "userID"), "user-id")
-        XCTAssertEqual(
-            try JSONDecoder().decode([String].self, from: request.body),
-            ["a", "b", "c"]
-        )
+        XCTAssertEqual(request.value(for: "existingQueue"), "a,b,c")
+        XCTAssertTrue(request.body.isEmpty)
         XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
         XCTAssertEqual(answer.count, 2)
     }
