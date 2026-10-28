@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// The Pinned row: what the user marked from any album, artist, playlist or
 /// mixtape's context menu.
@@ -10,10 +9,11 @@ import UniformTypeIdentifiers
 /// it asks the server again — present, the item opens; gone, the removal of
 /// the pin is offered.
 ///
-/// The user sets the row's order themselves: with more than one pin every
-/// tile lifts its pin for a drag — long-press on iOS, click-drag on macOS —
-/// and dropping it at an index of the row moves it there, order and all,
-/// persisted with the pins.
+/// The user sets the row's order themselves. With more than one pin, a tile
+/// can be dragged along the row — long-press on iOS, click-drag on macOS —
+/// and dropping it moves the pin there. The new order is persisted with the
+/// pins. Before macOS 27, which lacks SwiftUI's reordering API, the row
+/// keeps its order.
 struct PinnedItemsSection: View {
     let entries: [PinnedItemsStore.Entry]
 
@@ -38,8 +38,7 @@ struct PinnedItemsSection: View {
             if entries.count > 1 {
                 ReorderableHomeItemRow(
                     items: entries,
-                    payload: \.pin,
-                    drop: { pin, index in pinnedItems.move(pin, to: index) }
+                    move: { entry, index in pinnedItems.move(entry.pin, to: index) }
                 ) { entry in
                     tile(for: entry)
                 }
@@ -110,15 +109,6 @@ struct PinnedItemsSection: View {
         case .cancelled:
             break
         }
-    }
-}
-
-extension PinnedItemsStore.PinnedItem: Transferable {
-    /// The payload a pinned tile carries when it is dragged. A drop only
-    /// ever moves a pin the row still holds, so a payload decoded from
-    /// anywhere else changes nothing.
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .data)
     }
 }
 

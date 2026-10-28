@@ -40,53 +40,86 @@ extension HomeItemRow where Trailing == EmptyView {
     }
 }
 
-/// The same row, made drag-to-reorder: every tile lifts the payload built
-/// from its item, and one drop destination over the row resolves a drop to
-/// the index it lands at — long-press and drag on iOS, click and drag on
-/// macOS, with the system shifting tiles out of the way and animating the
-/// moved tile into its new place. `drop` asks the model to move the payload
-/// and reports whether the order changed; a drop that changes nothing just
-/// lets the tile spring back.
+/// The same row, made drag-to-reorder with SwiftUI's reordering API — the
+/// tiles are `.reorderable()` inside a `.reorderContainer`. A tile lifts
+/// with a long-press and drag on iOS, or a click and drag on macOS, and the
+/// other tiles shift out of its way. Dropping it hands `move` the tile's
+/// item and the index it landed at, counted against `items` as the drag
+/// found them: the index means "before the item currently there", and
+/// `items.count` means the end of the row. A drop that changes nothing can
+/// be ignored.
 ///
-/// It is a sibling of ``HomeItemRow`` rather than a mode of it because the
-/// reordering modifiers must sit on the `ForEach` itself — SwiftUI's list
+/// (A `dropDestination` on the `ForEach` is an insert action, not a
+/// reorder. SwiftUI never delivers this row's drags to it, so every
+/// dropped tile springs back.)
+///
+/// The reordering API needs macOS 27, so on earlier macOS versions this is
+/// the plain row and its order is fixed.
+///
+/// It is a sibling of ``HomeItemRow`` rather than a mode of it because
+/// `.reorderable()` must sit on the `ForEach` itself — SwiftUI's list
 /// identity only survives the chain when the modifier is unconditional —
 /// so rows that do not reorder keep the plain type untouched. Keep both
 /// bodies' layout in step.
-struct ReorderableHomeItemRow<Item: Identifiable, Payload: Transferable, Content: View>: View {
+struct ReorderableHomeItemRow<Item: Identifiable, Content: View>: View where Item.ID: Sendable {
     let items: [Item]
-    var payload: (Item) -> Payload
-    var drop: (Payload, Int) -> Bool
+    var move: (Item, Int) -> Void
     var content: (Item) -> Content
 
     init(
         items: [Item],
-        payload: @escaping (Item) -> Payload,
-        drop: @escaping (Payload, Int) -> Bool,
+        move: @escaping (Item, Int) -> Void,
         @ViewBuilder content: @escaping (Item) -> Content
     ) {
         self.items = items
-        self.payload = payload
-        self.drop = drop
+        self.move = move
         self.content = content
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(alignment: .top, spacing: 16) {
-                ForEach(items) { item in
-                    content(item)
-                        .draggable(payload(item))
-                }
-                .dropDestination(for: Payload.self) { payloads, index in
-                    guard let payload = payloads.first else { return }
-                    _ = withAnimation(.snappy) {
-                        drop(payload, index)
+        if #available(macOS 27, *) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 16) {
+                    ForEach(items) { item in
+                        // The stack makes every tile a single view. A tile
+                        // whose body opens with an `if` or `switch` — as
+                        // HomeItemTile and PinnedItemsSection's tiles do —
+                        // otherwise crashes SwiftUI as the drag lifts
+                        // ("Unexpected identifier type"). `.id`, `.frame`
+                        // and other modifiers distribute over the branches
+                        // and do not help; `AnyView` crashes too.
+                        ZStack {
+                            content(item)
+                        }
                     }
+                    .reorderable()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+            }
+            .reorderContainer(for: Item.self) { difference in
+                // The API declares this closure nonisolated, but a drop is a
+                // UI event on the main actor.
+                MainActor.assumeIsolated {
+                    moveTile(within: difference)
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 4)
+        } else {
+            HomeItemRow(items: items, content: content)
         }
+    }
+
+    /// The reordering API's drop, translated for `move`: the dragged tile's
+    /// item, and the index of the tile it landed before.
+    @available(macOS 27, *)
+    private func moveTile(within difference: ReorderDifference<Item.ID, ReorderableSingleCollectionIdentifier>) {
+        // Tiles move one at a time.
+        guard let id = difference.sources.first,
+              let item = items.first(where: { $0.id == id }) else { return }
+        let index = switch difference.destination.position {
+        case .before(let anchor): items.firstIndex { $0.id == anchor } ?? items.count
+        case .end: items.count
+        }
+        move(item, index)
     }
 }
