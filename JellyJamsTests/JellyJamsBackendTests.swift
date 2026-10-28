@@ -743,4 +743,95 @@ final class JellyJamsBackendTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Infinite Queue
+
+    private static let extendedQueuePayload = Data(#"{"NewTrackIDs":["x1","x2"],"Count":2}"#.utf8)
+
+    private func extendedQueueResponse() -> (URLRequest) throws -> (HTTPURLResponse, Data) {
+        return { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Self.extendedQueuePayload)
+        }
+    }
+
+    /// `/extend-queue` is a GET whose song list travels as a JSON body — the
+    /// shape FastAPI gives a list parameter. A drift on either side (the body
+    /// in the query, a POST instead) is a 422 nobody sees until Infinite
+    /// Queue quietly stops extending.
+    func testExtendingTheQueueSendsTheExistingQueueAsABody() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.extendedQueueResponse()(request)
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().extendQueue(
+            userID: "user-id",
+            existingQueue: ["a", "b", "c"]
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/extend-queue")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(
+            try JSONDecoder().decode([String].self, from: request.body),
+            ["a", "b", "c"]
+        )
+        XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
+        XCTAssertEqual(answer.count, 2)
+    }
+
+    /// The album variant names the album in the query and carries no body.
+    func testExtendingByAlbumNamesTheAlbumInTheQuery() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.extendedQueueResponse()(request)
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().extendQueueByAlbum(
+            userID: "user-id",
+            currentAlbumID: "album-1"
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/extend-queue-by-album")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "currentAlbumID"), "album-1")
+        XCTAssertTrue(request.body.isEmpty)
+        XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
+    }
+
+    /// An account the backend does not know answers 404 with a human detail,
+    /// which must surface like every other refusal rather than vanish.
+    func testAnExtensionForAnUnknownUserSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"detail":"User user-id not found"}"#.utf8))
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().extendQueue(userID: "user-id", existingQueue: [])
+            XCTFail("Expected a refusal")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 404, detail: "User user-id not found"))
+        }
+    }
 }

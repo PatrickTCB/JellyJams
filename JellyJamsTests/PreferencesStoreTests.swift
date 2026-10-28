@@ -248,4 +248,20 @@ final class PreferencesStoreTests: XCTestCase {
             "Before registration the name is shown as the server has it"
         )
     }
+
+    // MARK: - Infinite Queue
+
+    /// Off before anyone asks for it: an absent key must not ship a feature
+    /// that grows every queue forever and calls out to the companion service
+    /// switched on.
+    func testInfiniteQueueIsOffBeforeTheUserHasChosen() {
+        XCTAssertFalse(PreferencesStore(defaults: defaults).infiniteQueueEnabled)
+    }
+
+    func testTurningInfiniteQueueOnSurvivesRelaunch() {
+        PreferencesStore(defaults: defaults).infiniteQueueEnabled = true
+
+        XCTAssertTrue(PreferencesStore(defaults: defaults).infiniteQueueEnabled)
+        XCTAssertEqual(defaults.object(forKey: "infiniteQueueEnabled") as? Bool, true)
+    }
 }

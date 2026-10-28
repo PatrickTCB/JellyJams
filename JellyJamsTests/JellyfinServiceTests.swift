@@ -119,6 +119,35 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertTrue(recorder.all.isEmpty, "Nothing to look up sends nothing")
     }
 
+    /// The order the ids were asked in is the whole point: it is the order
+    /// the backend picked queue extensions in, and the server answers an ids
+    /// query in its own order. The stub answers reversed on purpose.
+    func testTracksByIdsComeBackInTheRequestedOrder() async throws {
+        URLProtocolStub.handler = { request in
+            let ids = RecordedRequest(request).values(for: "ids")
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                itemsPayload(ids.reversed().map { (id: $0, type: "Audio") })
+            )
+        }
+
+        let tracks = try await makeClient().tracks(byIds: ["t1", "t2", "t3"])
+
+        XCTAssertEqual(tracks.compactMap(\.id), ["t1", "t2", "t3"])
+    }
+
+    /// Ids the server does not know drop out without failing the batch — one
+    /// dead entry should not cost a whole queue top-up.
+    func testTracksByIdsDropIdsTheServerDoesNotKnow() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), itemsPayload([(id: "t1", type: "Audio")]))
+        }
+
+        let tracks = try await makeClient().tracks(byIds: ["t1", "gone"])
+
+        XCTAssertEqual(tracks.compactMap(\.id), ["t1"])
+    }
+
     func testStreamURLIncludesPlaybackSessionAndCredentials() throws {
         let url = try makeClient().streamURL(
             itemId: "track-id",
