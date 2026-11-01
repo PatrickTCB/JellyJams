@@ -16,7 +16,7 @@ final class JellyJamsBackendTests: XCTestCase {
     }
 
     private static let registrationPayload = Data(
-        #"{"User":"pat","Created":true,"Saved":true,"PlaylistSuffix":"_automatic","KafkaIP":"10.0.0.2","KafkaPort":"9092"}"#.utf8
+        #"{"User":"pat","Created":true,"Saved":true,"PlaylistSuffix":"_automatic"}"#.utf8
     )
 
     private func successResponse(statusCode: Int = 201) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
@@ -76,8 +76,6 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertTrue(registration.created)
         XCTAssertTrue(registration.saved)
         XCTAssertEqual(registration.playlistSuffix, "_automatic")
-        XCTAssertEqual(registration.kafkaIP, "10.0.0.2")
-        XCTAssertEqual(registration.kafkaPort, "9092")
     }
 
     /// A known user gets 200 ("already registered"), a new one 201. Both are

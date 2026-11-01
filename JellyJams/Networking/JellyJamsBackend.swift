@@ -17,9 +17,7 @@ struct JellyfinAccount: Sendable, Equatable {
 /// The backend's answer to a successful `POST /register`.
 ///
 /// The field names are capitalised because that is how the backend writes
-/// them; the coding keys translate. Kafka fields are carried for the events
-/// integration later on — nothing in the app reads them yet, and registering
-/// works whether the backend fills them or leaves them empty.
+/// them; the coding keys translate. 
 struct BackendRegistration: Codable, Sendable, Equatable {
     let user: String
     /// Whether this registration created the account or refreshed an
@@ -30,16 +28,12 @@ struct BackendRegistration: Codable, Sendable, Equatable {
     /// The ending the backend gives the mixtape playlists it builds — what
     /// the app tells mixtapes apart by.
     let playlistSuffix: String
-    let kafkaIP: String
-    let kafkaPort: String
 
     private enum CodingKeys: String, CodingKey {
         case user = "User"
         case created = "Created"
         case saved = "Saved"
         case playlistSuffix = "PlaylistSuffix"
-        case kafkaIP = "KafkaIP"
-        case kafkaPort = "KafkaPort"
     }
 }
 
