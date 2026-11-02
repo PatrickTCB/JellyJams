@@ -173,12 +173,12 @@ final class JellyJamsBackendTests: XCTestCase {
         }
     }
 
-    // MARK: - Family Blend
+    // MARK: - Server Playlist
 
     /// The blend endpoints insist on an `itemID` they never read — copied
     /// from `/ban`'s signature — so the client sends the empty one FastAPI
     /// accepts, and this is where dropping it would show up.
-    func testFamilyBlendStatusReadsTheLowerCasedAnswer() async throws {
+    func testServerPlaylistStatusReadsTheLowerCasedAnswer() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
@@ -186,18 +186,18 @@ final class JellyJamsBackendTests: XCTestCase {
             // code); any 2xx has to do.
             return (
                 try emptyResponse(for: request, statusCode: 201),
-                Data(#"{"id":"user-id","inFamilyBlend":true}"#.utf8)
+                Data(#"{"id":"user-id","inServerPlaylist":true}"#.utf8)
             )
         }
 
-        let status = try await TestFixtures.stubbedBackend().familyBlendStatus(userID: "user-id")
+        let status = try await TestFixtures.stubbedBackend().serverPlaylistStatus(userID: "user-id")
 
         XCTAssertEqual(status.id, "user-id")
-        XCTAssertTrue(status.inFamilyBlend)
+        XCTAssertTrue(status.inServerPlaylist)
 
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "GET")
-        XCTAssertEqual(request.path, "/family-blend")
+        XCTAssertEqual(request.path, "/server-playlist")
         XCTAssertEqual(request.value(for: "userID"), "user-id")
         XCTAssertEqual(request.value(for: "itemID"), "")
     }
@@ -208,13 +208,13 @@ final class JellyJamsBackendTests: XCTestCase {
             recorder.record(request)
             return (
                 try emptyResponse(for: request, statusCode: 201),
-                Data(#"{"id":"user-id","inFamilyBlend":true}"#.utf8)
+                Data(#"{"id":"user-id","inServerPlaylist":true}"#.utf8)
             )
         }
 
-        let status = try await TestFixtures.stubbedBackend().joinFamilyBlend(userID: "user-id")
+        let status = try await TestFixtures.stubbedBackend().joinServerPlaylist(userID: "user-id")
 
-        XCTAssertTrue(status.inFamilyBlend)
+        XCTAssertTrue(status.inServerPlaylist)
         XCTAssertEqual(recorder.all.first?.method, "POST")
     }
 
@@ -224,13 +224,13 @@ final class JellyJamsBackendTests: XCTestCase {
             recorder.record(request)
             return (
                 try emptyResponse(for: request, statusCode: 200),
-                Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                Data(#"{"id":"user-id","inServerPlaylist":false}"#.utf8)
             )
         }
 
-        let status = try await TestFixtures.stubbedBackend().leaveFamilyBlend(userID: "user-id")
+        let status = try await TestFixtures.stubbedBackend().leaveServerPlaylist(userID: "user-id")
 
-        XCTAssertFalse(status.inFamilyBlend)
+        XCTAssertFalse(status.inServerPlaylist)
         XCTAssertEqual(recorder.all.first?.method, "DELETE")
     }
 
@@ -245,7 +245,7 @@ final class JellyJamsBackendTests: XCTestCase {
         }
 
         do {
-            _ = try await TestFixtures.stubbedBackend().familyBlendStatus(userID: "user-id")
+            _ = try await TestFixtures.stubbedBackend().serverPlaylistStatus(userID: "user-id")
             XCTFail("Expected a rejection")
         } catch let error as BackendError {
             XCTAssertEqual(error, .rejected(status: 401, detail: "User user-id does not seem to exist"))

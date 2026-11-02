@@ -28,29 +28,33 @@ struct BackendRegistration: Codable, Sendable, Equatable {
     /// The ending the backend gives the mixtape playlists it builds — what
     /// the app tells mixtapes apart by.
     let playlistSuffix: String
+    // The backend can generate a playlist for all users based
+    // on the listening and favourites of all users
+    let serverPlaylist: String
 
     private enum CodingKeys: String, CodingKey {
         case user = "User"
         case created = "Created"
         case saved = "Saved"
         case playlistSuffix = "PlaylistSuffix"
+        case serverPlaylist = "ServerPlaylist"
     }
 }
 
-/// The backend's answer about one account's Family Blend membership.
+/// The backend's answer about one account's Server Plalist membership.
 ///
 /// Unlike `/register`, this model's fields arrive lower-cased-first, so the
 /// default coding keys fit as they are.
-struct BackendFamilyBlend: Codable, Sendable, Equatable {
+struct BackendSharedPlaylist: Codable, Sendable, Equatable {
     let id: String
-    let inFamilyBlend: Bool
+    let inServerPlaylist: Bool
 }
 
 /// The repeat limits the backend applies to one account's tapes: the most
 /// tracks from a single album, and from a single artist, that may share a
 /// generated mixtape.
 ///
-/// Like ``BackendFamilyBlend``, this model's fields arrive lower-cased
+/// Like ``BackendSharedPlaylist``, this model's fields arrive lower-cased
 /// first, so the default coding keys fit as they are. An account that has
 /// never set limits is answered with the backend's own defaults — album 3,
 /// artist 5 — so there is no first-read mystery for the app to paper over.
@@ -260,7 +264,7 @@ enum BackendError: LocalizedError, Sendable, Equatable {
 }
 
 /// App-level access to the Jelly Jams Backend — the companion service for
-/// the app, whose features so far are building Mixtapes, the Family Blend,
+/// the app, whose features so far are building Mixtapes, the Server Plalist,
 /// taking bans, and extending running queues, and which will later offer AI
 /// instant mixes.
 ///
@@ -364,39 +368,33 @@ final class JellyJamsBackend: Sendable {
         _ = try await perform(.get, path: "ping")
     }
 
-    // MARK: - Family Blend
+    // MARK: - Server Playlist
 
-    /// `GET /family-blend` — whether this account is in the blend right now.
+    /// `GET /server-playlist` — whether this account is in the blend right now.
     ///
     /// The backend answers a read with 201 (it was copied from the write
     /// endpoints); any 2xx is success as far as the app is concerned.
-    func familyBlendStatus(userID: String) async throws -> BackendFamilyBlend {
-        let data = try await perform(.get, path: "family-blend", queryItems: familyBlendQuery(userID: userID))
-        return try JSONDecoder().decode(BackendFamilyBlend.self, from: data)
+    func serverPlaylistStatus(userID: String) async throws -> BackendSharedPlaylist {
+        let data = try await perform(.get, path: "server-playlist", queryItems: serverPlaylistQuery(userID: userID))
+        return try JSONDecoder().decode(BackendSharedPlaylist.self, from: data)
     }
 
-    /// `POST /family-blend` — join the blend, and the shared playlist that
+    /// `POST /server-playlist` — join the blend, and the shared playlist that
     /// comes from it being built out of every member's listening.
-    func joinFamilyBlend(userID: String) async throws -> BackendFamilyBlend {
-        let data = try await perform(.post, path: "family-blend", queryItems: familyBlendQuery(userID: userID))
-        return try JSONDecoder().decode(BackendFamilyBlend.self, from: data)
+    func joinServerPlaylist(userID: String) async throws -> BackendSharedPlaylist {
+        let data = try await perform(.post, path: "server-playlist", queryItems: serverPlaylistQuery(userID: userID))
+        return try JSONDecoder().decode(BackendSharedPlaylist.self, from: data)
     }
 
-    /// `DELETE /family-blend` — leave the blend.
-    func leaveFamilyBlend(userID: String) async throws -> BackendFamilyBlend {
-        let data = try await perform(.delete, path: "family-blend", queryItems: familyBlendQuery(userID: userID))
-        return try JSONDecoder().decode(BackendFamilyBlend.self, from: data)
+    /// `DELETE /server-playlist` — leave the blend.
+    func leaveServerPlaylist(userID: String) async throws -> BackendSharedPlaylist {
+        let data = try await perform(.delete, path: "server-playlist", queryItems: serverPlaylistQuery(userID: userID))
+        return try JSONDecoder().decode(BackendSharedPlaylist.self, from: data)
     }
 
-    private func familyBlendQuery(userID: String) -> [URLQueryItem] {
+    private func serverPlaylistQuery(userID: String) -> [URLQueryItem] {
         [
-            URLQueryItem(name: "userID", value: userID),
-            // The endpoint insists on an `itemID` because it was copied from
-            // `/ban`'s signature; its handler never reads the value, but
-            // FastAPI refuses the request without it — so an empty one goes
-            // along, and FastAPI ignores unknown parameters whenever the
-            // backend drops this one.
-            URLQueryItem(name: "itemID", value: ""),
+            URLQueryItem(name: "userID", value: userID)
         ]
     }
 

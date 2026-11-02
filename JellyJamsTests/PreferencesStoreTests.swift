@@ -140,20 +140,20 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertNil(PreferencesStore(defaults: defaults).playlistNameFilter(for: .playlists))
     }
 
-    // MARK: - Family Blend
+    // MARK: - Server Playlist
 
     /// Off until opted in: the blend gathers a real account's listening for
     /// everybody in it, so nobody should be in before they have asked.
-    func testFamilyBlendIsOffBeforeTheUserHasChosen() {
-        XCTAssertFalse(PreferencesStore(defaults: defaults).familyBlendJoined)
+    func testServerPlaylistIsOffBeforeTheUserHasChosen() {
+        XCTAssertFalse(PreferencesStore(defaults: defaults).serverPlaylistJoined)
     }
 
     /// The remembered membership outlives a relaunch — and an offline spell:
     /// it is what the settings sheet shows when the backend cannot answer.
-    func testFamilyBlendMembershipSurvivesRelaunch() {
-        PreferencesStore(defaults: defaults).familyBlendJoined = true
+    func testServerPlaylistMembershipSurvivesRelaunch() {
+        PreferencesStore(defaults: defaults).serverPlaylistJoined = true
 
-        XCTAssertTrue(PreferencesStore(defaults: defaults).familyBlendJoined)
+        XCTAssertTrue(PreferencesStore(defaults: defaults).serverPlaylistJoined)
     }
 
     // MARK: - Default playback

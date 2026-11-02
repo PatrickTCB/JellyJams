@@ -82,7 +82,7 @@ struct SettingsView: View {
                     LabeledContent("Jelly Jams Backend", value: backendSettingsSummary)
                 }
             } footer: {
-                Text("The companion service behind generated features like Mixtapes and Family Blend. Its settings check in with the backend as they open — unreachable, they show what was last saved.")
+                Text("The companion / sidecar service behind generated features like Mixtapes and the Server Playlist '\(preferences.serverPlaylist)'. Its settings check in with the backend as they open — unreachable, they show what was last saved.")
             }
 
             Section {

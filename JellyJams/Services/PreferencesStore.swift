@@ -43,7 +43,8 @@ final class PreferencesStore: ObservableObject {
         static let showsCompleteAlbumsOnly = "showsCompleteAlbumsOnly"
         static let jellyJamsBackendAddress = "jellyJamsBackendAddress"
         static let mixtapeSuffix = "mixtapeSuffix"
-        static let familyBlendJoined = "familyBlendJoined"
+        static let serverPlaylistJoined = "serverPlaylistJoined"
+        static let serverPlaylist = "serverPlaylist"
         static let sameAlbumLimit = "sameAlbumLimit"
         static let sameArtistLimit = "sameArtistLimit"
         static let defaultPlayback = "defaultPlayback"
@@ -91,24 +92,30 @@ final class PreferencesStore: ObservableObject {
     @Published private(set) var mixtapeSuffix: String {
         didSet { defaults.set(mixtapeSuffix, forKey: Key.mixtapeSuffix) }
     }
-
+    
     /// Record a successful registration with the backend: the address it was
     /// reached at, and the playlist-name ending it gave back. This is what
     /// turns Mixtapes on — the section appears with the first registration
     /// and stays until a registration reports an ending that matches nothing.
-    func recordRegistration(address: String, suffix: String) {
+    func recordRegistration(address: String, suffix: String, playlist: String) {
         jellyJamsBackendAddress = address
         mixtapeSuffix = suffix
+        serverPlaylist = playlist
     }
 
-    /// Whether this account is in the backend's Family Blend, as last known:
+    /// Whether this account is in the backend's Server Playlist, as last known:
     /// the backend's own answer when it could be reached, this memory when it
     /// could not. The settings sheet writes a change through to the backend
     /// first and only settles it here once the backend agrees — which is also
     /// why joining is opt-in: the blend gathers a real account's listening
     /// for everyone in it, so nobody should be in it before asking to be.
-    @Published var familyBlendJoined: Bool {
-        didSet { defaults.set(familyBlendJoined, forKey: Key.familyBlendJoined) }
+    @Published var serverPlaylistJoined: Bool {
+        didSet { defaults.set(serverPlaylistJoined, forKey: Key.serverPlaylistJoined) }
+    }
+    
+    /// This is the name for the server playlist that the was set in the backend
+    @Published private(set) var serverPlaylist: String {
+        didSet { defaults.set(serverPlaylist, forKey: Key.serverPlaylist) }
     }
 
     /// The most tracks from one album that the backend may put into a single
@@ -166,7 +173,8 @@ final class PreferencesStore: ObservableObject {
         showsCompleteAlbumsOnly = defaults.object(forKey: Key.showsCompleteAlbumsOnly) as? Bool ?? true
         jellyJamsBackendAddress = defaults.string(forKey: Key.jellyJamsBackendAddress) ?? ""
         mixtapeSuffix = defaults.string(forKey: Key.mixtapeSuffix) ?? ""
-        familyBlendJoined = defaults.object(forKey: Key.familyBlendJoined) as? Bool ?? false
+        serverPlaylistJoined = defaults.object(forKey: Key.serverPlaylistJoined) as? Bool ?? false
+        serverPlaylist = defaults.object(forKey: Key.serverPlaylist) as? String ?? ""
         sameAlbumLimit = defaults.object(forKey: Key.sameAlbumLimit) as? Int ?? 3
         sameArtistLimit = defaults.object(forKey: Key.sameArtistLimit) as? Int ?? 5
         defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {

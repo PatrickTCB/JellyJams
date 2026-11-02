@@ -23,7 +23,7 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
     }
 
     /// A backend that lives: pong for `/ping`, the supplied membership
-    /// answer for every `/family-blend` method, and the supplied pair for
+    /// answer for every `/server-playlist` method, and the supplied pair for
     /// every `/limits` one.
     private func stubAwakeBackend(
         joined: Bool,
@@ -47,7 +47,7 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             let answer = joined ? "true" : "false"
             return (
                 try emptyResponse(for: request, statusCode: 201),
-                Data(#"{"id":"user-id","inFamilyBlend":\#(answer)}"#.utf8)
+                Data(#"{"id":"user-id","inServerPlaylist":\#(answer)}"#.utf8)
             )
         }
     }
@@ -56,7 +56,7 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
 
     func testAnAbsentAddressLeavesTheSavedStateStandingAndNothingEditable() async {
         let preferences = PreferencesStore(defaults: defaults)
-        preferences.familyBlendJoined = true
+        preferences.serverPlaylistJoined = true
 
         let model = JellyJamsBackendSettingsModel()
         await model.refresh(
@@ -70,15 +70,15 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         if case .unreachable = model.connection {} else {
             XCTFail("Expected unreachable, got \(model.connection)")
         }
-        XCTAssertTrue(preferences.familyBlendJoined, "The remembered state stands until the backend corrects it")
-        XCTAssertFalse(model.canEditFamilyBlend)
+        XCTAssertTrue(preferences.serverPlaylistJoined, "The remembered state stands until the backend corrects it")
+        XCTAssertFalse(model.canEditServerPlaylist)
     }
 
     /// No request can be made — the handler is not installed and the stub
     /// fails every load — so the memory must survive untouched.
     func testADeadBackendLeavesTheSavedStateStandingAndNothingEditable() async {
         let preferences = PreferencesStore(defaults: defaults)
-        preferences.familyBlendJoined = true
+        preferences.serverPlaylistJoined = true
 
         let model = JellyJamsBackendSettingsModel()
         await model.refresh(
@@ -92,14 +92,14 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         if case .unreachable = model.connection {} else {
             XCTFail("Expected unreachable, got \(model.connection)")
         }
-        XCTAssertTrue(preferences.familyBlendJoined)
-        XCTAssertFalse(model.canEditFamilyBlend)
+        XCTAssertTrue(preferences.serverPlaylistJoined)
+        XCTAssertFalse(model.canEditServerPlaylist)
     }
 
     /// A change must not be written to the memory when the backend cannot be
     /// reached to confirm it — even if a caller hands the model a client
     /// out of order, the gate holds.
-    func testSetFamilyBlendRefusesWhileUnreachable() async {
+    func testSetServerPlaylistRefusesWhileUnreachable() async {
         let preferences = PreferencesStore(defaults: defaults)
         let model = JellyJamsBackendSettingsModel()
         await model.refresh(
@@ -110,14 +110,14 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             preferences: preferences
         )
 
-        await model.setFamilyBlend(
+        await model.setServerPlaylist(
             joined: true,
             backend: TestFixtures.stubbedBackend(),
             userID: "user-id",
             preferences: preferences
         )
 
-        XCTAssertFalse(preferences.familyBlendJoined)
+        XCTAssertFalse(preferences.serverPlaylistJoined)
     }
 
     // MARK: - Online
@@ -125,7 +125,7 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
     func testTheAnswerFromTheBackendReplacesTheRememberedState() async {
         stubAwakeBackend(joined: true)
         let preferences = PreferencesStore(defaults: defaults)
-        preferences.familyBlendJoined = false
+        preferences.serverPlaylistJoined = false
 
         let model = JellyJamsBackendSettingsModel()
         await model.refresh(
@@ -137,8 +137,8 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         )
 
         XCTAssertEqual(model.connection, .online)
-        XCTAssertTrue(preferences.familyBlendJoined, "The server's answer wins over the app's memory")
-        XCTAssertTrue(model.canEditFamilyBlend)
+        XCTAssertTrue(preferences.serverPlaylistJoined, "The server's answer wins over the app's memory")
+        XCTAssertTrue(model.canEditServerPlaylist)
     }
 
     /// Online is the gate; registered is the *content* behind it. Before a
@@ -165,8 +165,8 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         )
 
         XCTAssertEqual(model.connection, .needsRegistration)
-        XCTAssertFalse(model.canEditFamilyBlend)
-        XCTAssertEqual(recorder.count(forPath: "/family-blend"), 0)
+        XCTAssertFalse(model.canEditServerPlaylist)
+        XCTAssertEqual(recorder.count(forPath: "/server-playlist"), 0)
         XCTAssertEqual(recorder.count(forPath: "/limits"), 0)
     }
 
@@ -184,16 +184,16 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             registered: true,
             preferences: preferences
         )
-        await model.setFamilyBlend(
+        await model.setServerPlaylist(
             joined: true,
             backend: TestFixtures.stubbedBackend(),
             userID: "user-id",
             preferences: preferences
         )
 
-        XCTAssertTrue(preferences.familyBlendJoined)
-        XCTAssertNil(model.familyBlendError)
-        XCTAssertFalse(model.isApplyingFamilyBlendChange)
+        XCTAssertTrue(preferences.serverPlaylistJoined)
+        XCTAssertNil(model.serverPlaylistError)
+        XCTAssertFalse(model.isApplyingServerPlaylistChange)
     }
 
     func testLeavingKeepsWhateverTheBackendConfirms() async {
@@ -213,17 +213,17 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             case "DELETE":
                 return (
                     try emptyResponse(for: request, statusCode: 200),
-                    Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                    Data(#"{"id":"user-id","inServerPlaylist":false}"#.utf8)
                 )
             default:
                 return (
                     try emptyResponse(for: request, statusCode: 201),
-                    Data(#"{"id":"user-id","inFamilyBlend":true}"#.utf8)
+                    Data(#"{"id":"user-id","inServerPlaylist":true}"#.utf8)
                 )
             }
         }
         let preferences = PreferencesStore(defaults: defaults)
-        preferences.familyBlendJoined = false
+        preferences.serverPlaylistJoined = false
 
         let model = JellyJamsBackendSettingsModel()
         await model.refresh(
@@ -233,17 +233,17 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             registered: true,
             preferences: preferences
         )
-        XCTAssertTrue(preferences.familyBlendJoined, "The refresh synced the membership the backend reports")
+        XCTAssertTrue(preferences.serverPlaylistJoined, "The refresh synced the membership the backend reports")
 
-        await model.setFamilyBlend(
+        await model.setServerPlaylist(
             joined: false,
             backend: TestFixtures.stubbedBackend(),
             userID: "user-id",
             preferences: preferences
         )
 
-        XCTAssertFalse(preferences.familyBlendJoined)
-        XCTAssertNil(model.familyBlendError)
+        XCTAssertFalse(preferences.serverPlaylistJoined)
+        XCTAssertNil(model.serverPlaylistError)
     }
 
     /// The optimistic write the switch shows must be withdrawn when the
@@ -263,7 +263,7 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             }
             return (
                 try emptyResponse(for: request, statusCode: 201),
-                Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                Data(#"{"id":"user-id","inServerPlaylist":false}"#.utf8)
             )
         }
 
@@ -276,16 +276,16 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             registered: true,
             preferences: preferences
         )
-        await model.setFamilyBlend(
+        await model.setServerPlaylist(
             joined: true,
             backend: TestFixtures.stubbedBackend(),
             userID: "user-id",
             preferences: preferences
         )
 
-        XCTAssertFalse(preferences.familyBlendJoined, "The refused join is taken back off the switch")
-        XCTAssertNotNil(model.familyBlendError)
-        XCTAssertTrue(model.familyBlendError?.contains("does not seem to exist") == true)
+        XCTAssertFalse(preferences.serverPlaylistJoined, "The refused join is taken back off the switch")
+        XCTAssertNotNil(model.serverPlaylistError)
+        XCTAssertTrue(model.serverPlaylistError?.contains("does not seem to exist") == true)
     }
 
     // MARK: - Mixtape limits
@@ -326,10 +326,10 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             if path == "/ping" {
                 return (try emptyResponse(for: request, statusCode: 200), Data(#"{"message":"pong","now":1}"#.utf8))
             }
-            if path == "/family-blend" {
+            if path == "/server-playlist" {
                 return (
                     try emptyResponse(for: request, statusCode: 201),
-                    Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                    Data(#"{"id":"user-id","inServerPlaylist":false}"#.utf8)
                 )
             }
             if request.httpMethod == "POST" {
@@ -386,10 +386,10 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             if path == "/ping" {
                 return (try emptyResponse(for: request, statusCode: 200), Data(#"{"message":"pong","now":1}"#.utf8))
             }
-            if path == "/family-blend" {
+            if path == "/server-playlist" {
                 return (
                     try emptyResponse(for: request, statusCode: 201),
-                    Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                    Data(#"{"id":"user-id","inServerPlaylist":false}"#.utf8)
                 )
             }
             if request.httpMethod == "POST" {
@@ -454,7 +454,7 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         XCTAssertFalse(model.canEditLimits)
     }
 
-    /// A ping that answers, a `/family-blend` that answers by method: POST
+    /// A ping that answers, a `/server-playlist` that answers by method: POST
     /// says the account is in, DELETE says it is out, reads say not yet.
     private func stubJoinableBackend() {
         URLProtocolStub.handler = { request in
@@ -472,12 +472,12 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
             case "POST":
                 return (
                     try emptyResponse(for: request, statusCode: 201),
-                    Data(#"{"id":"user-id","inFamilyBlend":true}"#.utf8)
+                    Data(#"{"id":"user-id","inServerPlaylist":true}"#.utf8)
                 )
             default:
                 return (
                     try emptyResponse(for: request, statusCode: 200),
-                    Data(#"{"id":"user-id","inFamilyBlend":false}"#.utf8)
+                    Data(#"{"id":"user-id","inServerPlaylist":false}"#.utf8)
                 )
             }
         }

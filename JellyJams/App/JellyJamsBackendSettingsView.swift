@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Jelly Jams Backend settings sheet: the server address and its
 /// registration, and beneath it the features the backend runs for this
-/// account — Family Blend, the mixtape limits and the user's bans.
+/// account — Server Playlist, the mixtape limits and the user's bans.
 ///
 /// The sheet speaks the backend's pattern: opening it pings the backend, and
 /// only while that ping answers do the feature switches take input. The
@@ -43,7 +43,7 @@ struct JellyJamsBackendSettingsView: View {
         NavigationStack(path: $navigator.path) {
             List {
                 addressSection
-                familyBlendSection
+                serverPlaylistSection
                 limitsSection
                 bansSection
             }
@@ -88,7 +88,7 @@ struct JellyJamsBackendSettingsView: View {
             Text("Connection")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("The Jelly Jams Backend is the companion service behind Jelly Jams' generated features — Mixtapes and Family Blend so far. Saving registers this sign-in with it: the backend checks your credentials against your server, then answers with the name ending its mixtapes carry.")
+                Text("The Jelly Jams Backend is a companion / sidecar service.\nCheck out the code and docs at github.com/PatrickTCB/JellyJams.")
                 if !session.isSignedIn {
                     Text("Registration checks your Jellyfin credentials with the backend, so there must be someone signed in.")
                         .foregroundStyle(.secondary)
@@ -154,7 +154,8 @@ struct JellyJamsBackendSettingsView: View {
                 let registration = try await backend.register(try currentJellyfinAccount())
                 preferences.recordRegistration(
                     address: backend.baseURL.absoluteString,
-                    suffix: registration.playlistSuffix
+                    suffix: registration.playlistSuffix,
+                    playlist: registration.serverPlaylist
                 )
                 saveStatus = .registered(suffix: registration.playlistSuffix)
                 await refresh()
@@ -181,19 +182,19 @@ struct JellyJamsBackendSettingsView: View {
         )
     }
 
-    // MARK: - Family Blend
+    // MARK: - Server Playlist
 
-    private var familyBlendSection: some View {
+    private var serverPlaylistSection: some View {
         Section {
-            Toggle("Join the Family Blend", isOn: familyBlendBinding)
-                .disabled(!model.canEditFamilyBlend)
+            Toggle("Join the Server Playlist: '\(preferences.serverPlaylist)'.", isOn: serverPlaylistBinding)
+                .disabled(!model.canEditServerPlaylist)
         } header: {
-            Text("Family Blend")
+            Text("\(preferences.serverPlaylist)")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("The backend weaves every opted-in account's recent plays and favourites — plus its own picks — into a shared “Family Blend” playlist, written into each member's library. Bans and repeat limits are respected.")
+                Text("The backend weaves every opted-in account's recent plays and favourites — plus its own picks — into a shared “\(preferences.serverPlaylist)” playlist, written into each member's library. Bans and repeat limits are respected.")
                 connectionLine
-                if let error = model.familyBlendError {
+                if let error = model.serverPlaylistError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                 }
@@ -203,12 +204,12 @@ struct JellyJamsBackendSettingsView: View {
 
     /// The toggle reads the remembered state and writes through the model,
     /// which asks the backend to agree before the memory keeps the change.
-    private var familyBlendBinding: Binding<Bool> {
+    private var serverPlaylistBinding: Binding<Bool> {
         Binding(
-            get: { preferences.familyBlendJoined },
+            get: { preferences.serverPlaylistJoined },
             set: { joined in
                 Task {
-                    await model.setFamilyBlend(
+                    await model.setServerPlaylist(
                         joined: joined,
                         backend: backendClient(),
                         userID: session.currentUser?.id,

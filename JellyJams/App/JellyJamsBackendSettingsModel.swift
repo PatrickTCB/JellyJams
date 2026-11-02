@@ -23,9 +23,9 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
     }
 
     @Published private(set) var connection: Connection = .checking
-    /// A refused Family Blend change, shown until the next refresh or retry.
-    @Published private(set) var familyBlendError: String?
-    @Published private(set) var isApplyingFamilyBlendChange = false
+    /// A refused Server Playlist change, shown until the next refresh or retry.
+    @Published private(set) var serverPlaylistError: String?
+    @Published private(set) var isApplyingServerPlaylistChange = false
     /// A refused limits save, shown until the next refresh or retry. The
     /// typed numbers stay put beside it — the address above keeps a failed
     /// registration's text for the same reason: fixing it should not mean
@@ -33,15 +33,15 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
     @Published private(set) var limitsError: String?
     @Published private(set) var isApplyingLimitsChange = false
 
-    /// Whether the Family Blend switch takes input now: the backend is
+    /// Whether the Server Playlist switch takes input now: the backend is
     /// answering, it knows this account, and no change of its own is
     /// already in flight.
-    var canEditFamilyBlend: Bool {
-        connection == .online && !isApplyingFamilyBlendChange
+    var canEditServerPlaylist: Bool {
+        connection == .online && !isApplyingServerPlaylistChange
     }
 
     /// Whether the mixtape-limit steppers and their Save take input now:
-    /// the same gate as the Family Blend switch, counting the limits' own
+    /// the same gate as the Server Playlist switch, counting the limits' own
     /// change in flight rather than the blend's.
     var canEditLimits: Bool {
         connection == .online && !isApplyingLimitsChange
@@ -49,7 +49,7 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
 
     /// The whole open-the-sheet ritual: ask the backend whether it lives,
     /// and when it does, ask it what it thinks of this account. The saved
-    /// ``PreferencesStore/familyBlendJoined`` speaks until the answers
+    /// ``PreferencesStore/serverPlaylistJoined`` speaks until the answers
     /// arrive — it is the app's memory of the last one.
     ///
     /// `backend` is the client built from the saved address, nil when there
@@ -63,7 +63,7 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
         registered: Bool,
         preferences: PreferencesStore
     ) async {
-        familyBlendError = nil
+        serverPlaylistError = nil
         limitsError = nil
         connection = .checking
 
@@ -91,37 +91,37 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
         }
 
         connection = .online
-        await refreshFamilyBlend(backend: backend, userID: userID, preferences: preferences)
+        await refreshServerPlaylist(backend: backend, userID: userID, preferences: preferences)
         await refreshLimits(backend: backend, userID: userID, preferences: preferences)
     }
 
-    /// Flip the Family Blend membership. The switch has already moved (this
+    /// Flip the Server Playlist membership. The switch has already moved (this
     /// is a toggle, and toggles should answer immediately), so the saved
     /// state is written first and withdrawn if the backend disagrees — the
     /// backend's own answer, not the tap, is what the memory keeps.
-    func setFamilyBlend(
+    func setServerPlaylist(
         joined: Bool,
         backend: JellyJamsBackend?,
         userID: String?,
         preferences: PreferencesStore
     ) async {
-        guard canEditFamilyBlend, let backend, let userID else { return }
+        guard canEditServerPlaylist, let backend, let userID else { return }
 
-        familyBlendError = nil
-        isApplyingFamilyBlendChange = true
-        preferences.familyBlendJoined = joined
-        defer { isApplyingFamilyBlendChange = false }
+        serverPlaylistError = nil
+        isApplyingServerPlaylistChange = true
+        preferences.serverPlaylistJoined = joined
+        defer { isApplyingServerPlaylistChange = false }
 
         do {
             let answer = joined
-                ? try await backend.joinFamilyBlend(userID: userID)
-                : try await backend.leaveFamilyBlend(userID: userID)
-            preferences.familyBlendJoined = answer.inFamilyBlend
+                ? try await backend.joinServerPlaylist(userID: userID)
+                : try await backend.leaveServerPlaylist(userID: userID)
+            preferences.serverPlaylistJoined = answer.inServerPlaylist
         } catch let error where error.isCancellation {
-            preferences.familyBlendJoined = !joined
+            preferences.serverPlaylistJoined = !joined
         } catch {
-            preferences.familyBlendJoined = !joined
-            familyBlendError = error.userFacingMessage
+            preferences.serverPlaylistJoined = !joined
+            serverPlaylistError = error.userFacingMessage
         }
     }
 
@@ -129,18 +129,18 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
     /// that answer replace the remembered one. A failure leaves the memory
     /// in place: the settings are still open and editable, and the switch
     /// shows the best truth the app has.
-    private func refreshFamilyBlend(
+    private func refreshServerPlaylist(
         backend: JellyJamsBackend,
         userID: String,
         preferences: PreferencesStore
     ) async {
         do {
-            let answer = try await backend.familyBlendStatus(userID: userID)
-            preferences.familyBlendJoined = answer.inFamilyBlend
+            let answer = try await backend.serverPlaylistStatus(userID: userID)
+            preferences.serverPlaylistJoined = answer.inServerPlaylist
         } catch let error where error.isCancellation {
             return
         } catch {
-            familyBlendError = error.userFacingMessage
+            serverPlaylistError = error.userFacingMessage
         }
     }
 
