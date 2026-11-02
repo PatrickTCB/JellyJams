@@ -88,7 +88,7 @@ struct JellyJamsBackendSettingsView: View {
             Text("Connection")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("The Jelly Jams Backend is a companion / sidecar service.\nCheck out the code and docs at github.com/PatrickTCB/JellyJams.")
+                Text("The Jelly Jams Backend is a companion / sidecar service. Check out the code and docs at github.com/PatrickTCB/JellyJamsBackend.")
                 if !session.isSignedIn {
                     Text("Registration checks your Jellyfin credentials with the backend, so there must be someone signed in.")
                         .foregroundStyle(.secondary)
