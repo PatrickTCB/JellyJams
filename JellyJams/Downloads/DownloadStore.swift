@@ -47,8 +47,9 @@ import JellyfinAPI
 /// Nothing in the browse path (`groups`, `tracks`, `localURL`, `localArtworkURL`)
 /// touches the network or needs a signed-in session: the manifest holds every
 /// byte of metadata those screens render. It is rewritten after every change, so
-/// downloads survive relaunches, and deliberately survives sign-out too —
-/// offline listening is the point.
+/// downloads survive relaunches. They do not survive a sign-out: leaving the
+/// server is a clean break back to the fresh-install state, and ``removeAll()``
+/// — files, artwork, manifest and all — is part of the reset it runs.
 ///
 /// Transfers survive the app too. On iOS they run on a background session:
 /// they continue while the app is suspended, and the system finishes them even

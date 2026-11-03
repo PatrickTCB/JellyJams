@@ -14,7 +14,9 @@ struct JellyfinAccount: Sendable, Equatable {
     let jellyfinHost: URL
 }
 
-/// The backend's answer to a successful `POST /register`.
+/// The backend's answer to `POST /register` — and to its undo,
+/// `DELETE /delete-me`, which answers the same shape with `saved` false to
+/// say the account is off the books.
 ///
 /// The field names are capitalised because that is how the backend writes
 /// them; the coding keys translate. 
@@ -346,17 +348,36 @@ final class JellyJamsBackend: Sendable {
     /// storing anything, so a failure here means the sign-in was rejected
     /// or the backend could not reach the server — never a silent half-save.
     func register(_ account: JellyfinAccount) async throws -> BackendRegistration {
-        let data = try await perform(
-            .post,
-            path: "register",
-            queryItems: [
-                URLQueryItem(name: "userName", value: account.userName),
-                URLQueryItem(name: "userID", value: account.userID),
-                URLQueryItem(name: "userToken", value: account.userToken),
-                URLQueryItem(name: "jellyfinHost", value: account.jellyfinHost.absoluteString),
-            ]
-        )
+        let data = try await perform(.post, path: "register", queryItems: accountQuery(account))
         return try JSONDecoder().decode(BackendRegistration.self, from: data)
+    }
+
+    /// `DELETE /delete-me` — the undo of ``register(_:)``: hand the same
+    /// sign-in back and the backend deletes the account, along with
+    /// everything it holds for it — the tape recipes, the bans, the Server
+    /// Playlist membership. The credentials ride along because the backend
+    /// checks them against the Jellyfin server before deleting anything:
+    /// only the account's own sign-in can take it off the books.
+    ///
+    /// The answer is the registration's own shape with `saved` false, and an
+    /// account the backend never had answers the same way — the state asked
+    /// for already holds, so a repeated sign-out reads as the success it is
+    /// rather than a failure.
+    func deleteAccount(_ account: JellyfinAccount) async throws -> BackendRegistration {
+        let data = try await perform(.delete, path: "delete-me", queryItems: accountQuery(account))
+        return try JSONDecoder().decode(BackendRegistration.self, from: data)
+    }
+
+    /// The four credentials both account endpoints ride with — the backend
+    /// checks them against the Jellyfin server before it saves, or deletes,
+    /// anything.
+    private func accountQuery(_ account: JellyfinAccount) -> [URLQueryItem] {
+        [
+            URLQueryItem(name: "userName", value: account.userName),
+            URLQueryItem(name: "userID", value: account.userID),
+            URLQueryItem(name: "userToken", value: account.userToken),
+            URLQueryItem(name: "jellyfinHost", value: account.jellyfinHost.absoluteString),
+        ]
     }
 
     /// `GET /ping` — is this backend instance awake?

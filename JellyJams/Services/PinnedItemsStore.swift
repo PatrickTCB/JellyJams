@@ -2,10 +2,12 @@ import Foundation
 
 /// The items the user has pinned to the home screen.
 ///
-/// Pins outlive a session and are persisted to `UserDefaults`, keyed by the
-/// account they belong to: an id only means something on the server that
-/// issued it, so switching servers must not resolve one server's pins against
-/// another's library.
+/// Pins are persisted to `UserDefaults`, keyed by the account they belong
+/// to: an id only means something on the server that issued it, so one
+/// server's pins must never be resolved against another's library. They do
+/// not outlive a sign-out, though — leaving a server is a clean break back
+/// to the fresh-install state, and ``forgetEverything()`` takes every
+/// account's pins with the rest of what the app stored.
 ///
 /// A pinned item can disappear at any time — the user deletes an album,
 /// playlist or artist on the Jellyfin server and this app finds out only when
@@ -115,9 +117,10 @@ final class PinnedItemsStore: ObservableObject {
     }
 
     /// Points the store at an account, publishing that account's pins. Pass
-    /// `nil` on sign-out; nothing is deleted, so signing back in restores it.
-    /// The pins come back as unresolved entries, shown from their stored names
-    /// until the next refresh resolves them.
+    /// `nil` to detach — this call deletes nothing on its own; deletion is
+    /// ``forgetEverything()``'s job, which a server sign-out runs. Pins a
+    /// re-attached account still has come back as unresolved entries, shown
+    /// from their stored names until the next refresh resolves them.
     func configure(accountKey: String?) {
         guard accountKey != self.accountKey else { return }
         self.accountKey = accountKey
@@ -125,6 +128,20 @@ final class PinnedItemsStore: ObservableObject {
         entries = pins.map { Entry(pin: $0, state: .unresolved) }
         errorMessage = nil
         isLoading = false
+    }
+
+    /// Forgets every account's pins and removes the persisted record — the
+    /// clean break a server sign-out makes. The keying keeps one account's
+    /// pins apart from another's while a session lives; the reset takes the
+    /// whole set, so no sign-in finds anything to restore.
+    func forgetEverything() {
+        stored = [:]
+        pins = []
+        entries = []
+        resolvingPinId = nil
+        isLoading = false
+        errorMessage = nil
+        defaults.removeObject(forKey: Key.storage)
     }
 
     var isFull: Bool { pins.count >= Self.maxPins }

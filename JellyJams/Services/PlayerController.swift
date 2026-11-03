@@ -213,6 +213,17 @@ final class PlayerController: ObservableObject {
 
     private let playbackStateKey = "jellyjams.playbackState"
 
+    /// Forgets what the player persists — the resume point on iOS, the
+    /// remembered volume on macOS — returning both to what a fresh install
+    /// reads. The queue itself is ``clearQueue()``'s business, which the
+    /// sign-out wiring runs alongside this.
+    func forgetEverything() {
+        UserDefaults.standard.removeObject(forKey: playbackStateKey)
+        #if os(macOS)
+        volume = 1
+        #endif
+    }
+
     func savePlaybackState() {
         #if os(iOS)
         guard hasQueue else { return }

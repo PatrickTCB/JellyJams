@@ -114,9 +114,16 @@ final class AppServices {
     /// values to wire for rather than reading them off `session`, which during
     /// a `@Published` emission still holds the old value; the signed-in state
     /// is just that both halves are present.
+    ///
+    /// A transition *from* signed-in is a sign-out — the settings button's or
+    /// the account menu's — as distinct from launching with nobody signed in,
+    /// which the first wiring at process start also is. Only the real thing
+    /// runs ``forgetEverything()``: the launch wiring must find the stored
+    /// state standing, or every relaunch would be a reset.
     private func wire(client: JellyfinService?, user: SessionStore.StoredUser?) {
         let signedIn = client != nil && user != nil
         guard lastWiredSignedIn != signedIn else { return }
+        let isSigningOut = lastWiredSignedIn == true && !signedIn
         lastWiredSignedIn = signedIn
 
         player.configure(downloads: downloads)
@@ -138,6 +145,9 @@ final class AppServices {
             }
         } else {
             player.clearQueue()
+            if isSigningOut {
+                forgetEverything()
+            }
             player.configure(client: nil)
             downloads.configure(client: nil)
             playlistStore.configure(client: nil)
@@ -145,6 +155,28 @@ final class AppServices {
             pinnedItems.configure(accountKey: nil)
             libraryCache.clear()
         }
+    }
+
+    /// What makes a sign-out indistinguishable from a fresh install: every
+    /// store forgets what it persisted — the preferences, every account's
+    /// pins, the playback resume point and the volume, the downloads and
+    /// their manifest — the device takes a new identity, and the artwork
+    /// caches are dropped. The in-memory state the sign-out wiring already
+    /// resets (the queue, the bans, the library cache, the playlist and
+    /// favourite caches) is not repeated here.
+    ///
+    /// The Jelly Jams Backend is deliberately not asked anything: a server
+    /// sign-out is a local affair. The account there lives on, with
+    /// everything it holds, until the backend's own Sign Out deletes it —
+    /// this app simply stops remembering it exists.
+    private func forgetEverything() {
+        preferences.forgetEverything()
+        pinnedItems.forgetEverything()
+        player.forgetEverything()
+        downloads.removeAll()
+        session.regenerateDeviceIdentity()
+        ImageCache.shared.removeAll()
+        ArtworkLoader.urlCache.removeAllCachedResponses()
     }
 
     /// The key a set of pins is stored under: item ids belong to one server,

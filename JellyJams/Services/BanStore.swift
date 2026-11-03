@@ -192,12 +192,17 @@ final class BanStore: ObservableObject {
         deviceInfo: DeviceInfo,
         sessionConfiguration: URLSessionConfiguration? = nil
     ) {
-        // A different account is a different set of bans — or none. The
-        // address alone changing must not clear the list: the settings
-        // field edits it one keystroke at a time, and the bans screen may
-        // be open behind it. Retiring the generation strands any read the
-        // old account's screen had in flight.
-        if userID != self.userID {
+        // A different account is a different set of bans — or none, and so
+        // is a lost registration: that is a backend sign-out, which deleted
+        // the account and its bans server-side, and a list kept in memory
+        // would answer for whichever backend the user registers with next.
+        // The address alone changing must not clear the list, though: the
+        // settings field edits it one keystroke at a time, and the bans
+        // screen may be open behind it — which is also why this watches the
+        // registration rather than the parsed URL, which comes and goes
+        // mid-typing. Retiring the generation strands any read the old
+        // state had in flight.
+        if userID != self.userID || (!registered && backendURL != nil) {
             loadGeneration = UUID()
             clearLists()
         }

@@ -30,12 +30,14 @@ struct DefaultPlaybackSetting: Codable, Equatable, Sendable {
     var repeatMode: RepeatMode
 }
 
-/// Settings the user controls that outlive a session, persisted to
-/// `UserDefaults`.
+/// Settings the user controls, persisted to `UserDefaults`.
 ///
-/// Separate from ``SessionStore`` on purpose: these survive signing out and
-/// belong to the person using the app, not to the server they happen to be
-/// signed in to.
+/// Separate from ``SessionStore``, but nothing here outlives a sign-out:
+/// leaving a server is a clean break back to the fresh-install state, so
+/// ``forgetEverything()`` returns every field to its default. Everything the
+/// Jelly Jams Backend relationship recorded is part of that, and
+/// ``forgetBackend()`` covers the backend's share on its own for the
+/// backend's own Sign Out.
 @MainActor
 final class PreferencesStore: ObservableObject {
     private enum Key {
@@ -49,6 +51,17 @@ final class PreferencesStore: ObservableObject {
         static let sameArtistLimit = "sameArtistLimit"
         static let defaultPlayback = "defaultPlayback"
         static let infiniteQueueEnabled = "infiniteQueueEnabled"
+    }
+
+    /// The whole reset a Jellyfin server sign-out performs: every setting
+    /// returns to the state a fresh install reads before anyone has touched
+    /// anything. The backend's share goes through ``forgetBackend()`` —
+    /// locally only; a server sign-out tells the backend nothing.
+    func forgetEverything() {
+        forgetBackend()
+        showsSimilarItems = true
+        showsCompleteAlbumsOnly = true
+        defaultPlayback = nil
     }
 
     /// Whether album and artist screens look up similar music.
@@ -83,7 +96,7 @@ final class PreferencesStore: ObservableObject {
 
     /// The name ending that marks a playlist as a mixtape the backend built,
     /// as the backend itself reported it. Never typed by hand — it arrives
-    /// through ``recordRegistration(address:suffix:)`` — because the backend
+    /// through ``recordRegistration(address:suffix:playlist:)`` — because the backend
     /// chooses how its own output is named, and an app that guessed would
     /// split the library on a rule the generator does not follow.
     ///
@@ -101,6 +114,31 @@ final class PreferencesStore: ObservableObject {
         jellyJamsBackendAddress = address
         mixtapeSuffix = suffix
         serverPlaylist = playlist
+    }
+
+    /// The undo of ``recordRegistration(address:suffix:playlist:)``, and
+    /// then some: a confirmed `DELETE /delete-me` is a clean break with the
+    /// backend. Everything the app learned through the relationship goes —
+    /// the address, the registration, the Server Playlist's name and
+    /// membership, the limits (back to the backend's own defaults, matching
+    /// what it now deletes), and the Infinite Queue switch — so migrating
+    /// to a different backend starts from the same blank slate this one
+    /// did, with nothing carried over behind its back.
+    ///
+    /// The Jellyfin sign-in is untouched: this is the backend's own Sign
+    /// Out, not the server's — and the server's is not this one's. Signing
+    /// out of a Jellyfin server never calls the backend; it forgets
+    /// everything locally (``forgetEverything()``, which subsumes this) and
+    /// leaves the backend account standing until its own Sign Out deletes
+    /// it.
+    func forgetBackend() {
+        jellyJamsBackendAddress = ""
+        mixtapeSuffix = ""
+        serverPlaylist = ""
+        serverPlaylistJoined = false
+        sameAlbumLimit = Self.defaultSameAlbumLimit
+        sameArtistLimit = Self.defaultSameArtistLimit
+        infiniteQueueEnabled = false
     }
 
     /// Whether this account is in the backend's Server Playlist, as last known:
@@ -165,6 +203,12 @@ final class PreferencesStore: ObservableObject {
 
     private let defaults: UserDefaults
 
+    /// The repeat limits the backend answers with for an account that never
+    /// set any — what the memory starts at, and what it returns to when a
+    /// sign-out forgets the backend entirely.
+    private static let defaultSameAlbumLimit = 3
+    private static let defaultSameArtistLimit = 5
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         // `object(forKey:)` rather than `bool(forKey:)`: the latter reports
@@ -175,8 +219,8 @@ final class PreferencesStore: ObservableObject {
         mixtapeSuffix = defaults.string(forKey: Key.mixtapeSuffix) ?? ""
         serverPlaylistJoined = defaults.object(forKey: Key.serverPlaylistJoined) as? Bool ?? false
         serverPlaylist = defaults.object(forKey: Key.serverPlaylist) as? String ?? ""
-        sameAlbumLimit = defaults.object(forKey: Key.sameAlbumLimit) as? Int ?? 3
-        sameArtistLimit = defaults.object(forKey: Key.sameArtistLimit) as? Int ?? 5
+        sameAlbumLimit = defaults.object(forKey: Key.sameAlbumLimit) as? Int ?? Self.defaultSameAlbumLimit
+        sameArtistLimit = defaults.object(forKey: Key.sameArtistLimit) as? Int ?? Self.defaultSameArtistLimit
         defaultPlayback = defaults.data(forKey: Key.defaultPlayback).flatMap {
             try? JSONDecoder().decode(DefaultPlaybackSetting.self, from: $0)
         }
