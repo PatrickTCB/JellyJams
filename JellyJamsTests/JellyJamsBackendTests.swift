@@ -16,7 +16,7 @@ final class JellyJamsBackendTests: XCTestCase {
     }
 
     private static let registrationPayload = Data(
-        #"{"User":"pat","Created":true,"Saved":true,"PlaylistSuffix":"_automatic"}"#.utf8
+        #"{"User":"pat","Created":true,"Saved":true,"PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8
     )
 
     private func successResponse(statusCode: Int = 201) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
@@ -76,6 +76,7 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertTrue(registration.created)
         XCTAssertTrue(registration.saved)
         XCTAssertEqual(registration.playlistSuffix, "_automatic")
+        XCTAssertEqual(registration.serverPlaylist, "Server Mix")
     }
 
     /// A known user gets 200 ("already registered"), a new one 201. Both are
@@ -139,6 +140,56 @@ final class JellyJamsBackendTests: XCTestCase {
         }
     }
 
+    // MARK: - Sign out
+
+    /// `DELETE /delete-me` rides with the same four credentials the
+    /// registration carries — the backend checks them against the Jellyfin
+    /// server before deleting anything — and answers the registration's own
+    /// shape with `Saved: false`: the account is off the books. A drift here
+    /// is a 422 nobody sees until Sign Out quietly stops working.
+    func testSignOutDeletesWithTheCredentialsAsQueryParameters() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"User":"pat","Created":false,"Saved":false,"PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().deleteAccount(account)
+
+        XCTAssertFalse(answer.saved, "The account is no longer on the books")
+        XCTAssertFalse(answer.created)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/delete-me")
+        XCTAssertEqual(request.value(for: "userName"), "pat")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "userToken"), "access-token")
+        XCTAssertEqual(request.value(for: "jellyfinHost"), "http://192.168.0.10:8096")
+    }
+
+    /// Credentials the backend cannot validate answer 401 with its own words,
+    /// and nothing was deleted — the refusal has to reach the sheet rather
+    /// than read as a signed-out account.
+    func testASignOutWithRefusedCredentialsSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User credentials submitted for pat could not be validated"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().deleteAccount(account)
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User credentials submitted for pat could not be validated"))
+        }
+    }
+
     // MARK: - Ping
 
     /// The settings sheet gates everything on a 200 from /ping. The body is
@@ -175,9 +226,8 @@ final class JellyJamsBackendTests: XCTestCase {
 
     // MARK: - Server Playlist
 
-    /// The blend endpoints insist on an `itemID` they never read — copied
-    /// from `/ban`'s signature — so the client sends the empty one FastAPI
-    /// accepts, and this is where dropping it would show up.
+    /// The blend endpoints key off `userID` alone, and the answer arrives
+    /// lower-cased-first — unlike the registration's capitalised shape.
     func testServerPlaylistStatusReadsTheLowerCasedAnswer() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
@@ -199,7 +249,6 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertEqual(request.method, "GET")
         XCTAssertEqual(request.path, "/server-playlist")
         XCTAssertEqual(request.value(for: "userID"), "user-id")
-        XCTAssertEqual(request.value(for: "itemID"), "")
     }
 
     func testJoiningTheBlendIsAPostTheBackendConfirms() async throws {

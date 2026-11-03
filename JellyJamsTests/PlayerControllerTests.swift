@@ -3,6 +3,27 @@ import XCTest
 
 @MainActor
 final class PlayerControllerTests: XCTestCase {
+    #if os(iOS)
+    /// The resume point goes with everything else a server sign-out forgets:
+    /// a fresh install has nothing to resume.
+    func testForgettingEverythingDropsTheSavedPlaybackState() {
+        let key = "jellyjams.playbackState"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.set(Data("stale".utf8), forKey: key)
+
+        PlayerController().forgetEverything()
+
+        XCTAssertNil(UserDefaults.standard.object(forKey: key))
+    }
+    #endif
+
     func testDuplicateTracksKeepDistinctQueueIdentity() {
         let player = PlayerController()
         let track = TestFixtures.item(id: "duplicate-track")

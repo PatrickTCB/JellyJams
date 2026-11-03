@@ -85,14 +85,75 @@ final class PreferencesStoreTests: XCTestCase {
     /// feature runs on them from then on.
     func testRegistrationSurvivesRelaunch() {
         let store = PreferencesStore(defaults: defaults)
-        store.recordRegistration(address: "https://backend.example.net", suffix: "_jams")
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_jams", playlist: "Server Mix")
 
         let reloaded = PreferencesStore(defaults: defaults)
         XCTAssertEqual(reloaded.jellyJamsBackendAddress, "https://backend.example.net")
         XCTAssertEqual(reloaded.mixtapeSuffix, "_jams")
+        XCTAssertEqual(reloaded.serverPlaylist, "Server Mix")
         XCTAssertTrue(reloaded.isMixtapesActive)
         XCTAssertEqual(reloaded.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_jams"))
         XCTAssertEqual(reloaded.playlistNameFilter(for: .playlists), .notEndsWith("_jams"))
+    }
+
+    /// A confirmed sign-out is a clean break: the address, the registration,
+    /// the Server Playlist, the limits and the Infinite Queue switch all go,
+    /// and they stay gone across a relaunch — the next backend starts from
+    /// the same blank slate this one did, with nothing carried over behind
+    /// its back. The app's other preferences are none of its business.
+    func testSigningOutForgetsTheWholeBackend() {
+        let store = PreferencesStore(defaults: defaults)
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic", playlist: "Server Mix")
+        store.serverPlaylistJoined = true
+        store.sameAlbumLimit = 7
+        store.sameArtistLimit = 2
+        store.infiniteQueueEnabled = true
+        store.showsSimilarItems = false
+
+        store.forgetBackend()
+
+        XCTAssertFalse(store.isMixtapesActive)
+        XCTAssertNil(store.playlistNameFilter(for: .mixtapePlaylists))
+        XCTAssertNil(store.playlistNameFilter(for: .playlists))
+
+        let reloaded = PreferencesStore(defaults: defaults)
+        XCTAssertEqual(reloaded.jellyJamsBackendAddress, "")
+        XCTAssertEqual(reloaded.mixtapeSuffix, "")
+        XCTAssertEqual(reloaded.serverPlaylist, "")
+        XCTAssertFalse(reloaded.serverPlaylistJoined)
+        XCTAssertFalse(reloaded.isMixtapesActive)
+        XCTAssertEqual(reloaded.sameAlbumLimit, 3, "The limits return to the backend's defaults")
+        XCTAssertEqual(reloaded.sameArtistLimit, 5)
+        XCTAssertFalse(reloaded.infiniteQueueEnabled)
+        XCTAssertFalse(reloaded.showsSimilarItems, "A preference that is not the backend's survives the break")
+    }
+
+    /// The whole reset a server sign-out performs: not just the backend's
+    /// share, but every setting back to what a fresh install reads before
+    /// anyone has touched anything — persisted, so a relaunch agrees.
+    func testForgettingEverythingRestoresTheFreshInstallState() {
+        let store = PreferencesStore(defaults: defaults)
+        store.showsSimilarItems = false
+        store.showsCompleteAlbumsOnly = false
+        store.defaultPlayback = DefaultPlaybackSetting(
+            kind: .song,
+            itemId: "song-1",
+            title: "Renegade",
+            shuffle: true,
+            repeatMode: .repeatOne
+        )
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic", playlist: "Server Mix")
+        store.infiniteQueueEnabled = true
+
+        store.forgetEverything()
+
+        let reloaded = PreferencesStore(defaults: defaults)
+        XCTAssertTrue(reloaded.showsSimilarItems)
+        XCTAssertTrue(reloaded.showsCompleteAlbumsOnly)
+        XCTAssertNil(reloaded.defaultPlayback)
+        XCTAssertEqual(reloaded.jellyJamsBackendAddress, "")
+        XCTAssertFalse(reloaded.isMixtapesActive)
+        XCTAssertFalse(reloaded.infiniteQueueEnabled)
     }
 
     /// An empty ending matches every name, which would hand the whole playlist
@@ -101,7 +162,7 @@ final class PreferencesStoreTests: XCTestCase {
     func testABlankSuffixLeavesMixtapesInactive() {
         for blank in ["", "   "] {
             let store = PreferencesStore(defaults: defaults)
-            store.recordRegistration(address: "https://backend.example.net", suffix: blank)
+            store.recordRegistration(address: "https://backend.example.net", suffix: blank, playlist: "Server Mix")
 
             XCTAssertFalse(store.isMixtapesActive, "\(blank.debugDescription)")
             XCTAssertNil(store.playlistNameFilter(for: .mixtapePlaylists))
@@ -114,7 +175,7 @@ final class PreferencesStoreTests: XCTestCase {
     /// "Add to Playlist" menu would make it unreachable rather than tidier.
     func testMixtapesSplitsOnlyTheTwoPlaylistLists() {
         let store = PreferencesStore(defaults: defaults)
-        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic")
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic", playlist: "Server Mix")
 
         XCTAssertEqual(store.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_automatic"))
         XCTAssertEqual(store.playlistNameFilter(for: .playlists), .notEndsWith("_automatic"))
@@ -130,7 +191,7 @@ final class PreferencesStoreTests: XCTestCase {
     /// backend setting must not decide what counts as a mixtape.
     func testMixtapeSuffixIsTrimmedBeforeItIsMatched() {
         let store = PreferencesStore(defaults: defaults)
-        store.recordRegistration(address: "https://backend.example.net", suffix: "  _automatic  ")
+        store.recordRegistration(address: "https://backend.example.net", suffix: "  _automatic  ", playlist: "Server Mix")
 
         XCTAssertEqual(store.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_automatic"))
     }
@@ -223,7 +284,7 @@ final class PreferencesStoreTests: XCTestCase {
         let off = PreferencesStore(defaults: defaults)
 
         let store = PreferencesStore(defaults: defaults)
-        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic")
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic", playlist: "Server Mix")
 
         let mixtape = TestFixtures.item(id: "mixtape", name: "Chill_automatic", type: .playlist)
         let playlist = TestFixtures.item(id: "playlist", name: "Road Trip", type: .playlist)
@@ -238,7 +299,7 @@ final class PreferencesStoreTests: XCTestCase {
     func testMixtapeNamesDropTheMatchedEnding() {
         let off = PreferencesStore(defaults: defaults)
         let store = PreferencesStore(defaults: defaults)
-        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic")
+        store.recordRegistration(address: "https://backend.example.net", suffix: "_automatic", playlist: "Server Mix")
         let mixtape = TestFixtures.item(id: "mixtape", name: "Chill_automatic", type: .playlist)
 
         XCTAssertEqual(store.mixtapeName(for: mixtape), "Chill")

@@ -364,6 +364,31 @@ final class BanStoreTests: XCTestCase {
         XCTAssertTrue(store.canBan)
     }
 
+    /// A backend sign-out deletes the account and its bans server-side, so
+    /// the memory must not survive it either: the next backend the user
+    /// registers with gets a blank list until it says otherwise, rather
+    /// than the previous backend's answers.
+    func testLosingTheRegistrationDropsTheBans() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), bansPayload)
+        }
+
+        let store = configuredStore()
+        await store.refreshBans()
+        XCTAssertTrue(store.hasBans)
+
+        store.configure(
+            userID: "user-id",
+            address: "https://backend.example.com",
+            registered: false,
+            deviceInfo: TestFixtures.deviceInfo,
+            sessionConfiguration: stubbedConfiguration
+        )
+
+        XCTAssertFalse(store.hasBans)
+        XCTAssertFalse(store.canBan)
+    }
+
     /// List writes from an unconfigured store say so rather than reaching
     /// at nothing.
     func testListWritesFromAnUnconfiguredStoreSaySo() async throws {

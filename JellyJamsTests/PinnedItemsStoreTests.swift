@@ -172,7 +172,7 @@ final class PinnedItemsStoreTests: XCTestCase {
         XCTAssertEqual(makeStore("https://two.example/jellyfin#user-2").pins.map(\.itemId), ["album-2"])
     }
 
-    func testSigningOutHidesPinsWithoutDeletingThem() {
+    func testDetachingHidesPinsWithoutDeletingThem() {
         let store = makeStore()
         store.pin(album("album-1"), kind: .album)
 
@@ -181,6 +181,24 @@ final class PinnedItemsStoreTests: XCTestCase {
 
         store.configure(accountKey: account)
         XCTAssertEqual(store.pins.map(\.itemId), ["album-1"])
+    }
+
+    /// The clean break a server sign-out makes: every account's pins go —
+    /// not just the attached account's — and the persisted record goes with
+    /// them, so no relaunch and no sign-in finds anything to restore.
+    func testForgettingEverythingDropsEveryAccountsPins() {
+        makeStore("https://one.example/jellyfin#user-1").pin(album("album-1"), kind: .album)
+        let second = makeStore("https://two.example/jellyfin#user-2")
+        second.pin(album("album-2"), kind: .album)
+
+        second.forgetEverything()
+
+        XCTAssertTrue(second.pins.isEmpty)
+        XCTAssertTrue(
+            makeStore("https://one.example/jellyfin#user-1").pins.isEmpty,
+            "The other account's pins are gone too"
+        )
+        XCTAssertNil(defaults.data(forKey: "jellyjams.pinnedItems"))
     }
 
     // MARK: - Reordering

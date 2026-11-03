@@ -40,5 +40,17 @@ final class PlayerVolumeTests: XCTestCase {
 
         XCTAssertEqual(PlayerController().volume, 0.4, accuracy: 0.0001)
     }
+
+    /// The sign-out reset takes the remembered volume too: a fresh install
+    /// starts at full, so a signed-out app reads the same.
+    func testForgettingEverythingReturnsTheVolumeToTheDefault() {
+        let player = PlayerController()
+        player.volume = 0.4
+
+        player.forgetEverything()
+
+        XCTAssertEqual(player.volume, 1)
+        XCTAssertEqual(PlayerController().volume, 1, "The next launch reads the default too")
+    }
 }
 #endif
