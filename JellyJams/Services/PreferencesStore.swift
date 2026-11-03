@@ -117,20 +117,21 @@ final class PreferencesStore: ObservableObject {
     }
 
     /// The undo of ``recordRegistration(address:suffix:playlist:)``, and
-    /// then some: a confirmed `DELETE /delete-me` is a clean break with the
-    /// backend. Everything the app learned through the relationship goes —
-    /// the address, the registration, the Server Playlist's name and
-    /// membership, the limits (back to the backend's own defaults, matching
-    /// what it now deletes), and the Infinite Queue switch — so migrating
-    /// to a different backend starts from the same blank slate this one
-    /// did, with nothing carried over behind its back.
+    /// then some: a clean break with the backend. Everything the app
+    /// learned through the relationship goes — the address, the
+    /// registration, the Server Playlist's name and membership, the limits
+    /// (back to the defaults a fresh install reads), and the Infinite
+    /// Queue switch — so migrating to a different backend starts from the
+    /// same blank slate this one did, with nothing carried over behind its
+    /// back.
     ///
-    /// The Jellyfin sign-in is untouched: this is the backend's own Sign
-    /// Out, not the server's — and the server's is not this one's. Signing
-    /// out of a Jellyfin server never calls the backend; it forgets
-    /// everything locally (``forgetEverything()``, which subsumes this) and
-    /// leaves the backend account standing until its own Sign Out deletes
-    /// it.
+    /// Forgetting is local; the backend hears nothing from this call. Its
+    /// account — bans, tape recipes, membership and all — stands until a
+    /// backend Sign Out confirmed with the deletion checkbox rides
+    /// `DELETE /delete-me` and takes it off the books, or nothing ever
+    /// does. The Jellyfin sign-in is untouched either way, and the
+    /// server's own sign-out runs this as part of ``forgetEverything()``
+    /// without calling the backend either.
     func forgetBackend() {
         jellyJamsBackendAddress = ""
         mixtapeSuffix = ""

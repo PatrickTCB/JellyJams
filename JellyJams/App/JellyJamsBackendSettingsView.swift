@@ -14,14 +14,16 @@ import SwiftUI
 /// Registration is the gate everything else sits behind — saving sends the
 /// current Jellyfin sign-in to `/register`, which checks it against the
 /// server and answers with the name ending the backend's mixtapes carry, the
-/// rule that turns the Mixtapes section on. Sign Out is the same seam in
-/// reverse, and a clean break: the sign-in rides a `DELETE /delete-me`, and
-/// once the backend confirms, the app forgets the backend entirely — every
-/// feature stands down and the address goes with them, so a different
-/// backend can take its place from a blank slate. The Jellyfin sign-in is
-/// untouched by this button; the server's own sign-out is the mirror image —
-/// it never calls the backend, and forgets everything the app stored, this
-/// relationship included.
+/// rule that turns the Mixtapes section on. Sign Out is a clean break, and
+/// local by default: the app forgets the backend entirely — every feature
+/// stands down and the address goes with them, so a different backend can
+/// take its place from a blank slate — without owing the backend a request,
+/// which is what lets a dead one be left behind. Its confirmation carries
+/// one checkbox, off unless asked for: also ride `DELETE /delete-me`, and
+/// the backend deletes the account and everything it holds before anything
+/// is forgotten. The Jellyfin sign-in is untouched by this button; the
+/// server's own sign-out forgets everything the app stored, this
+/// relationship included, and never calls the backend.
 struct JellyJamsBackendSettingsView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var preferences: PreferencesStore
@@ -36,9 +38,14 @@ struct JellyJamsBackendSettingsView: View {
     @StateObject private var navigator = LibraryNavigator()
     @State private var saveStatus: SaveStatus?
     /// Whether the Sign Out confirmation is up. The button itself only asks;
-    /// the dialog's destructive action is what runs ``signOut()`` — deleting
-    /// the backend account is not a one-tap affair.
+    /// the alert's destructive action is what runs ``signOut()`` — leaving
+    /// the backend is not a one-tap affair.
     @State private var isConfirmingSignOut = false
+    /// The confirmation's checkbox: whether signing out also asks the
+    /// backend to delete the account (`DELETE /delete-me`) rather than only
+    /// forgetting it locally. Reset to off at every presentation —
+    /// deleting the account is an explicit extra, never a default.
+    @State private var alsoDeletesAccount = false
 
     /// Where the last Save or Sign Out got to. Transient by design: a retry
     /// is a fresh request, and the standing truth ("registered with ending
@@ -47,8 +54,12 @@ struct JellyJamsBackendSettingsView: View {
     private enum SaveStatus {
         case saving
         case registered(suffix: String)
+        /// The deletion the confirmation's checkbox asked for is in flight.
         case signingOut
+        /// The app forgot the backend; the account there still stands.
         case signedOut
+        /// The backend deleted the account, and the app forgot the backend.
+        case accountDeleted
         case failed(String)
     }
 
@@ -69,14 +80,16 @@ struct JellyJamsBackendSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .confirmationDialog(
-                "Sign out of the Jelly Jams Backend?",
-                isPresented: $isConfirmingSignOut,
-                titleVisibility: .visible
-            ) {
+            .alert("Sign out of the Jelly Jams Backend?", isPresented: $isConfirmingSignOut) {
+                Toggle("Also delete my account on the backend", isOn: $alsoDeletesAccount)
                 Button("Sign Out", role: .destructive) { signOut() }
+                Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The backend deletes your account and everything it holds for it — your mixtape recipes, your bans, and your place in the Server Playlist — and the app forgets the backend too, its address and settings included, ready for a different one. Your Jellyfin sign-in is untouched, and playlists already in your library stay put.")
+                if alsoDeletesAccount {
+                    Text("The backend deletes your account and everything it holds for it — your mixtape recipes, your bans, and your place in the Server Playlist — and then the app forgets the backend. Playlists already in your library stay put, and your Jellyfin sign-in is untouched.")
+                } else {
+                    Text("The app forgets this backend — its address, your registration, limits, and Server Playlist membership. The account on the backend is left standing, with everything it holds. Your Jellyfin sign-in is untouched either way.")
+                }
             }
             .environmentObject(navigator)
             .libraryNavigationDestinations(navigator: navigator)
@@ -107,14 +120,17 @@ struct JellyJamsBackendSettingsView: View {
             Button("Save") { save() }
                     .disabled(!canSave)
 
-            Button("Sign Out", role: .destructive) { isConfirmingSignOut = true }
+            Button("Sign Out", role: .destructive) {
+                alsoDeletesAccount = false
+                isConfirmingSignOut = true
+            }
                 .disabled(!canSignOut)
             
         } header: {
             Text("Connection")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
-                Text("The Jelly Jams Backend is a companion / sidecar service. Check out the code and docs at github.com/PatrickTCB/JellyJamsBackend.")
+                Text("The Jelly Jams Backend is a companion / sidecar service. Check out the code and docs at [github.com/PatrickTCB/JellyJamsBackend](https://github.com/PatrickTCB/JellyJamsBackend).")
                 if !session.isSignedIn {
                     Text("Registration checks your Jellyfin credentials with the backend, so there must be someone signed in.")
                         .foregroundStyle(.secondary)
@@ -138,13 +154,17 @@ struct JellyJamsBackendSettingsView: View {
         return session.isSignedIn && !address.isEmpty && !isBusy
     }
 
-    /// Sign Out is registration's undo, so it sits behind the same gate the
-    /// feature switches do: `.online` is exactly "the backend is answering
-    /// and it knows this account". An unreachable backend cannot delete
-    /// anything, and an unregistered one has nothing to delete — in both
-    /// cases the button waits rather than fails.
+    /// Sign Out forgets the backend locally, so it is available whenever
+    /// there is anything to forget — a registration, or even just a typed
+    /// address — and it works with the backend dead or unreachable, which
+    /// is half the point: a backend that no longer answers must not hold
+    /// the install hostage to its registration. The confirmation's
+    /// deletion checkbox needs more — a sign-in and a live backend — and
+    /// that path says so in its own words when the more turns out not to
+    /// be there.
     private var canSignOut: Bool {
-        model.connection == .online && session.isSignedIn && !isBusy
+        let address = preferences.jellyJamsBackendAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !isBusy && (preferences.isMixtapesActive || !address.isEmpty)
     }
 
     /// A line for where the save or sign-out got to: the in-flight request,
@@ -172,7 +192,10 @@ struct JellyJamsBackendSettingsView: View {
             }
             .foregroundStyle(.secondary)
         case .signedOut:
-            Label("Signed out — the backend forgot this account, and the app forgot the backend.", systemImage: "person.crop.circle.badge.xmark")
+            Label("Signed out — the app forgot this backend; the account there still stands.", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.secondary)
+        case .accountDeleted:
+            Label("Signed out — the backend deleted this account, and the app forgot the backend.", systemImage: "person.crop.circle.badge.xmark")
                 .foregroundStyle(.secondary)
         case .failed(let message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -214,17 +237,25 @@ struct JellyJamsBackendSettingsView: View {
         }
     }
 
-    /// The undo of ``save()``, and a clean break: hand the backend the same
-    /// sign-in, ask it to delete the account, and once it confirms, forget
-    /// the backend entirely — address, registration, limits, all of it — so
-    /// a different backend starts from the same blank slate this one did.
-    /// Only the backend's answer clears anything: a refusal or an
-    /// unreachable backend leaves the memory standing with the reason
-    /// beside it, the same grace every other setting here gets. The
-    /// Jellyfin sign-in is untouched either way: this signs out of the
-    /// backend, not the server — and the server's sign-out, in turn,
-    /// forgets the backend locally without ever calling it.
+    /// The clean break, at one of two depths. By default it is local and
+    /// instant: the app forgets the backend — address, registration,
+    /// limits, membership — and owes it no request, so a backend that no
+    /// longer answers can still be left behind, and the account there
+    /// simply stands. With the confirmation's checkbox on, the sign-in
+    /// rides `DELETE /delete-me` first and only the backend's confirmation
+    /// forgets anything: a refusal leaves the whole memory standing with
+    /// the reason beside it — the same grace every other setting here gets
+    /// — because "memory gone, account still on the books" is exactly the
+    /// half-state the checkbox exists to prevent; uncheck it to leave
+    /// without the backend's say. The Jellyfin sign-in is untouched either
+    /// way: this signs out of the backend, not the server.
     private func signOut() {
+        guard alsoDeletesAccount else {
+            preferences.forgetBackend()
+            saveStatus = .signedOut
+            Task { await refresh() }
+            return
+        }
         saveStatus = .signingOut
         Task {
             do {
@@ -232,7 +263,7 @@ struct JellyJamsBackendSettingsView: View {
                 let backend = JellyJamsBackend(baseURL: baseURL, deviceInfo: session.deviceInfo)
                 _ = try await backend.deleteAccount(try currentJellyfinAccount())
                 preferences.forgetBackend()
-                saveStatus = .signedOut
+                saveStatus = .accountDeleted
                 await refresh()
             } catch {
                 saveStatus = .failed(error.userFacingMessage)

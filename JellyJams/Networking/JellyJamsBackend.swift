@@ -255,7 +255,7 @@ enum BackendError: LocalizedError, Sendable, Equatable {
         case .invalidServerURL:
             return "The backend server address is not valid."
         case .notSignedIn:
-            return "Registration hands your Jellyfin sign-in to the backend to be checked, so you need to be signed in first."
+            return "The Jelly Jams Backend works through your Jellyfin sign-in, so you need to be signed in first."
         case .rejected(let status, let detail):
             if let detail, !detail.isEmpty {
                 return "The backend refused the request (\(status)): \(detail)"
