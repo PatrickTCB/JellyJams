@@ -228,8 +228,9 @@ struct BackendTapeDeleted: Decodable, Sendable, Equatable {
     }
 }
 
-/// The backend's answer to both queue-extension endpoints: the ids of the
-/// tracks to append, in the order they should play, and how many that is.
+/// The backend's answer to the song-picking endpoints — both queue
+/// extensions and `/text-to-tunes`: the ids of the tracks it chose, in the
+/// order they should play, and how many that is.
 ///
 /// The field names are capitalised because that is how the backend writes
 /// them. `Count` always agrees with the list beside it — the backend fills
@@ -267,8 +268,8 @@ enum BackendError: LocalizedError, Sendable, Equatable {
 
 /// App-level access to the Jelly Jams Backend — the companion service for
 /// the app, whose features so far are building Mixtapes, the Server Plalist,
-/// taking bans, and extending running queues, and which will later offer AI
-/// instant mixes.
+/// taking bans, extending running queues, and turning free text into a
+/// queue of songs.
 ///
 /// Every endpoint but `/ping` keys off the `userID` that `/register` hands
 /// over, so registration is the seam the rest of the integration grows
@@ -629,6 +630,29 @@ final class JellyJamsBackend: Sendable {
             queryItems: [
                 URLQueryItem(name: "userID", value: userID),
                 URLQueryItem(name: "currentAlbumID", value: currentAlbumID),
+            ]
+        )
+        return try JSONDecoder().decode(BackendExtendedQueue.self, from: data)
+    }
+
+    // MARK: - Text to Tunes
+
+    /// `GET /text-to-tunes` — the songs matching a free-text description of
+    /// what the listener wants to hear, like "Up tempo folk about Canada".
+    ///
+    /// The description travels verbatim as the `query` parameter, and
+    /// `limit` caps how many songs the backend picks. The answer is the
+    /// queue-extension shape — ids in the order they should play — because
+    /// that is what it is: a backend pick over the user's library, resolved
+    /// through the user's own Jellyfin server exactly like an extension.
+    func textToTunes(userID: String, query: String, limit: Int) async throws -> BackendExtendedQueue {
+        let data = try await perform(
+            .get,
+            path: "text-to-tunes",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "query", value: query),
+                URLQueryItem(name: "limit", value: String(limit)),
             ]
         )
         return try JSONDecoder().decode(BackendExtendedQueue.self, from: data)

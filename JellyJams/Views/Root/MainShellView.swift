@@ -12,6 +12,9 @@ import SwiftUI
 /// view on macOS.
 struct MainShellView: View {
     @State private var selection: LibrarySection = .home
+    /// Raised by the Home toolbar's sparkles button; the sheet itself is
+    /// hosted above the tabs in ``body``, like the player and settings ones.
+    @State private var isPresentingTextToTunes = false
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var playerPresentation: PlayerPresentation
     @EnvironmentObject private var downloads: DownloadStore
@@ -30,6 +33,10 @@ struct MainShellView: View {
     var body: some View {
         settingsHost
             .sheet(isPresented: $playerPresentation.isShowingPlayer) { PlayerView() }
+            // Hosted here rather than by the toolbar button that raises it,
+            // for the settings sheet's own reason: a sheet owned by a
+            // toolbar item dies with the tab bar teardown on iOS.
+            .sheet(isPresented: $isPresentingTextToTunes) { TextToTunesSheet() }
             .onChange(of: session.serverReachable, initial: true) { _, reachable in
                 if !reachable { selection = .downloads }
             }
@@ -80,7 +87,10 @@ struct MainShellView: View {
             Tab(LibrarySection.home.title, systemImage: LibrarySection.home.systemImage, value: LibrarySection.home) {
                 LibraryNavigationStack {
                     HomeView()
-                        .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
+                        .toolbar {
+                            ToolbarItem(placement: .primaryAction) { textToTunesButton }
+                            ToolbarItem(placement: .primaryAction) { AccountMenu() }
+                        }
                 }
             }
 
@@ -154,9 +164,27 @@ struct MainShellView: View {
     @ViewBuilder private func sectionTab(_ section: LibrarySection) -> some View {
         let content = LibraryNavigationStack {
             SectionRootView(section: section)
-                .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
+                .toolbar {
+                    // Text to Tunes is a Home-screen feature, so its button is
+                    // offered there alone — declared first, which is the slot
+                    // to the left of the account menu.
+                    if section == .home {
+                        ToolbarItem(placement: .primaryAction) { textToTunesButton }
+                    }
+                    ToolbarItem(placement: .primaryAction) { AccountMenu() }
+                }
         }
         content
+    }
+
+    /// The Home toolbar's Text to Tunes button: it raises the sheet hosted
+    /// above the tabs rather than owning one itself.
+    private var textToTunesButton: some View {
+        Button {
+            isPresentingTextToTunes = true
+        } label: {
+            Label("Text to Tunes", systemImage: "sparkles.2")
+        }
     }
 
     /// The Downloads tab icon: a live progress ring while batches run, the
