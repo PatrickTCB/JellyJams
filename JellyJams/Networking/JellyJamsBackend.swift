@@ -348,8 +348,12 @@ final class JellyJamsBackend: Sendable {
     /// The backend validates the token against the Jellyfin server before
     /// storing anything, so a failure here means the sign-in was rejected
     /// or the backend could not reach the server — never a silent half-save.
+    ///
+    /// The credentials travel as form fields in the request body rather
+    /// than in the query string, so the token stays out of the URL — and
+    /// out of any access log that records one.
     func register(_ account: JellyfinAccount) async throws -> BackendRegistration {
-        let data = try await perform(.post, path: "register", queryItems: accountQuery(account))
+        let data = try await perform(.post, path: "register", formFields: accountParameters(account))
         return try JSONDecoder().decode(BackendRegistration.self, from: data)
     }
 
@@ -365,14 +369,15 @@ final class JellyJamsBackend: Sendable {
     /// for already holds, so a repeated sign-out reads as the success it is
     /// rather than a failure.
     func deleteAccount(_ account: JellyfinAccount) async throws -> BackendRegistration {
-        let data = try await perform(.delete, path: "delete-me", queryItems: accountQuery(account))
+        let data = try await perform(.delete, path: "delete-me", queryItems: accountParameters(account))
         return try JSONDecoder().decode(BackendRegistration.self, from: data)
     }
 
     /// The four credentials both account endpoints ride with — the backend
     /// checks them against the Jellyfin server before it saves, or deletes,
-    /// anything.
-    private func accountQuery(_ account: JellyfinAccount) -> [URLQueryItem] {
+    /// anything. `/register` takes them as form fields, `/delete-me` in its
+    /// query string.
+    private func accountParameters(_ account: JellyfinAccount) -> [URLQueryItem] {
         [
             URLQueryItem(name: "userName", value: account.userName),
             URLQueryItem(name: "userID", value: account.userID),
@@ -397,24 +402,24 @@ final class JellyJamsBackend: Sendable {
     /// The backend answers a read with 201 (it was copied from the write
     /// endpoints); any 2xx is success as far as the app is concerned.
     func serverPlaylistStatus(userID: String) async throws -> BackendSharedPlaylist {
-        let data = try await perform(.get, path: "server-playlist", queryItems: serverPlaylistQuery(userID: userID))
+        let data = try await perform(.get, path: "server-playlist", queryItems: serverPlaylistParameters(userID: userID))
         return try JSONDecoder().decode(BackendSharedPlaylist.self, from: data)
     }
 
     /// `POST /server-playlist` — join the blend, and the shared playlist that
     /// comes from it being built out of every member's listening.
     func joinServerPlaylist(userID: String) async throws -> BackendSharedPlaylist {
-        let data = try await perform(.post, path: "server-playlist", queryItems: serverPlaylistQuery(userID: userID))
+        let data = try await perform(.post, path: "server-playlist", formFields: serverPlaylistParameters(userID: userID))
         return try JSONDecoder().decode(BackendSharedPlaylist.self, from: data)
     }
 
     /// `DELETE /server-playlist` — leave the blend.
     func leaveServerPlaylist(userID: String) async throws -> BackendSharedPlaylist {
-        let data = try await perform(.delete, path: "server-playlist", queryItems: serverPlaylistQuery(userID: userID))
+        let data = try await perform(.delete, path: "server-playlist", queryItems: serverPlaylistParameters(userID: userID))
         return try JSONDecoder().decode(BackendSharedPlaylist.self, from: data)
     }
 
-    private func serverPlaylistQuery(userID: String) -> [URLQueryItem] {
+    private func serverPlaylistParameters(userID: String) -> [URLQueryItem] {
         [
             URLQueryItem(name: "userID", value: userID)
         ]
@@ -442,7 +447,7 @@ final class JellyJamsBackend: Sendable {
     /// `POST /limits` — the pair of limits to keep for this account. The
     /// backend always takes both numbers, so the number that did not
     /// change rides along as it was remembered; the integers travel as
-    /// strings like everything else in the query. The answer is what the
+    /// text, like every form field. The answer is what the
     /// backend stored — clamped on read — so the app learns the standing
     /// numbers rather than assuming them.
     func setLimits(
@@ -453,7 +458,7 @@ final class JellyJamsBackend: Sendable {
         let data = try await perform(
             .post,
             path: "limits",
-            queryItems: [
+            formFields: [
                 URLQueryItem(name: "userID", value: userID),
                 URLQueryItem(name: "sameAlbumLimit", value: String(sameAlbumLimit)),
                 URLQueryItem(name: "sameArtistLimit", value: String(sameArtistLimit)),
@@ -476,7 +481,7 @@ final class JellyJamsBackend: Sendable {
         let data = try await perform(
             .post,
             path: "ban",
-            queryItems: [
+            formFields: [
                 URLQueryItem(name: "userID", value: userID),
                 URLQueryItem(name: "itemID", value: itemID),
             ]
@@ -544,7 +549,7 @@ final class JellyJamsBackend: Sendable {
     ///
     /// The switches travel as `"true"`/`"false"` because FastAPI parses its
     /// booleans from text; the name carries whatever punctuation the user
-    /// typed and rides the query string, where `URLComponents` escapes it.
+    /// typed, and the form body escapes all of it.
     func createTape(_ draft: BackendTapeDraft, userID: String) async throws -> BackendTapeCreated {
         let trimmed = BackendTapeDraft(
             name: draft.name.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -558,7 +563,7 @@ final class JellyJamsBackend: Sendable {
         let data = try await perform(
             .post,
             path: "new-tape",
-            queryItems: [
+            formFields: [
                 URLQueryItem(name: "userID", value: userID),
                 URLQueryItem(name: "name", value: trimmed.name),
                 URLQueryItem(name: "recents", value: trimmed.recents ? "true" : "false"),
@@ -707,26 +712,39 @@ final class JellyJamsBackend: Sendable {
         case delete = "DELETE"
     }
 
-    /// One request against the backend: query items in, JSON out, with
-    /// anything outside 2xx turned into a `BackendError` carrying the
-    /// backend's own human-readable refusal when it bothers to send one.
+    /// One request against the backend: query items or form fields in, JSON
+    /// out, with anything outside 2xx turned into a `BackendError` carrying
+    /// the backend's own human-readable refusal when it bothers to send one.
     ///
-    /// Every endpoint the app calls puts all of its input in the query
-    /// string; none of them carries a request body.
+    /// The GETs and DELETEs take all of their input in the query string.
+    /// Every POST is declared with FastAPI `Form` parameters instead: it
+    /// reads an `application/x-www-form-urlencoded` body and ignores the
+    /// query string entirely, so a POST's input goes in `formFields`.
     private func perform(
         _ method: Method,
         path: String,
-        queryItems: [URLQueryItem] = []
+        queryItems: [URLQueryItem] = [],
+        formFields: [URLQueryItem] = []
     ) async throws -> Data {
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
             resolvingAgainstBaseURL: false
         )
-        if !queryItems.isEmpty { components?.queryItems = queryItems }
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+            // `URLComponents` leaves `+` bare, which the backend reads as a
+            // space; spaces are already `%20`, so any `+` left is a literal.
+            let query = components?.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+            components?.percentEncodedQuery = query
+        }
         guard let url = components?.url else { throw BackendError.invalidServerURL }
 
         var request = URLRequest(url: url)
         request.httpMethod = method.rawValue
+        if !formFields.isEmpty {
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Self.formBody(formFields)
+        }
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -740,6 +758,35 @@ final class JellyJamsBackend: Sendable {
             throw BackendError.rejected(status: http.statusCode, detail: detail)
         }
         return data
+    }
+
+    /// Serialises fields as an `application/x-www-form-urlencoded` body, byte
+    /// for byte the way a browser submits a form: ASCII letters, digits and
+    /// `*-._` go as they are, a space as `+`, and every other UTF-8 byte is
+    /// percent-encoded.
+    ///
+    /// The query string's encoding can't be borrowed: `URLComponents` leaves
+    /// `+` bare, and a form parser reads that as a space — a name with one in
+    /// it would arrive changed.
+    private static func formBody(_ fields: [URLQueryItem]) -> Data {
+        func encode(_ text: String) -> String {
+            text.utf8.map { byte in
+                switch byte {
+                case UInt8(ascii: "a")...UInt8(ascii: "z"),
+                     UInt8(ascii: "A")...UInt8(ascii: "Z"),
+                     UInt8(ascii: "0")...UInt8(ascii: "9"),
+                     UInt8(ascii: "*"), UInt8(ascii: "-"), UInt8(ascii: "."), UInt8(ascii: "_"):
+                    String(UnicodeScalar(byte))
+                case UInt8(ascii: " "):
+                    "+"
+                default:
+                    String(format: "%%%02X", byte)
+                }
+            }
+            .joined()
+        }
+        let pairs = fields.map { "\(encode($0.name))=\(encode($0.value ?? ""))" }
+        return Data(pairs.joined(separator: "&").utf8)
     }
 }
 

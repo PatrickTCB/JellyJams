@@ -44,10 +44,12 @@ final class JellyJamsBackendTests: XCTestCase {
 
     // MARK: - The request
 
-    /// `/register` is a POST with everything in the query string — the shape
-    /// FastAPI defines. A drift here is a 422 nobody can see until settings
+    /// `/register` is a POST whose credentials ride an
+    /// `application/x-www-form-urlencoded` body — the backend's `Form`
+    /// parameters — with nothing in the query string, so the token never
+    /// lands in a URL. A drift here is a 422 nobody can see until settings
     /// quietly stops working.
-    func testRegisterPostsCredentialsAsQueryParameters() async throws {
+    func testRegisterPostsCredentialsAsAFormBody() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
@@ -59,10 +61,40 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "POST")
         XCTAssertEqual(request.path, "/register")
-        XCTAssertEqual(request.value(for: "userName"), "pat")
-        XCTAssertEqual(request.value(for: "userID"), "user-id")
-        XCTAssertEqual(request.value(for: "userToken"), "access-token")
-        XCTAssertEqual(request.value(for: "jellyfinHost"), "http://192.168.0.10:8096")
+        XCTAssertNil(request.url?.query, "The credentials must not ride the URL")
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userName"), "pat")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "userToken"), "access-token")
+        XCTAssertEqual(request.formValue(for: "jellyfinHost"), "http://192.168.0.10:8096")
+    }
+
+    /// A form body has its own escaping: a bare `+` reads as a space and a
+    /// bare `&` ends the field, so — as a browser does — everything but
+    /// letters, digits and `*-._` is percent-encoded, as UTF-8 past ASCII,
+    /// and a space goes as `+`. The exact bytes are pinned because the
+    /// backend's form parser is the only other reader.
+    func testRegisterFormEncodesWhatAFormParserWouldMisread() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.successResponse()(request)
+        }
+        let awkward = JellyfinAccount(
+            userName: "Zoë & Ana+1; 100%=ok",
+            userID: "user-id",
+            userToken: "access-token",
+            jellyfinHost: URL(string: "http://192.168.0.10:8096")!
+        )
+
+        _ = try await TestFixtures.stubbedBackend().register(awkward)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(
+            String(decoding: request.body, as: UTF8.self),
+            "userName=Zo%C3%AB+%26+Ana%2B1%3B+100%25%3Dok&userID=user-id&userToken=access-token&jellyfinHost=http%3A%2F%2F192.168.0.10%3A8096"
+        )
+        XCTAssertEqual(request.formValue(for: "userName"), "Zoë & Ana+1; 100%=ok")
     }
 
     // MARK: - The response
@@ -264,7 +296,13 @@ final class JellyJamsBackendTests: XCTestCase {
         let status = try await TestFixtures.stubbedBackend().joinServerPlaylist(userID: "user-id")
 
         XCTAssertTrue(status.inServerPlaylist)
-        XCTAssertEqual(recorder.all.first?.method, "POST")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/server-playlist")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
     }
 
     func testLeavingTheBlendIsADeleteTheBackendConfirms() async throws {
@@ -331,8 +369,8 @@ final class JellyJamsBackendTests: XCTestCase {
 
     /// `/limits` takes the pair as one setting: both numbers travel even
     /// when only one was touched, and the answer echoes what the backend
-    /// stored. A drifted parameter name is a silent 422, so the query
-    /// shape is asserted as it rides.
+    /// stored. A drifted field name is a silent 422, so the form body is
+    /// asserted as it rides.
     func testSettingLimitsSendsTheWholePair() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
@@ -355,9 +393,11 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "POST")
         XCTAssertEqual(request.path, "/limits")
-        XCTAssertEqual(request.value(for: "userID"), "user-id")
-        XCTAssertEqual(request.value(for: "sameAlbumLimit"), "4")
-        XCTAssertEqual(request.value(for: "sameArtistLimit"), "7")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "sameAlbumLimit"), "4")
+        XCTAssertEqual(request.formValue(for: "sameArtistLimit"), "7")
     }
 
     /// Limits belong to a backend account like everything else here: an
@@ -406,8 +446,10 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "POST")
         XCTAssertEqual(request.path, "/ban")
-        XCTAssertEqual(request.value(for: "userID"), "user-id")
-        XCTAssertEqual(request.value(for: "itemID"), "song-id")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "itemID"), "song-id")
     }
 
     /// Re-banning answers `Success: false, AlreadyBanned: true` with a 201
@@ -583,7 +625,7 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertEqual(request.value(for: "userID"), "user-id")
     }
 
-    /// A tape set up is eight parameters — the account, the name, and
+    /// A tape set up is eight form fields — the account, the name, and
     /// every choice the composer made. FastAPI parses booleans from text,
     /// so each switch travels as `"true"`/`"false"`. A drifted name here
     /// is a 422 nobody can see until creation quietly stops working.
@@ -617,14 +659,16 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "POST")
         XCTAssertEqual(request.path, "/new-tape")
-        XCTAssertEqual(request.value(for: "userID"), "user-id")
-        XCTAssertEqual(request.value(for: "name"), "Weekend Haul") // trimmed before sending
-        XCTAssertEqual(request.value(for: "recents"), "true")
-        XCTAssertEqual(request.value(for: "favourites"), "false")
-        XCTAssertEqual(request.value(for: "fingerprint"), "true")
-        XCTAssertEqual(request.value(for: "alchemyPercent"), "30")
-        XCTAssertEqual(request.value(for: "freshAlchemy"), "true")
-        XCTAssertEqual(request.value(for: "songCount"), "150")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "name"), "Weekend Haul") // trimmed before sending
+        XCTAssertEqual(request.formValue(for: "recents"), "true")
+        XCTAssertEqual(request.formValue(for: "favourites"), "false")
+        XCTAssertEqual(request.formValue(for: "fingerprint"), "true")
+        XCTAssertEqual(request.formValue(for: "alchemyPercent"), "30")
+        XCTAssertEqual(request.formValue(for: "freshAlchemy"), "true")
+        XCTAssertEqual(request.formValue(for: "songCount"), "150")
     }
 
     /// A second send under a name the account already uses answers
@@ -720,6 +764,27 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertEqual(request.path, "/delete-tape")
         XCTAssertEqual(request.value(for: "userID"), "user-id")
         XCTAssertEqual(request.value(for: "name"), "Weekend Haul")
+    }
+
+    /// `/new-tape` stores a name verbatim from its form body, so the query
+    /// that deletes it has to carry it verbatim too. A bare `+` reads as a
+    /// space on the backend: `Rock + Roll` would arrive as `Rock   Roll`,
+    /// answer 404, and the optimistic delete would leave the tape in place.
+    func testDeletingATapeKeepsAPlusInItsName() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Deleted":true,"Name":"Rock + Roll"}"#.utf8)
+            )
+        }
+
+        _ = try await TestFixtures.stubbedBackend().deleteTape(name: "Rock + Roll", userID: "user-id")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.serverQueryValue(for: "name"), "Rock + Roll")
+        XCTAssertEqual(request.serverQueryValue(for: "userID"), "user-id")
     }
 
     /// A name the backend no longer has answers 404 with its reasons —

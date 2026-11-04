@@ -368,9 +368,9 @@ final class JellyJamsBackendSettingsModelTests: XCTestCase {
         let post = try XCTUnwrap(
             recorder.all.first { $0.method == "POST" && $0.path == "/limits" }
         )
-        XCTAssertEqual(post.value(for: "userID"), "user-id")
-        XCTAssertEqual(post.value(for: "sameAlbumLimit"), "4")
-        XCTAssertEqual(post.value(for: "sameArtistLimit"), "5")
+        XCTAssertEqual(post.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(post.formValue(for: "sameAlbumLimit"), "4")
+        XCTAssertEqual(post.formValue(for: "sameArtistLimit"), "5")
         XCTAssertEqual(preferences.sameAlbumLimit, 4)
         XCTAssertEqual(preferences.sameArtistLimit, 6, "The echoed answer settles over the draft")
         XCTAssertNil(model.limitsError)

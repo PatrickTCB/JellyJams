@@ -117,9 +117,9 @@ final class BanStoreTests: XCTestCase {
         for request in requests {
             XCTAssertEqual(request.method, "POST")
             XCTAssertEqual(request.path, "/ban")
-            XCTAssertEqual(request.value(for: "userID"), "user-id")
+            XCTAssertEqual(request.formValue(for: "userID"), "user-id")
         }
-        XCTAssertEqual(requests.map { $0.value(for: "itemID") }, ["song-1", "album-2", "artist-3"])
+        XCTAssertEqual(requests.map { $0.formValue(for: "itemID") }, ["song-1", "album-2", "artist-3"])
     }
 
     /// Reconfiguring with a different address must not keep sending to the

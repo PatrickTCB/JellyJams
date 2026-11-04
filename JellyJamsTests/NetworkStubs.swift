@@ -63,6 +63,7 @@ struct RecordedRequest: Sendable {
     let url: URL?
     let path: String
     let method: String
+    let contentType: String?
     let body: Data
     private let query: [URLQueryItem]
 
@@ -71,12 +72,38 @@ struct RecordedRequest: Sendable {
         let components = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
         path = components?.path ?? ""
         method = request.httpMethod ?? ""
+        contentType = request.value(forHTTPHeaderField: "Content-Type")
         query = components?.queryItems ?? []
         body = RecordedRequest.readBody(of: request)
     }
 
     func value(for name: String) -> String? {
         query.last { $0.name == name }?.value
+    }
+
+    /// A field of an `application/x-www-form-urlencoded` body, decoded the
+    /// way a server's form parser reads it: `+` is a space, and the
+    /// percent-escapes resolve as UTF-8.
+    func formValue(for name: String) -> String? {
+        Self.field(name, in: String(decoding: body, as: UTF8.self))
+    }
+
+    /// A query parameter as the backend reads it. `value(for:)` decodes
+    /// through `URLComponents`, which keeps a bare `+` as itself; a
+    /// server's query parser decodes like a form parser, `+` as a space.
+    func serverQueryValue(for name: String) -> String? {
+        Self.field(name, in: url?.query(percentEncoded: true) ?? "")
+    }
+
+    private static func field(_ name: String, in encoded: String) -> String? {
+        func decode(_ text: Substring) -> String? {
+            text.replacingOccurrences(of: "+", with: " ").removingPercentEncoding
+        }
+        return encoded
+            .split(separator: "&")
+            .map { $0.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false) }
+            .last { decode($0[0]) == name }
+            .flatMap { $0.count > 1 ? decode($0[1]) : "" }
     }
 
     /// Flattens a repeated or comma-delimited query parameter into its values.
