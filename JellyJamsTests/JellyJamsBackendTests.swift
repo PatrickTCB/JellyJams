@@ -880,4 +880,35 @@ final class JellyJamsBackendTests: XCTestCase {
             XCTAssertEqual(error, .rejected(status: 404, detail: "User user-id not found"))
         }
     }
+
+    // MARK: - Text to Tunes
+
+    /// `/text-to-tunes` is a GET whose free-text description and song count
+    /// ride the query string, answered with the queue-extension shape — the
+    /// picked ids in the order they should play. A drift on either side is a
+    /// 422 nobody sees until the Home screen's sparkles button quietly stops
+    /// making music.
+    func testTextToTunesSendsTheQueryAndLimitAndReadsThePicks() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.extendedQueueResponse()(request)
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().textToTunes(
+            userID: "user-id",
+            query: "Up tempo folk about Canada",
+            limit: 30
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/text-to-tunes")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "query"), "Up tempo folk about Canada")
+        XCTAssertEqual(request.value(for: "limit"), "30")
+        XCTAssertTrue(request.body.isEmpty)
+        XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
+        XCTAssertEqual(answer.count, 2)
+    }
 }
