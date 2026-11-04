@@ -29,7 +29,7 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
     var sdkValues: [JellyfinAPI.ItemSortBy] {
         switch self {
         case .sortName: [.sortName]
-        case .albumArtist: [.albumArtist, .sortName]
+        case .albumArtist: [.albumArtist, .premiereDate, .sortName]
         case .albumArtistTrackOrder: [.albumArtist, .album, .parentIndexNumber, .indexNumber, .sortName]
         case .album: [.album, .sortName]
         case .artist: [.artist, .sortName]

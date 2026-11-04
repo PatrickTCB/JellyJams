@@ -130,7 +130,7 @@ final class AppServices {
         player.configure(preferences: preferences)
         player.configure(queueExtender: queueExtender)
         #if os(iOS)
-        CarPlayController.shared.configure(session: session, player: player, downloads: downloads)
+        CarPlayController.shared.configure(session: session, player: player, downloads: downloads, pinnedItems: pinnedItems)
         #endif
 
         if signedIn {
