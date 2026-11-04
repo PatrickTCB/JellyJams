@@ -80,9 +80,9 @@ struct TextToTunesSheet: View {
                 .keyboardType(.numberPad)
                 #endif
         } header: {
-            Text("Song Count")
+            Text("Maximum Song Count")
         } footer: {
-            Text("How many songs should the backend pick?")
+            Text("What is the maximum number of songs the backend should return?")
         }
     }
 
