@@ -4,7 +4,7 @@ import JellyfinAPI
 /// Sort choices exposed by the app, mapped to the SDK's ordered sort fields.
 enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
     case sortName = "SortName"
-    case albumArtist = "AlbumArtist,SortName"
+    case albumArtist = "AlbumArtist,PremiereDate,SortName"
     /// Album-artist ordering that keeps each album's tracks together, in
     /// track order. Offered by the Downloads songs list only; the
     /// server-backed Library lists don't include it.
