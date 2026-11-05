@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The Jelly Jams Backend settings sheet: the server address and its
 /// registration, and beneath it the features the backend runs for this
-/// account — Server Playlist, the mixtape limits and the user's bans.
+/// account — Server Playlist, the mixtape limits, the Infinite Queue and the
+/// user's bans.
 ///
 /// The sheet speaks the backend's pattern: opening it pings the backend, and
 /// only while that ping answers do the feature switches take input. The
@@ -69,6 +70,7 @@ struct JellyJamsBackendSettingsView: View {
                 addressSection
                 serverPlaylistSection
                 limitsSection
+                infiniteQueueSection
                 bansSection
             }
             .navigationTitle("Jelly Jams Backend")
@@ -420,6 +422,28 @@ struct JellyJamsBackendSettingsView: View {
                 userID: session.currentUser?.id,
                 preferences: preferences
             )
+        }
+    }
+
+    // MARK: - Infinite Queue
+
+    /// The listener's opt-in to the backend's queue extension: whenever the
+    /// running queue gets near its end, the backend picks the next tracks —
+    /// the next album in the listen, or an alchemy set seeded from the queue
+    /// so far — and appends them.
+    ///
+    /// Unlike the backend's other feature switches, this one is the app's own
+    /// preference rather than something the backend keeps a copy of, so it is
+    /// editable however the connection stands: an unreachable backend simply
+    /// means nothing ever extends, and the remembered state keeps the switch
+    /// where the user left it.
+    private var infiniteQueueSection: some View {
+        Section {
+            Toggle("Infinite Queue", isOn: $preferences.infiniteQueueEnabled)
+        } header: {
+            Text("Infinite Queue")
+        } footer: {
+            Text("When the queue runs short the backend picks the next tracks — the next album in the listen, or an alchemy set from the queue so far — and appends them. Turn it off and the queue ends where it ran out; while the backend is unreachable it simply never extends.")
         }
     }
 

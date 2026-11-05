@@ -162,10 +162,10 @@ struct PlayerView: View {
             }
             .buttonStyle(.plain)
 
-            // The same preference the Settings toggle edits — Infinite Queue
-            // is one switch with two handles. Lit while on; when the backend
-            // cannot be reached it simply does nothing rather than refusing
-            // the tap.
+            // The same preference in the backend settings sheet's toggle edits —
+            // Infinite Queue is one switch with two handles. Lit while on;
+            // when the backend cannot be reached it simply does nothing rather
+            // than refusing the tap.
             Button { preferences.infiniteQueueEnabled.toggle() } label: {
                 Image(systemName: "infinity")
                     .foregroundStyle(preferences.infiniteQueueEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
