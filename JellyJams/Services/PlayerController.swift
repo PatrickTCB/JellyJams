@@ -162,6 +162,7 @@ final class PlayerController: ObservableObject {
 
     init() {
         player.actionAtItemEnd = .pause
+        player.automaticallyWaitsToMinimizeStalling = true
         #if os(macOS)
         player.volume = volume
         #endif
