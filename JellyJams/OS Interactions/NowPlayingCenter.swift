@@ -16,6 +16,7 @@ struct RemoteCommandHandlers: Sendable {
     var next: @MainActor @Sendable () -> Void
     var previous: @MainActor @Sendable () -> Void
     var seek: @MainActor @Sendable (Double) -> Void
+    var like: @MainActor @Sendable () -> Void
 }
 
 /// Bridges playback state to `MPNowPlayingInfoCenter` and wires up
@@ -60,12 +61,17 @@ final class NowPlayingCenter {
             Task { @MainActor in handlers.seek(position) }
             return .success
         }
+        center.likeCommand.addTarget { _ in
+            Task { @MainActor in handlers.like() }
+            return .success
+        }
         setCommandAvailability(
             hasItem: false,
             isPlaying: false,
             canGoNext: false,
             canGoPrevious: false,
-            canSeek: false
+            canSeek: false,
+            isFavourite: false
         )
     }
 
@@ -77,7 +83,8 @@ final class NowPlayingCenter {
         artworkURL: URL?,
         localArtworkURL: URL?,
         canGoNext: Bool,
-        canGoPrevious: Bool
+        canGoPrevious: Bool,
+        isFavourite: Bool
     ) {
         guard let item else { clear(); return }
         setCommandAvailability(
@@ -85,7 +92,8 @@ final class NowPlayingCenter {
             isPlaying: isPlaying,
             canGoNext: canGoNext,
             canGoPrevious: canGoPrevious,
-            canSeek: duration > 0
+            canSeek: duration > 0,
+            isFavourite: isFavourite
         )
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: item.displayName,
@@ -175,7 +183,8 @@ final class NowPlayingCenter {
             isPlaying: false,
             canGoNext: false,
             canGoPrevious: false,
-            canSeek: false
+            canSeek: false,
+            isFavourite: false
         )
     }
 
@@ -184,7 +193,8 @@ final class NowPlayingCenter {
         isPlaying: Bool,
         canGoNext: Bool,
         canGoPrevious: Bool,
-        canSeek: Bool
+        canSeek: Bool,
+        isFavourite: Bool
     ) {
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.isEnabled = hasItem && !isPlaying
@@ -193,5 +203,10 @@ final class NowPlayingCenter {
         center.nextTrackCommand.isEnabled = hasItem && canGoNext
         center.previousTrackCommand.isEnabled = hasItem && canGoPrevious
         center.changePlaybackPositionCommand.isEnabled = hasItem && canSeek
+        // The like command is offered while a track is loaded and reflects the
+        // user's favourite state for it — the heart on the lock screen and in
+        // Control Centre.
+        center.likeCommand.isEnabled = hasItem
+        center.likeCommand.isActive = isFavourite
     }
 }

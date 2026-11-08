@@ -96,6 +96,11 @@ final class PlayerController: ObservableObject {
     /// session and backend settings describe. Nil — or unconfigured — while
     /// there is no backend account to extend a queue with.
     private var queueExtender: QueueExtender?
+
+    /// The user's favourite overrides, so the Now Playing transport — the
+    /// lock screen heart — can flip the current track's favourite state exactly
+    /// like an in-app tap does.
+    private var favourites: FavouriteStore?
     /// Replaced whenever the queue is swapped wholesale or deliberately cut
     /// short, so an extension fetched for an older queue can never land in
     /// the new one — the same guard ``BanStore`` keeps over its ban lists.
@@ -142,6 +147,13 @@ final class PlayerController: ObservableObject {
 
     var hasQueue: Bool { !queue.isEmpty }
 
+    /// Whether the track currently playing is favourited, resolved through the
+    /// store so a session override beats the server snapshot.
+    var isCurrentItemFavourite: Bool {
+        guard let item = currentItem, let favourites else { return false }
+        return favourites.isFavourite(item)
+    }
+
     /// How many already-played tracks the queue UI keeps visible above the
     /// current one.
     static let visibleHistoryCount = 2
@@ -177,7 +189,8 @@ final class PlayerController: ObservableObject {
             toggle: { [weak self] in self?.togglePlayPause() },
             next: { [weak self] in self?.next() },
             previous: { [weak self] in self?.previous() },
-            seek: { [weak self] time in self?.seek(to: time) }
+            seek: { [weak self] time in self?.seek(to: time) },
+            like: { [weak self] in self?.toggleFavourite() }
         ))
     }
 
@@ -208,6 +221,10 @@ final class PlayerController: ObservableObject {
 
     func configure(queueExtender: QueueExtender?) {
         self.queueExtender = queueExtender
+    }
+
+    func configure(favourites: FavouriteStore?) {
+        self.favourites = favourites
     }
 
     // MARK: - State Persistence
@@ -397,6 +414,16 @@ final class PlayerController: ObservableObject {
 
     func togglePlayPause() {
         isPlaying ? pause() : resume()
+    }
+
+    /// The lock screen / Control Centre heart: flips the current track's
+    /// favourite state through the store, which persists to the server like
+    /// any other favourite write, then refreshes the now playing state so the
+    /// heart reflects the new favourite.
+    func toggleFavourite() {
+        guard let item = currentItem else { return }
+        favourites?.toggle(item)
+        updateNowPlaying()
     }
 
     /// Play/resume for the system transport ("Hey Siri, play", the Control
@@ -1128,7 +1155,8 @@ final class PlayerController: ObservableObject {
             artworkURL: currentItem.flatMap { client?.artworkURL(for: $0, size: 600) },
             localArtworkURL: currentItem.flatMap { downloads?.localArtworkURL(for: $0) },
             canGoNext: canGoNext,
-            canGoPrevious: canGoPrevious
+            canGoPrevious: canGoPrevious,
+            isFavourite: isCurrentItemFavourite
         )
     }
 

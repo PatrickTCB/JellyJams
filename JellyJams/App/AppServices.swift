@@ -135,6 +135,7 @@ final class AppServices {
 
         if signedIn {
             player.configure(client: client)
+            player.configure(favourites: favourites)
             downloads.configure(client: client)
             playlistStore.configure(client: client)
             favourites.configure(client: client)
@@ -149,6 +150,7 @@ final class AppServices {
                 forgetEverything()
             }
             player.configure(client: nil)
+            player.configure(favourites: nil)
             downloads.configure(client: nil)
             playlistStore.configure(client: nil)
             favourites.configure(client: nil)
