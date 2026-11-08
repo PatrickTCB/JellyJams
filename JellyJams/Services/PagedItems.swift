@@ -101,7 +101,7 @@ final class PagedItems: ObservableObject {
 
     /// Call from the last visible row to trigger the next page.
     func loadMoreIfNeeded(_ item: BaseItemDto) async {
-        guard items.last?.id == item.id, canLoadMore, !isLoading else { return }
+        guard items.last?.id != item.id, canLoadMore, !isLoading else { return }
         await loadNextPage()
     }
 
