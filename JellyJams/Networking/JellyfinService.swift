@@ -173,28 +173,6 @@ final class JellyfinService: Sendable {
         return try validated(result)
     }
 
-    /// The newest items of the given kinds (`/Items/Latest`).
-    ///
-    /// This endpoint answers with a bare array rather than a query result, so
-    /// it validates its own identifiers instead of going through
-    /// ``validated(_:)``.
-    func getLatestMedia(includeItemTypes: [ItemType], limit: Int) async throws -> [BaseItemDto] {
-        let userId = try requireUserId()
-        let request = Paths.getLatestMedia(
-            parameters: .init(
-                userID: userId,
-                fields: Self.defaultFields,
-                includeItemTypes: includeItemTypes,
-                enableImages: true,
-                enableUserData: true,
-                limit: limit
-            )
-        )
-        let items = try await apiClient.send(request).value
-        guard items.allSatisfy({ $0.id != nil }) else { throw JellyfinError.missingItemIdentifier }
-        return items
-    }
-
     func getAlbumArtists(
         searchTerm: String? = nil,
         sortBy: SortBy? = .sortName,
@@ -265,6 +243,27 @@ final class JellyfinService: Sendable {
         return try validated(result)
     }
 
+    // MARK: - Instant mix
+
+    /// Songs the server mixes from a seed song, album, artist or playlist
+    /// (`/Items/{id}/InstantMix`), in the order it suggests playing them.
+    func getInstantMix(itemId: String?, limit: Int) async throws -> BaseItemDtoQueryResult {
+        let userId = try requireUserId()
+        guard let itemId else { throw JellyfinError.missingItemIdentifier }
+        let request = Paths.getInstantMixFromItem(
+            itemID: itemId,
+            parameters: .init(
+                userID: userId,
+                limit: limit,
+                fields: Self.defaultFields,
+                enableImages: true,
+                enableUserData: true
+            )
+        )
+        let result = try await apiClient.send(request).value
+        return try validated(result)
+    }
+
     func getPlaylistItems(playlistId: String?) async throws -> BaseItemDtoQueryResult {
         let userId = try requireUserId()
         guard let playlistId else { throw JellyfinError.missingItemIdentifier }
@@ -304,6 +303,23 @@ final class JellyfinService: Sendable {
             found.append(contentsOf: try await getItems(includeItemTypes: [.musicAlbum], ids: chunk).items ?? [])
         }
         return found
+    }
+
+    /// Tracks by id, in the order the ids were given. The server answers an
+    /// ids query in its own order, so the result is re-sorted against the
+    /// request — the caller's order is the whole point: it is the order the
+    /// backend picked queue extensions in, which is the order they play in.
+    /// Ids nothing resolves to are dropped rather than failing the batch.
+    func tracks(byIds ids: [String]) async throws -> [BaseItemDto] {
+        var found: [BaseItemDto] = []
+        for chunk in ids.chunked(into: Self.playlistBatchSize) {
+            found.append(contentsOf: try await getItems(includeItemTypes: [.audio], ids: chunk).items ?? [])
+        }
+        var byId: [String: BaseItemDto] = [:]
+        for item in found {
+            if let id = item.id { byId[id] = item }
+        }
+        return ids.compactMap { byId[$0] }
     }
 
     /// Resolves every audio track belonging to a collection item (album,
@@ -381,7 +397,7 @@ final class JellyfinService: Sendable {
 
     /// Moves a playlist entry to a new position
     /// (`POST /Playlists/{id}/Items/{entryId}/Move/{index}`). The identifier is
-    /// the entry's `PlaylistItemId` — the same one removal takes — not the
+    /// the entry's `playlistItemID` — the same one removal takes — not the
     /// track id.
     func moveItemInPlaylist(playlistId: String?, entryId: String, to index: Int) async throws {
         guard let playlistId, !entryId.isEmpty else { throw JellyfinError.missingItemIdentifier }

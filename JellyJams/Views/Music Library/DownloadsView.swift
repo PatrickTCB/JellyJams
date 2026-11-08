@@ -1,16 +1,19 @@
 import SwiftUI
 
-/// The Downloads section: every song saved for offline playback, presented the
-/// way Library and Favourites present theirs — a segmented
-/// Songs / Albums / Artists / Playlists picker, with albums and artists as the
-/// same artwork grids those sections show (square album covers, circular
-/// artist photos) and songs and playlists as lists, and a
-/// ``DownloadStatusBar`` under the picker while downloads run. Albums and
-/// artists are views derived from the songs' own metadata, playlists are
-/// saved membership records, and nothing here asks the server for anything:
-/// the section is wrapped in ``downloadsBrowsing()``, cells and rows read the
-/// manifest, and artwork comes from saved files. Removing a collection
-/// unreferences its songs; only songs no other download requires disappear.
+/// The Downloads section: every song saved for offline playback. A segmented
+/// Albums / Artists / Playlists / Songs picker — the pattern Favourites uses —
+/// with albums and artists as the same artwork grids those sections show
+/// (square album covers, circular artist photos), songs and playlists as
+/// lists, and a ``DownloadStatusBar`` under the picker while downloads run.
+/// Albums and artists are views derived from the songs' own metadata,
+/// playlists are saved membership records, and browsing asks the server for
+/// nothing: the section is wrapped in ``downloadsBrowsing()``, cells and rows
+/// read the manifest, and artwork comes from saved files. The exceptions are
+/// the deliberate, signed-in actions the user invokes — the artist-artwork
+/// refresh, an album's "Download Missing Songs", an offline playlist's
+/// refresh. Removing a collection deletes the songs it stands for, whatever
+/// else required them; the collections left behind keep listing and report
+/// what they still have.
 ///
 /// The Albums tab starts filtered to albums that are fully on disk — the filter
 /// menu in the toolbar shows the partial ones, and the choice is remembered in
@@ -325,8 +328,8 @@ struct DownloadsView: View {
                 }
                 .padding()
 
-                // A filter that hides things says so where the results end, with
-                // one tap to show them again.
+                // A filter that hides things says so where the results end;
+                // the toolbar's filter menu is how they come back.
                 if filtered, hidden > 0 {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Hiding \(Format.albumCount(hidden)) not downloaded in full.")
@@ -537,8 +540,8 @@ struct DownloadedGroupCell: View {
 
 /// Right-click (macOS) and long-press (iOS / iPadOS) actions for a downloaded
 /// group, whether it was downloaded itself or surfaced through another
-/// collection. The actions match the ones a Library tile offers, but every
-/// one is answered from the manifest: Play and Shuffle start the group's
+/// collection. The playback actions match the ones a Library tile offers, but
+/// every one is answered from the manifest: Play and Shuffle start the group's
 /// songs on disk with playback resolving each to its saved file, Play Next
 /// and Add to Queue enqueue them the same way. An album that isn't complete
 /// also gets a fill-in action: the one deliberate, signed-in exception,

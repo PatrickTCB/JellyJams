@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A single track row used in album detail, songs, search and queue lists.
-/// The row follows the standard music-list model everywhere: a single tap or
-/// click belongs to the enclosing list's selection, and playback is a
+/// A single track row used in the album and playlist details, the songs,
+/// favourites and downloads lists, search results, and an artist's featured
+/// songs. The row follows the standard music-list model everywhere: a single
+/// tap or click belongs to the enclosing list's selection, and playback is a
 /// deliberate second gesture — a double-click on macOS, a tap outside edit
 /// mode on iOS. Lists that keep whole-row tap-to-play (search results, whose
 /// List is a navigation list and binds no selection) set ``tapBehavior`` to
@@ -40,6 +41,7 @@ struct TrackRow: View {
 
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var navigator: LibraryNavigator
     @EnvironmentObject private var playlistStore: PlaylistStore
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
@@ -57,8 +59,8 @@ struct TrackRow: View {
     #if os(iOS)
     /// Active while an enclosing list is in edit mode — playlist detail's
     /// selection mode. The row then stops playing on tap so the list can
-    /// select it instead. macOS has no edit mode: rows are selected there
-    /// with a click and modifier-clicks, and keep playing on a plain click.
+    /// select it instead. macOS has no edit mode: a click and modifier-clicks
+    /// select there, and a double-click plays.
     @Environment(\.editMode) private var editMode
     #endif
 
@@ -218,6 +220,10 @@ struct TrackRow: View {
         Button { onPlay() } label: { Label("Play", systemImage: "play.fill") }
         Button { player.playNext(contextTracks) } label: { Label("Play Next", systemImage: "text.insert") }
         Button { player.addToQueue(contextTracks) } label: { Label("Add to Queue", systemImage: "text.append") }
+        // Seeded by one song, so it isn't offered for a multi-row selection.
+        if contextTracks.count == 1 {
+            InstantMixButton(item: track)
+        }
 
         Menu {
             Button {
@@ -238,11 +244,39 @@ struct TrackRow: View {
             Label("Add to Playlist", systemImage: "text.badge.plus")
         }
 
+        // The song option covers the selection the row belongs to; the
+        // album and artist options stay the row's own, as its navigation
+        // buttons do.
+        BanMenu(item: track, selectedSongIds: contextTracks.compactMap(\.id))
+
         if let onRemoveFromPlaylist {
             Button(role: .destructive, action: onRemoveFromPlaylist) {
                 Label("Remove from Playlist", systemImage: "minus.circle")
             }
         }
+
+        // The artist and album pages load from the server, so browsing
+        // downloads doesn't offer them — the rule Instant Mix follows.
+        // Navigation always means the row's own album and artist, whatever
+        // the selection.
+        if !offlineBrowsing {
+            let artists = track.artistNavigationItems
+            let album = track.albumNavigationItem
+            if !artists.isEmpty || album != nil {
+                Divider()
+                ForEach(artists) { artist in
+                    Button { navigator.open(artist) } label: {
+                        Label(artist.displayName, systemImage: "person")
+                    }
+                }
+                if let album {
+                    Button { navigator.open(album) } label: {
+                        Label(album.displayName, systemImage: "record.circle.fill")
+                    }
+                }
+            }
+        }
+
         Divider()
         Button { toggleFavourites() } label: {
             Label(allFavourite ? "Remove from Favourites" : "Add to Favourites",

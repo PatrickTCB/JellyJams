@@ -4,7 +4,7 @@ import JellyfinAPI
 /// Sort choices exposed by the app, mapped to the SDK's ordered sort fields.
 enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
     case sortName = "SortName"
-    case albumArtist = "AlbumArtist,SortName"
+    case albumArtist = "AlbumArtist,PremiereDate,SortName"
     /// Album-artist ordering that keeps each album's tracks together, in
     /// track order. Offered by the Downloads songs list only; the
     /// server-backed Library lists don't include it.
@@ -12,6 +12,9 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
     case album = "Album,SortName"
     case artist = "Artist,SortName"
     case dateCreated = "DateCreated,SortName"
+    /// Newest by the item's own premiere date. Not shown in sort menus;
+    /// the home screen's "new artists" row is its only user.
+    case premiereDate = "PremiereDate,SortName"
     case datePlayed = "DatePlayed,SortName"
     case playCount = "PlayCount,SortName"
     case productionYear = "ProductionYear,PremiereDate,SortName"
@@ -26,11 +29,12 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
     var sdkValues: [JellyfinAPI.ItemSortBy] {
         switch self {
         case .sortName: [.sortName]
-        case .albumArtist: [.albumArtist, .sortName]
+        case .albumArtist: [.albumArtist, .premiereDate, .sortName]
         case .albumArtistTrackOrder: [.albumArtist, .album, .parentIndexNumber, .indexNumber, .sortName]
         case .album: [.album, .sortName]
         case .artist: [.artist, .sortName]
         case .dateCreated: [.dateCreated, .sortName]
+        case .premiereDate: [.premiereDate, .sortName]
         case .datePlayed: [.datePlayed, .sortName]
         case .playCount: [.playCount, .sortName]
         case .productionYear: [.productionYear, .premiereDate, .sortName]
@@ -49,6 +53,7 @@ enum SortBy: String, Codable, Sendable, CaseIterable, Identifiable {
         case .album: return "Album"
         case .artist: return "Artist"
         case .dateCreated: return "Date Added"
+        case .premiereDate: return "Premiere Date"
         case .datePlayed: return "Date Played"
         case .playCount: return "Play Count"
         case .productionYear: return "Year"

@@ -3,9 +3,9 @@ import Foundation
 /// Every library read the UI performs, in one place.
 ///
 /// Views describe *what* they want — a ``LibraryQuery``, an artist's overview,
-/// a search term — and this type owns *how* it is fetched. No view builds a
-/// Jellyfin request or reaches into ``SessionStore/client``, so a new screen
-/// inherits paging, sorting and error handling instead of reimplementing them.
+/// a search term — and this type owns *how* it is fetched, so a screen that
+/// goes through it inherits paging, sorting and error handling instead of
+/// reimplementing them.
 ///
 /// The client is optional so that a repository always exists, signed in or
 /// not. A read attempted while signed out throws
@@ -34,6 +34,10 @@ struct LibraryRepository: Sendable {
     private static let searchGenreFoldIn = 5
 
     private static let genreItemLimit = 100
+
+    /// Length of an instant mix queue. Matches what Jellyfin's own web client
+    /// asks for.
+    private static let instantMixLimit = 200
 
     init(client: JellyfinService?) {
         self.client = client
@@ -86,7 +90,7 @@ struct LibraryRepository: Sendable {
     }
 
     /// A page of playlists, split by name when the query asks for one half of
-    /// the AudioMuse-AI partition.
+    /// the Mixtapes partition.
     ///
     /// The split is applied here rather than by the server. Jellyfin's only
     /// name query is `searchTerm`, which matches anywhere in a name and would
@@ -100,7 +104,7 @@ struct LibraryRepository: Sendable {
     /// Deliberately no cap on the whole-list fetch: unlike ``JellyfinService``'s
     /// `getPlaylists()`, which feeds a menu that nobody scrolls past a few
     /// hundred entries, this response *is* the screen's content, so a limit
-    /// would quietly leave stations out of a large library.
+    /// would quietly leave mixtapes out of a large library.
     private func playlistPage(
         _ query: LibraryQuery,
         startIndex: Int,
@@ -131,9 +135,12 @@ struct LibraryRepository: Sendable {
 
     // MARK: - Home
 
-    /// Which of Jellyfin's "latest" streams a home row wants. Albums and
-    /// artists are requested separately because the endpoint filters by item
-    /// type, and a mixed request would let one kind crowd out the other.
+    /// Which kind of "new music" a home row wants. Albums and artists are
+    /// requested separately because each request carries its own limit, and
+    /// a mixed one would let the more numerous kind crowd the other out.
+    /// The two are also judged by different dates: an album is new when it
+    /// joins the library, while an artist surfaces through the premiere
+    /// dates of their releases.
     enum LatestKind: Sendable, Equatable {
         case albums
         case artists
@@ -144,13 +151,31 @@ struct LibraryRepository: Sendable {
             case .artists: .musicArtist
             }
         }
+
+        var sortBy: SortBy {
+            switch self {
+            case .albums: .dateCreated
+            case .artists: .premiereDate
+            }
+        }
     }
 
-    /// The newest music of one kind, newest first.
+    /// The newest music of one kind, newest first: a plain `/Items` query
+    /// sorted descending by the kind's own date. `/Items/Latest` was tried
+    /// first and proved the weaker source — it keys off when items entered
+    /// the library, so an artist only surfaces when their folder is added,
+    /// however recent their music.
     func latestItems(_ kind: LatestKind, limit: Int) async throws -> [BaseItemDto] {
         let client = try requireClient()
         guard limit > 0 else { return [] }
-        return try await client.getLatestMedia(includeItemTypes: [kind.itemType], limit: limit)
+        let result = try await client.getItems(
+            includeItemTypes: [kind.itemType],
+            recursive: true,
+            sortBy: kind.sortBy,
+            sortOrder: .descending,
+            limit: limit
+        )
+        return result.items ?? []
     }
 
     /// Resolves specific item ids, in whatever order the server answers.
@@ -165,15 +190,15 @@ struct LibraryRepository: Sendable {
         return result.items ?? []
     }
 
-    /// The first `limit` AudioMuse-AI stations, by name.
+    /// The first `limit` backend-built mixtapes, by name.
     ///
-    /// Reuses the same whole-list fetch and name split as the AI Radio screen:
+    /// Reuses the same whole-list fetch and name split as the Mixtapes screen:
     /// Jellyfin cannot filter by name ending, so a window applied server-side
     /// could hide matches beyond it.
-    func aiRadioStations(nameFilter: PlaylistNameFilter, limit: Int) async throws -> [BaseItemDto] {
+    func mixtapes(nameFilter: PlaylistNameFilter, limit: Int) async throws -> [BaseItemDto] {
         guard limit > 0 else { return [] }
         let result = try await page(
-            LibraryQuery(list: .aiRadioPlaylists, nameFilter: nameFilter),
+            LibraryQuery(list: .mixtapePlaylists, nameFilter: nameFilter),
             startIndex: 0,
             limit: limit
         )
@@ -352,6 +377,17 @@ struct LibraryRepository: Sendable {
             result = try await client.getSimilarArtists(itemId: item.id, limit: limit)
         }
         return result.items ?? []
+    }
+
+    // MARK: - Instant mix
+
+    /// A queue of songs the server mixes from `item` — a song, album, artist
+    /// or playlist. Anything that isn't a song is dropped, so the result can
+    /// go straight to the player.
+    func instantMix(for item: BaseItemDto) async throws -> [BaseItemDto] {
+        let client = try requireClient()
+        let result = try await client.getInstantMix(itemId: item.id, limit: Self.instantMixLimit)
+        return (result.items ?? []).filter { $0.itemType == .audio }
     }
 
     // MARK: - Search

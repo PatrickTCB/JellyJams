@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The app's settings screen. Phase 1 exposes account details and sign out;
-/// playback/download preferences arrive in a later phase.
+/// The app's settings screen: the account and its sign-out, the library,
+/// the Jelly Jams Backend sheet, and the default-playback choice.
 ///
 /// On macOS this is the content of the `Settings` scene — the standard
 /// settings window, opened from the app menu with ⌘, or from ``AccountMenu``.
@@ -14,6 +14,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     #endif
     @State private var isChoosingDefaultPlayback = false
+    @State private var isShowingBackendSettings = false
 
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -75,22 +76,13 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("AudioMuse-AI Radio", isOn: $preferences.aiRadioEnabled)
-                if preferences.aiRadioEnabled {
-                    TextField(
-                        "Name ends with",
-                        text: $preferences.aiRadioSuffix,
-                        prompt: Text(PreferencesStore.defaultAIRadioSuffix)
-                    )
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    #endif
+                Button {
+                    isShowingBackendSettings = true
+                } label: {
+                    LabeledContent("Jelly Jams Backend", value: backendSettingsSummary)
                 }
-            } header: {
-                Text("AI Radio")
             } footer: {
-                Text("Gathers the playlists AudioMuse-AI generates into an AI Radio section, where a tap plays the station instead of opening it, and hides them from Playlists. They are recognised by this ending in their name.")
+                Text("The companion / sidecar service behind generated features like Mixtapes and the Server Playlist '\(preferences.serverPlaylist)'. Its settings check in with the backend as they open — unreachable, they show what was last saved.")
             }
 
             Section {
@@ -110,6 +102,15 @@ struct SettingsView: View {
         .sheet(isPresented: $isChoosingDefaultPlayback) {
             DefaultPlaybackSettingsView()
         }
+        .sheet(isPresented: $isShowingBackendSettings) {
+            JellyJamsBackendSettingsView()
+        }
+    }
+
+    /// One glance at how far the backend relationship got: an address alone
+    /// is ambition, registration is the fact.
+    private var backendSettingsSummary: String {
+        preferences.isMixtapesActive ? "Registered" : "Not registered"
     }
 
     private var defaultPlaybackSummary: String {

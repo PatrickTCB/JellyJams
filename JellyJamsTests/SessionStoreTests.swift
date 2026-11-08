@@ -25,4 +25,27 @@ final class SessionStoreTests: XCTestCase {
             XCTAssertThrowsError(try SessionStore.normalizeServerURL(address), address)
         }
     }
+
+    /// The sign-out reset takes the device identity too: a new id is
+    /// generated and persisted, so the next sign-in appears on the server as
+    /// a brand-new device — what a fresh install would present.
+    func testRegeneratingTheDeviceIdentityTakesANewOneAndPersistsIt() {
+        let key = DeviceInfo.deviceIdDefaultsKey
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
+        let store = SessionStore()
+        let old = store.deviceInfo.deviceId
+
+        store.regenerateDeviceIdentity()
+
+        XCTAssertNotEqual(store.deviceInfo.deviceId, old)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: key), store.deviceInfo.deviceId)
+    }
 }

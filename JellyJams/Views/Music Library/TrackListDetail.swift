@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Shared layout for a "collection of tracks" detail screen (an album or a
-/// playlist): a large header with artwork, metadata and Play/Shuffle actions,
-/// followed by the track list.
+/// playlist): a large header with artwork, metadata and Play/Shuffle actions
+/// (plus Instant Mix when online), followed by the track list.
 struct TrackListDetail: View {
     let headerItem: BaseItemDto
     var subtitle: String?
@@ -347,6 +347,12 @@ struct TrackListDetail: View {
             }
             .buttonStyle(.bordered)
             .disabled(tracks.isEmpty)
+
+            if !downloaded {
+                InstantMixButton(item: headerItem)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.bordered)
+            }
         }
     }
 
@@ -384,8 +390,8 @@ struct TrackListDetail: View {
     /// Playlists are the only collection whose order the user owns — albums
     /// are disc/track sorted, and downloaded collections are offline copies
     /// whose order no server call would change. Only an editable,
-    /// server-backed playlist gets row selection, drag reordering and batch
-    /// removal.
+    /// server-backed playlist gets drag reordering and batch removal; row
+    /// selection itself exists on every collection.
     private var isEditablePlaylist: Bool {
         headerItem.itemType == .playlist && !downloaded
     }
@@ -393,8 +399,8 @@ struct TrackListDetail: View {
     private func removeFromPlaylist(_ track: BaseItemDto) {
         guard let entryId = track.playlistItemID else { return }
         Task {
-            // ponytail: failed removes surface as the track simply surviving
-            // the reload; no separate error UI.
+            // Failed removes surface as the track simply surviving the
+            // reload; no separate error UI.
             try? await session.library.removeFromPlaylist(playlistId: headerItem.id, entryIds: [entryId])
             await reload()
         }
@@ -438,8 +444,8 @@ struct TrackListDetail: View {
         let after = tracks
         Task {
             await replay(Self.movePlan(from: before, to: after))
-            // ponytail: the optimistic move is already on screen, so success
-            // and failure share one outcome — the reload shows the server's
+            // The optimistic move is already on screen, so success and
+            // failure share one outcome — the reload shows the server's
             // arrangement, which confirms the drag or snaps the list back if
             // a move was rejected. No separate error UI for either.
             await reload()
@@ -496,8 +502,8 @@ struct TrackListDetail: View {
         guard !entryIds.isEmpty else { return }
         selection = []
         Task {
-            // ponytail: failed removes surface as the tracks simply surviving
-            // the reload; no separate error UI.
+            // Failed removes surface as the tracks simply surviving the
+            // reload; no separate error UI.
             try? await session.library.removeFromPlaylist(playlistId: headerItem.id, entryIds: entryIds)
             await reload()
         }
@@ -690,6 +696,8 @@ extension Array where Element == BaseItemDto {
             return compare(lhs.album ?? "", rhs.album ?? "")
         case .dateCreated:
             return compare(lhs.dateCreated ?? .distantPast, rhs.dateCreated ?? .distantPast)
+        case .premiereDate:
+            return compare(lhs.premiereDate ?? .distantPast, rhs.premiereDate ?? .distantPast)
         case .datePlayed:
             return compare(lhs.userData?.lastPlayedDate ?? .distantPast, rhs.userData?.lastPlayedDate ?? .distantPast)
         case .playCount:

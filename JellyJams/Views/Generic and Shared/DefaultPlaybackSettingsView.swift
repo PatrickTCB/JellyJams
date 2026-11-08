@@ -5,10 +5,11 @@ import SwiftUI
 /// queued, plus its shuffle and repeat settings.
 ///
 /// Unset means the built-in favourites shuffle, which stays pinned at the top
-/// of the sheet so it is always one tap away. Items are found with the same
-/// literal server search the library uses; picking one stores its id, kind
-/// and title (``DefaultPlaybackSetting``), and ``DefaultPlaybackResolver``
-/// rehydrates the tracks at play time.
+/// of the sheet so it is always one tap away. Items are found with the
+/// server's literal search-term matching, in this sheet's own lightweight
+/// search; picking one stores its id, kind and title
+/// (``DefaultPlaybackSetting``), and ``DefaultPlaybackResolver`` rehydrates
+/// the tracks at play time.
 struct DefaultPlaybackSettingsView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var preferences: PreferencesStore

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// One tile in a home row: the standard grid cell at a fixed size. It
 /// navigates through the library stack unless `onSelect` replaces the tap
-/// action, the way station tiles play instead of opening.
+/// action, the way mixtape tiles play instead of opening.
 struct HomeItemTile: View {
     static let width: CGFloat = 150
 

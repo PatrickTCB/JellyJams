@@ -15,6 +15,10 @@ final class ImageCache: @unchecked Sendable {
         cache.countLimit = 500
     }
 
+    /// Drops every decoded image — part of the reset a server sign-out
+    /// performs, which leaves nothing a fresh install would not have.
+    func removeAll() { cache.removeAllObjects() }
+
     func image(for url: URL) -> PlatformImage? { cache.object(forKey: url.cacheKey()) }
     func set(_ image: PlatformImage, for url: URL) { cache.setObject(image, forKey: url.cacheKey()) }
 
@@ -36,9 +40,14 @@ private extension URL {
 }
 
 enum ArtworkLoader {
+    /// The artwork HTTP cache, held here rather than inline in the session's
+    /// configuration so the reset a server sign-out performs can empty it:
+    /// a fresh install starts with no artwork stored, on disk or in memory.
+    static let urlCache = URLCache(memoryCapacity: 32 * 1024 * 1024, diskCapacity: 512 * 1024 * 1024)
+
     static let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.urlCache = URLCache(memoryCapacity: 32 * 1024 * 1024, diskCapacity: 512 * 1024 * 1024)
+        config.urlCache = urlCache
         config.requestCachePolicy = .returnCacheDataElseLoad
         JellyfinService.registerAuditProtocol(in: config)
         return URLSession(configuration: config)

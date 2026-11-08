@@ -67,57 +67,7 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
-    // MARK: - Latest media & id lookups
-
-    func testLatestMediaRequestsTheLatestEndpointForOneItemType() async throws {
-        let recorder = RequestRecorder()
-        URLProtocolStub.handler = { request in
-            recorder.record(request)
-            let response = try XCTUnwrap(
-                HTTPURLResponse(
-                    url: try XCTUnwrap(request.url),
-                    statusCode: 200,
-                    httpVersion: nil,
-                    headerFields: ["Content-Type": "application/json"]
-                )
-            )
-            let data = Data(#"[{"Id":"album-1","Name":"album-1","Type":"MusicAlbum"}]"#.utf8)
-            return (response, data)
-        }
-
-        let items = try await makeClient().getLatestMedia(includeItemTypes: [.musicAlbum], limit: 10)
-
-        let request = try XCTUnwrap(recorder.all.first)
-        XCTAssertEqual(request.path, "/jellyfin/Items/Latest")
-        XCTAssertEqual(request.values(for: "includeItemTypes"), ["MusicAlbum"])
-        XCTAssertEqual(request.value(for: "limit"), "10")
-        XCTAssertEqual(items.compactMap(\.id), ["album-1"])
-    }
-
-    /// `/Items/Latest` answers with a bare array rather than a query result,
-    /// so it must validate its own identifiers.
-    func testLatestMediaRejectsItemsWithoutIdentifiers() async {
-        URLProtocolStub.handler = { request in
-            let response = try XCTUnwrap(
-                HTTPURLResponse(
-                    url: try XCTUnwrap(request.url),
-                    statusCode: 200,
-                    httpVersion: nil,
-                    headerFields: ["Content-Type": "application/json"]
-                )
-            )
-            return (response, Data(#"[{"Name":"Missing ID","Type":"MusicAlbum"}]"#.utf8))
-        }
-
-        do {
-            _ = try await makeClient().getLatestMedia(includeItemTypes: [.musicAlbum], limit: 10)
-            XCTFail("Expected an incomplete SDK item to be rejected")
-        } catch JellyfinError.missingItemIdentifier {
-            // Expected.
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
+    // MARK: - Id lookups
 
     func testItemLookupByIdsSendsTheIdsFilter() async throws {
         let recorder = RequestRecorder()
@@ -169,6 +119,35 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertTrue(recorder.all.isEmpty, "Nothing to look up sends nothing")
     }
 
+    /// The order the ids were asked in is the whole point: it is the order
+    /// the backend picked queue extensions in, and the server answers an ids
+    /// query in its own order. The stub answers reversed on purpose.
+    func testTracksByIdsComeBackInTheRequestedOrder() async throws {
+        URLProtocolStub.handler = { request in
+            let ids = RecordedRequest(request).values(for: "ids")
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                itemsPayload(ids.reversed().map { (id: $0, type: "Audio") })
+            )
+        }
+
+        let tracks = try await makeClient().tracks(byIds: ["t1", "t2", "t3"])
+
+        XCTAssertEqual(tracks.compactMap(\.id), ["t1", "t2", "t3"])
+    }
+
+    /// Ids the server does not know drop out without failing the batch — one
+    /// dead entry should not cost a whole queue top-up.
+    func testTracksByIdsDropIdsTheServerDoesNotKnow() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), itemsPayload([(id: "t1", type: "Audio")]))
+        }
+
+        let tracks = try await makeClient().tracks(byIds: ["t1", "gone"])
+
+        XCTAssertEqual(tracks.compactMap(\.id), ["t1"])
+    }
+
     func testStreamURLIncludesPlaybackSessionAndCredentials() throws {
         let url = try makeClient().streamURL(
             itemId: "track-id",
@@ -179,7 +158,7 @@ final class JellyfinServiceTests: XCTestCase {
         let query = components.queryItems ?? []
 
         XCTAssertEqual(components.path, "/jellyfin/Audio/track-id/stream")
-        XCTAssertEqual(query.last(where: { $0.name == "api_key" })?.value, "token")
+        XCTAssertEqual(query.last(where: { $0.name == "ApiKey" })?.value, "token")
         XCTAssertEqual(query.last(where: { $0.name == "deviceId" })?.value, "device-id")
         XCTAssertEqual(query.last(where: { $0.name == "mediaSourceId" })?.value, "source-id")
         XCTAssertEqual(query.last(where: { $0.name == "playSessionId" })?.value, "session-id")
@@ -407,7 +386,7 @@ final class JellyfinServiceTests: XCTestCase {
 
         let url = try XCTUnwrap(makeClient().artworkURL(for: album, size: 320))
 
-        XCTAssertEqual(queryValue(url, "api_key"), "token")
+        XCTAssertEqual(queryValue(url, "ApiKey"), "token")
     }
 
     func testArtworkForAnItemWithoutAnIdentifierIsNil() {

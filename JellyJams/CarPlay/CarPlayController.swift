@@ -1,17 +1,19 @@
 #if os(iOS)
 import CarPlay
+import Combine
 import UIKit
 
 /// Builds and drives the CarPlay interface.
 ///
 /// A single shared instance is configured from the SwiftUI app — which owns the
 /// service objects — and connected from ``CarPlaySceneDelegate`` when CarPlay
-/// attaches. The root is a ``CPTabBarTemplate`` with Favourites (the default
-/// tab), Downloads and Library, mirroring the iOS Music app. Each tab is a
+/// attaches. The root is a ``CPTabBarTemplate`` with Home (the default tab,
+/// the user's pinned items), Favourites, Downloads and Library, mirroring the
+/// iOS Music app and the phone app's own tab order. Each tab is a
 /// ``CPListTemplate`` whose rows push item lists; selecting a track starts
 /// playback and presents the system Now Playing template.
 @MainActor
-final class CarPlayController {
+final class CarPlayController: NSObject {
     static let shared = CarPlayController()
 
     private weak var interfaceController: CPInterfaceController?
@@ -19,32 +21,52 @@ final class CarPlayController {
     private var session: SessionStore?
     private var player: PlayerController?
     private var downloads: DownloadStore?
+    private var pinnedItems: PinnedItemsStore?
 
-    private init() {}
+    /// The Home tab's list and its subscriptions to the store. All belong to
+    /// one CarPlay connection: the template is rebuilt on every connect, and
+    /// the subscriptions end on disconnect so a detached template is never
+    /// updated and a reconnect starts observing afresh.
+    private var homeTemplate: CPListTemplate?
+    private var pinnedCancellables: [AnyCancellable] = []
+    /// A pin refresh in flight, so a second trigger landing mid-request does
+    /// not start another one.
+    private var isRefreshingPins = false
+
+    private override init() {
+        super.init()
+    }
 
     /// Captures the app's service objects. Called from the SwiftUI app; the
     /// references are read lazily by the handlers, so a template can be built
     /// before or after this runs.
-    func configure(session: SessionStore, player: PlayerController, downloads: DownloadStore) {
+    func configure(session: SessionStore, player: PlayerController, downloads: DownloadStore, pinnedItems: PinnedItemsStore) {
         self.session = session
         self.player = player
         self.downloads = downloads
+        self.pinnedItems = pinnedItems
+        observePinnedItems()
     }
 
     func connect(_ interfaceController: CPInterfaceController) {
         self.interfaceController = interfaceController
         interfaceController.setRootTemplate(rootTemplate(), animated: false, completion: nil)
+        observePinnedItems()
     }
 
     func disconnect(_ interfaceController: CPInterfaceController) {
         if self.interfaceController === interfaceController {
             self.interfaceController = nil
+            homeTemplate = nil
+            pinnedCancellables.removeAll()
         }
     }
 
     // MARK: - Root
 
     private func rootTemplate() -> CPTabBarTemplate {
+        let home = makeHomeTemplate()
+
         let favourites = CPListTemplate(title: "Favourites", sections: [
             CPListSection(items: [
                 shuffleItem("Shuffle Favourite Songs") { [weak self] in
@@ -105,7 +127,150 @@ final class CarPlayController {
             ]),
         ])
 
-        return CPTabBarTemplate(templates: [favourites, downloads, library])
+        let tabBar = CPTabBarTemplate(templates: [home, favourites, downloads, library])
+        tabBar.delegate = self
+        return tabBar
+    }
+
+    // MARK: - Home (pinned items)
+
+    private func makeHomeTemplate() -> CPListTemplate {
+        let template = CPListTemplate(title: "Home", sections: [])
+        template.emptyViewTitleVariants = ["Nothing pinned"]
+        homeTemplate = template
+        return template
+    }
+
+    /// Mirrors the store onto the Home tab. Runs once the store and the
+    /// template are both in place — whichever of `configure` and `connect`
+    /// lands second — and each subscription's immediate first emission covers
+    /// the state that is already current: rows from the entries as they
+    /// stand, a resolve for the pins as they stand. From then on the store
+    /// drives both, so pins made, removed or resolved on the phone while
+    /// CarPlay is connected update the car's rows live — including a sign-in
+    /// that happens after the car is already showing Home.
+    private func observePinnedItems() {
+        guard pinnedCancellables.isEmpty, let pinnedItems, let homeTemplate else { return }
+        pinnedItems.$entries
+            .sink { [weak self] entries in
+                guard let self else { return }
+                homeTemplate.updateSections([CPListSection(items: entries.map { self.pinnedRow($0) })])
+            }
+            .store(in: &pinnedCancellables)
+        // The pin set itself changing — a sign-in restoring pins, a pin made
+        // or removed anywhere in the app — is the resolve trigger. Refresh
+        // only ever rewrites entries, so this cannot feed itself.
+        pinnedItems.$pins
+            .sink { [weak self] pins in
+                guard !pins.isEmpty else { return }
+                self?.refreshPins()
+            }
+            .store(in: &pinnedCancellables)
+    }
+
+    /// Resolves the pins against the server the way the phone's Home does on
+    /// appear: whenever the pin set changes and whenever the Home tab is
+    /// selected.
+    private func refreshPins() {
+        guard !isRefreshingPins, let pinnedItems, let session else { return }
+        isRefreshingPins = true
+        Task {
+            await pinnedItems.refresh(using: session.library)
+            self.isRefreshingPins = false
+        }
+    }
+
+    /// A row for one pin. A resolved pin browses like any other collection
+    /// row; an unresolved or missing one is shown from its stored name under a
+    /// kind placeholder — the car's take on the phone's `UnresolvedPinTile` —
+    /// and a tap asks the server about it now.
+    private func pinnedRow(_ entry: PinnedItemsStore.Entry) -> CPListItem {
+        switch entry.state {
+        case .resolved(let item):
+            return collectionItem(item) { [weak self] in
+                self?.pushOnlineCollection(item)
+            }
+        case .unresolved:
+            return unresolvedPinnedRow(entry, isMissing: false)
+        case .missing:
+            return unresolvedPinnedRow(entry, isMissing: true)
+        }
+    }
+
+    private func unresolvedPinnedRow(_ entry: PinnedItemsStore.Entry, isMissing: Bool) -> CPListItem {
+        let item = CPListItem(
+            text: entry.pin.name,
+            detailText: isMissing ? "Unavailable" : nil,
+            image: UIImage(systemName: placeholderSystemImage(for: entry.pin.kind))
+        )
+        item.accessoryType = .disclosureIndicator
+        item.handler = { [weak self] _, completion in
+            self?.usePinned(entry)
+            completion()
+        }
+        return item
+    }
+
+    /// The same placeholders the phone's unresolved pin tiles use.
+    private func placeholderSystemImage(for kind: PinnedItemsStore.Kind) -> String {
+        switch kind {
+        case .album: "record.circle.fill"
+        case .artist: "music.mic"
+        case .playlist: "music.note.list"
+        }
+    }
+
+    /// A tap on a pin the server has not currently resolved: ask about it
+    /// now. Answered present, the item opens; answered gone, the removal of
+    /// the pin is offered — the same conversation the phone's pinned row has,
+    /// with the confirmation dialog replaced by an alert because action
+    /// sheets are unavailable while driving.
+    private func usePinned(_ entry: PinnedItemsStore.Entry) {
+        guard let pinnedItems, let session else { return }
+        Task {
+            switch await pinnedItems.use(entry, using: session.library) {
+            case .resolved(let item):
+                pushOnlineCollection(item)
+            case .missing:
+                offerPinRemoval(entry.pin)
+            case .unavailable(let message):
+                showAlert(message)
+            case .cancelled:
+                break
+            }
+        }
+    }
+
+    private func offerPinRemoval(_ pin: PinnedItemsStore.PinnedItem) {
+        guard let interfaceController else { return }
+        let alert = CPAlertTemplate(
+            titleVariants: ["“\(pin.name)” no longer exists on your server."],
+            actions: [
+                CPAlertAction(title: "Remove Pin", style: .destructive) { [weak self] _ in
+                    self?.pinnedItems?.unpin(pin)
+                    self?.interfaceController?.dismissTemplate(animated: true, completion: nil)
+                },
+                CPAlertAction(title: "Keep Pin", style: .cancel) { [weak self] _ in
+                    self?.interfaceController?.dismissTemplate(animated: true, completion: nil)
+                },
+            ]
+        )
+        interfaceController.presentTemplate(alert, animated: true, completion: nil)
+    }
+
+    /// A one-button alert, for a failure with nowhere else to surface in the
+    /// car — the phone presents these through the root-hosted action alert.
+    private func showAlert(_ message: String) {
+        guard let interfaceController else { return }
+        let alert = CPAlertTemplate(
+            titleVariants: [message],
+            actions: [
+                CPAlertAction(title: "OK", style: .cancel) { [weak self] _ in
+                    self?.interfaceController?.dismissTemplate(animated: true, completion: nil)
+                },
+            ]
+        )
+        interfaceController.presentTemplate(alert, animated: true, completion: nil)
     }
 
     // MARK: - Row builders
@@ -378,6 +543,16 @@ final class CarPlayController {
             if let image = await CarPlayArtwork.image(from: url) {
                 listItem.setImage(image)
             }
+        }
+    }
+}
+
+extension CarPlayController: CPTabBarTemplateDelegate {
+    /// Re-resolves the pins when their tab is chosen, the way the phone's
+    /// Home re-resolves whenever it appears.
+    func tabBarTemplate(_ tabBarTemplate: CPTabBarTemplate, didSelect selectedTemplate: CPTemplate) {
+        if selectedTemplate === homeTemplate {
+            refreshPins()
         }
     }
 }

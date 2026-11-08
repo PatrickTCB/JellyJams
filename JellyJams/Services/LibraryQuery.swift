@@ -14,11 +14,11 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
     case artists
     case songs
     case playlists
-    /// The playlists AudioMuse-AI generates, kept apart from ``playlists`` by
-    /// ``LibraryQuery/nameFilter``. A separate list — and so a separate
-    /// ``PagedItems`` — because it is its own screen with its own scroll
-    /// position, not the same list rendered differently.
-    case aiRadioPlaylists
+    /// The mixtapes the Jelly Jams Backend builds, kept apart from
+    /// ``playlists`` by ``LibraryQuery/nameFilter``. A separate list — and so
+    /// a separate ``PagedItems`` — because it is its own screen with its own
+    /// scroll position, not the same list rendered differently.
+    case mixtapePlaylists
     case favouriteSongs
     case favouriteAlbums
     case favouriteArtists
@@ -39,18 +39,18 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
         case .albums, .favouriteAlbums: .albums
         case .artists, .favouriteArtists: .artists
         case .songs, .favouriteSongs: .songs
-        case .playlists, .aiRadioPlaylists, .favouritePlaylists: .playlists
+        case .playlists, .mixtapePlaylists, .favouritePlaylists: .playlists
         }
     }
 
     /// Server-side filters that narrow the list. Only the favourite lists use
-    /// one; everything else browses the whole library. Splitting AI Radio out
+    /// one; everything else browses the whole library. Splitting Mixtapes out
     /// of the playlists is a *name* rule, which Jellyfin cannot express, so it
     /// lives in ``LibraryQuery/nameFilter`` instead.
     var filters: [ItemFilter]? {
         switch self {
         case .favouriteSongs, .favouriteAlbums, .favouriteArtists, .favouritePlaylists: [.isFavorite]
-        case .albums, .artists, .songs, .playlists, .aiRadioPlaylists: nil
+        case .albums, .artists, .songs, .playlists, .mixtapePlaylists: nil
         }
     }
 
@@ -66,7 +66,7 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
     var defaultSortBy: SortBy {
         switch self {
         case .albums, .favouriteAlbums: .albumArtist
-        case .artists, .favouriteArtists, .playlists, .aiRadioPlaylists, .favouritePlaylists: .sortName
+        case .artists, .favouriteArtists, .playlists, .mixtapePlaylists, .favouritePlaylists: .sortName
         case .songs, .favouriteSongs: .artist
         }
     }
@@ -84,14 +84,14 @@ enum LibraryList: String, Hashable, Sendable, CaseIterable {
             [.artist, .sortName, .album, .albumArtist, .dateCreated, .datePlayed, .runtime, .random]
         case .favouriteArtists:
             [.sortName, .random]
-        case .artists, .playlists, .aiRadioPlaylists, .favouritePlaylists:
+        case .artists, .playlists, .mixtapePlaylists, .favouritePlaylists:
             []
         }
     }
 }
 
-/// Splits the playlist list in two by a name ending — how the playlists
-/// AudioMuse-AI generates are told apart from the ones the user made.
+/// Splits the playlist list in two by a name ending — how the mixtapes the
+/// Jelly Jams Backend builds are told apart from the ones the user made.
 ///
 /// Jellyfin has no "name ends with" query, so the rule is described here and
 /// applied by ``LibraryRepository`` to what the server returns.
@@ -102,7 +102,7 @@ enum PlaylistNameFilter: Hashable, Sendable {
     case notEndsWith(String)
 
     /// Whether a playlist name belongs to this side of the split. Compared
-    /// case-insensitively: the suffix is a convention of the generator, not
+    /// case-insensitively: the suffix is a convention of the backend, not
     /// something the user typed to match it exactly.
     func matches(_ name: String) -> Bool {
         switch self {
@@ -113,12 +113,12 @@ enum PlaylistNameFilter: Hashable, Sendable {
         }
     }
 
-    /// The name with the ending taken off, for showing a station under its own
-    /// name rather than the generator's marker — "Chill_automatic" is called
+    /// The name with the ending taken off, for showing a mixtape under its own
+    /// name rather than the backend's marker — "Chill_automatic" is called
     /// "Chill" once it has its own section to live in.
     ///
     /// Recognition follows ``matches(_:)``, so whatever was identified as a
-    /// station is what gets trimmed, at any case. Names that don't carry the
+    /// mixtape is what gets trimmed, at any case. Names that don't carry the
     /// ending come back untouched, as does a name that *is* the ending and
     /// would otherwise be shown as nothing.
     func trimmingMatchedEnding(from name: String) -> String {
@@ -144,8 +144,8 @@ struct LibraryQuery: Hashable, Sendable {
     var sortBy: SortBy
     var sortOrder: SortOrder
     /// The playlist-name split this query wants, if any. Nil for every list
-    /// that isn't a playlist list, and for playlist lists while the AI Radio
-    /// feature is off.
+    /// that isn't a playlist list, and for playlist lists while the app has
+    /// no backend registration to match on.
     var nameFilter: PlaylistNameFilter?
 
     init(

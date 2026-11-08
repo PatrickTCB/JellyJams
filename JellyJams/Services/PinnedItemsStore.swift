@@ -2,10 +2,12 @@ import Foundation
 
 /// The items the user has pinned to the home screen.
 ///
-/// Pins outlive a session and are persisted to `UserDefaults`, keyed by the
-/// account they belong to: an id only means something on the server that
-/// issued it, so switching servers must not resolve one server's pins against
-/// another's library.
+/// Pins are persisted to `UserDefaults`, keyed by the account they belong
+/// to: an id only means something on the server that issued it, so one
+/// server's pins must never be resolved against another's library. They do
+/// not outlive a sign-out, though — leaving a server is a clean break back
+/// to the fresh-install state, and ``forgetEverything()`` takes every
+/// account's pins with the rest of what the app stored.
 ///
 /// A pinned item can disappear at any time — the user deletes an album,
 /// playlist or artist on the Jellyfin server and this app finds out only when
@@ -115,9 +117,10 @@ final class PinnedItemsStore: ObservableObject {
     }
 
     /// Points the store at an account, publishing that account's pins. Pass
-    /// `nil` on sign-out; nothing is deleted, so signing back in restores it.
-    /// The pins come back as unresolved entries, shown from their stored names
-    /// until the next refresh resolves them.
+    /// `nil` to detach — this call deletes nothing on its own; deletion is
+    /// ``forgetEverything()``'s job, which a server sign-out runs. Pins a
+    /// re-attached account still has come back as unresolved entries, shown
+    /// from their stored names until the next refresh resolves them.
     func configure(accountKey: String?) {
         guard accountKey != self.accountKey else { return }
         self.accountKey = accountKey
@@ -125,6 +128,20 @@ final class PinnedItemsStore: ObservableObject {
         entries = pins.map { Entry(pin: $0, state: .unresolved) }
         errorMessage = nil
         isLoading = false
+    }
+
+    /// Forgets every account's pins and removes the persisted record — the
+    /// clean break a server sign-out makes. The keying keeps one account's
+    /// pins apart from another's while a session lives; the reset takes the
+    /// whole set, so no sign-in finds anything to restore.
+    func forgetEverything() {
+        stored = [:]
+        pins = []
+        entries = []
+        resolvingPinId = nil
+        isLoading = false
+        errorMessage = nil
+        defaults.removeObject(forKey: Key.storage)
     }
 
     var isFull: Bool { pins.count >= Self.maxPins }
@@ -168,6 +185,41 @@ final class PinnedItemsStore: ObservableObject {
         pins.removeAll { $0.itemId == id }
         entries.removeAll { $0.pin.itemId == id }
         persist()
+    }
+
+    /// The order after the dragged pin lands at `index` — counted against
+    /// the pins as the row showed them when the drag began, so it means
+    /// "before the pin currently there", and past the last pin means the
+    /// end of the row. Nil when the dragged pin is not one of the row's,
+    /// or when the drop changes nothing: a pin back onto its own slot, or
+    /// onto the gap it already fills.
+    static func reordered(_ pins: [PinnedItem], moving dragged: PinnedItem, to index: Int) -> [PinnedItem]? {
+        guard let from = pins.firstIndex(where: { $0.itemId == dragged.itemId }) else { return nil }
+        var moved = pins
+        moved.remove(at: from)
+        // Removing the dragged pin shifted everything after it one place
+        // left; the requested index, counted before that shift, follows.
+        let destination = min(max(index > from ? index - 1 : index, 0), moved.count)
+        moved.insert(dragged, at: destination)
+        return moved == pins ? nil : moved
+    }
+
+    /// Reorders the row after a drag: the pin lands at `index`, its entry
+    /// travelling with it and keeping its resolved state — the row
+    /// shuffles, the server answers stay put. Returns false, changing
+    /// neither order nor storage, when the drop changes nothing or names
+    /// a pin the row does not hold.
+    @discardableResult
+    func move(_ dragged: PinnedItem, to index: Int) -> Bool {
+        guard let order = Self.reordered(pins, moving: dragged, to: index) else { return false }
+        let entryByID = Dictionary(
+            entries.map { ($0.pin.itemId, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        pins = order
+        entries = order.compactMap { entryByID[$0.itemId] }
+        persist()
+        return true
     }
 
     /// Resolves every pin against the server in one request, upgrading the

@@ -10,6 +10,7 @@ struct RootContainerView: View {
     @EnvironmentObject private var favourites: FavouriteStore
     @EnvironmentObject private var downloads: DownloadStore
     @EnvironmentObject private var playlistStore: PlaylistStore
+    @EnvironmentObject private var bans: BanStore
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -93,6 +94,19 @@ struct RootContainerView: View {
             Button("OK", role: .cancel) { playlistStore.dismissActionError() }
         } message: {
             Text(playlistStore.actionErrorMessage ?? "")
+        }
+        // Ban sends are raised from context menus that dismiss the moment
+        // their button is chosen, so their failures come home here too.
+        .alert(
+            "Couldn’t Ban",
+            isPresented: Binding(
+                get: { bans.actionErrorMessage != nil },
+                set: { if !$0 { bans.dismissActionError() } }
+            )
+        ) {
+            Button("OK", role: .cancel) { bans.dismissActionError() }
+        } message: {
+            Text(bans.actionErrorMessage ?? "")
         }
     }
 }

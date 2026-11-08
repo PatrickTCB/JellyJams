@@ -30,6 +30,38 @@ final class ItemPresentationTests: XCTestCase {
         XCTAssertNil(BaseItemDto().subtitleArtist)
     }
 
+    /// A multi-artist song yields one navigation stub per artist, in server
+    /// order, so the context menu can offer a button for each; artists
+    /// without an id to route on are dropped and repeats of an id collapse.
+    /// An album navigates on its album artists, like ``artistNavigationItem``.
+    func testArtistNavigationItemsOfferOneEntryPerArtist() {
+        let track = BaseItemDto(
+            artistItems: [
+                NameIDPair(id: "a2", name: "Second"),
+                NameIDPair(id: nil, name: "Nameless"),
+                NameIDPair(id: "a1", name: "First"),
+                NameIDPair(id: "a1", name: "First Again"),
+            ],
+            id: "t",
+            type: .audio
+        )
+
+        let items = track.artistNavigationItems
+        XCTAssertEqual(items.map(\.id), ["a2", "a1"])
+        XCTAssertEqual(items.map(\.displayName), ["Second", "First"])
+        XCTAssertTrue(items.allSatisfy { $0.type == .musicArtist })
+
+        let album = BaseItemDto(
+            albumArtists: [NameIDPair(id: "ab1", name: "Album Artist")],
+            artistItems: [NameIDPair(id: "ta1", name: "Track Artist")],
+            id: "al",
+            type: .musicAlbum
+        )
+        XCTAssertEqual(album.artistNavigationItems.map(\.id), ["ab1"])
+
+        XCTAssertEqual(BaseItemDto(id: "x").artistNavigationItems, [])
+    }
+
     /// The key puts the album artist first, then the album, then the disc and
     /// track numbers — zero-padded, so the string order is the numeric order.
     func testAlbumArtistSortComposesTheWholeKey() {
@@ -193,8 +225,9 @@ final class SortByTests: XCTestCase {
         }
     }
 
-    /// The raw value is the comma-joined form of the SDK fields and both reach
-    /// Jellyfin, so they have to agree.
+    /// The raw value is the comma-joined form of the SDK fields; the SDK
+    /// values are what reach Jellyfin, so the two have to agree for the raw
+    /// value to keep describing the request.
     func testRawValuesMatchTheSDKFieldOrder() {
         for option in SortBy.allCases {
             XCTAssertEqual(

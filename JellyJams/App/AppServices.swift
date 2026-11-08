@@ -20,6 +20,8 @@ final class AppServices {
     let playlistStore = PlaylistStore()
     let libraryCache = LibraryCache()
     let favourites = FavouriteStore()
+    let bans = BanStore()
+    let queueExtender = QueueExtender()
     let settingsPresentation = SettingsPresentation()
     let preferences = PreferencesStore()
     let downloads = DownloadStore()
@@ -66,6 +68,39 @@ final class AppServices {
             }
             .store(in: &cancellables)
 
+        // Bans and Infinite Queue follow the backend rather than the session
+        // alone: whether a "Ban" menu may offer itself — and whether a
+        // running queue can be extended — depends on who is signed in, where
+        // the backend lives, and whether it knows this account yet. The
+        // settings sheet edits the address live, so every value comes from
+        // the publisher rather than being read back (`@Published` announces
+        // before the change lands, and mid-registration the suffix the store
+        // holds can still be the old one). The `registered` check is the
+        // same rule `PreferencesStore.isMixtapesActive` reads: a
+        // registration recorded a playlist-name ending.
+        Publishers.CombineLatest3(
+            session.$currentUser,
+            preferences.$jellyJamsBackendAddress,
+            preferences.$mixtapeSuffix
+        )
+            .sink { [weak self] user, address, suffix in
+                guard let self else { return }
+                let registered = !suffix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                self.bans.configure(
+                    userID: user?.id,
+                    address: address,
+                    registered: registered,
+                    deviceInfo: self.session.deviceInfo
+                )
+                self.queueExtender.configure(
+                    userID: user?.id,
+                    address: address,
+                    registered: registered,
+                    deviceInfo: self.session.deviceInfo
+                )
+            }
+            .store(in: &cancellables)
+
         // Restoring here rather than in the app's `onAppear` puts the saved
         // session in place at process start, foreground launch or background.
         session.restore()
@@ -79,19 +114,28 @@ final class AppServices {
     /// values to wire for rather than reading them off `session`, which during
     /// a `@Published` emission still holds the old value; the signed-in state
     /// is just that both halves are present.
+    ///
+    /// A transition *from* signed-in is a sign-out — the settings button's or
+    /// the account menu's — as distinct from launching with nobody signed in,
+    /// which the first wiring at process start also is. Only the real thing
+    /// runs ``forgetEverything()``: the launch wiring must find the stored
+    /// state standing, or every relaunch would be a reset.
     private func wire(client: JellyfinService?, user: SessionStore.StoredUser?) {
         let signedIn = client != nil && user != nil
         guard lastWiredSignedIn != signedIn else { return }
+        let isSigningOut = lastWiredSignedIn == true && !signedIn
         lastWiredSignedIn = signedIn
 
         player.configure(downloads: downloads)
         player.configure(preferences: preferences)
+        player.configure(queueExtender: queueExtender)
         #if os(iOS)
-        CarPlayController.shared.configure(session: session, player: player, downloads: downloads)
+        CarPlayController.shared.configure(session: session, player: player, downloads: downloads, pinnedItems: pinnedItems)
         #endif
 
         if signedIn {
             player.configure(client: client)
+            player.configure(favourites: favourites)
             downloads.configure(client: client)
             playlistStore.configure(client: client)
             favourites.configure(client: client)
@@ -102,13 +146,39 @@ final class AppServices {
             }
         } else {
             player.clearQueue()
+            if isSigningOut {
+                forgetEverything()
+            }
             player.configure(client: nil)
+            player.configure(favourites: nil)
             downloads.configure(client: nil)
             playlistStore.configure(client: nil)
             favourites.configure(client: nil)
             pinnedItems.configure(accountKey: nil)
             libraryCache.clear()
         }
+    }
+
+    /// What makes a sign-out indistinguishable from a fresh install: every
+    /// store forgets what it persisted — the preferences, every account's
+    /// pins, the playback resume point and the volume, the downloads and
+    /// their manifest — the device takes a new identity, and the artwork
+    /// caches are dropped. The in-memory state the sign-out wiring already
+    /// resets (the queue, the bans, the library cache, the playlist and
+    /// favourite caches) is not repeated here.
+    ///
+    /// The Jelly Jams Backend is deliberately not asked anything: a server
+    /// sign-out is a local affair. The account there lives on, with
+    /// everything it holds, until the backend's own Sign Out deletes it —
+    /// this app simply stops remembering it exists.
+    private func forgetEverything() {
+        preferences.forgetEverything()
+        pinnedItems.forgetEverything()
+        player.forgetEverything()
+        downloads.removeAll()
+        session.regenerateDeviceIdentity()
+        ImageCache.shared.removeAll()
+        ArtworkLoader.urlCache.removeAllCachedResponses()
     }
 
     /// The key a set of pins is stored under: item ids belong to one server,

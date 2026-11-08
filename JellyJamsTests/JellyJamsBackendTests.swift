@@ -1,0 +1,979 @@
+import Foundation
+import XCTest
+@testable import JellyJams
+
+/// Covers the Jelly Jams Backend's `/register` — the one endpoint v1 speaks.
+/// The payload shape matters most: the backend writes its fields capitalised,
+/// and the app builds its whole Mixtapes split from one of them. A wrong key
+/// decode does not crash, it silently never turns the feature on.
+final class JellyJamsBackendTests: XCTestCase {
+    override func setUp() {
+        URLProtocolStub.handler = nil
+    }
+
+    override func tearDown() {
+        URLProtocolStub.handler = nil
+    }
+
+    private static let registrationPayload = Data(
+        #"{"User":"pat","Created":true,"Saved":true,"PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8
+    )
+
+    private func successResponse(statusCode: Int = 201) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
+        return { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: statusCode,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Self.registrationPayload)
+        }
+    }
+
+    private var account: JellyfinAccount {
+        JellyfinAccount(
+            userName: "pat",
+            userID: "user-id",
+            userToken: "access-token",
+            jellyfinHost: URL(string: "http://192.168.0.10:8096")!
+        )
+    }
+
+    // MARK: - The request
+
+    /// `/register` is a POST whose credentials ride an
+    /// `application/x-www-form-urlencoded` body — the backend's `Form`
+    /// parameters — with nothing in the query string, so the token never
+    /// lands in a URL. A drift here is a 422 nobody can see until settings
+    /// quietly stops working.
+    func testRegisterPostsCredentialsAsAFormBody() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.successResponse()(request)
+        }
+
+        _ = try await TestFixtures.stubbedBackend().register(account)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/register")
+        XCTAssertNil(request.url?.query, "The credentials must not ride the URL")
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userName"), "pat")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "userToken"), "access-token")
+        XCTAssertEqual(request.formValue(for: "jellyfinHost"), "http://192.168.0.10:8096")
+    }
+
+    /// A form body has its own escaping: a bare `+` reads as a space and a
+    /// bare `&` ends the field, so — as a browser does — everything but
+    /// letters, digits and `*-._` is percent-encoded, as UTF-8 past ASCII,
+    /// and a space goes as `+`. The exact bytes are pinned because the
+    /// backend's form parser is the only other reader.
+    func testRegisterFormEncodesWhatAFormParserWouldMisread() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.successResponse()(request)
+        }
+        let awkward = JellyfinAccount(
+            userName: "Zoë & Ana+1; 100%=ok",
+            userID: "user-id",
+            userToken: "access-token",
+            jellyfinHost: URL(string: "http://192.168.0.10:8096")!
+        )
+
+        _ = try await TestFixtures.stubbedBackend().register(awkward)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(
+            String(decoding: request.body, as: UTF8.self),
+            "userName=Zo%C3%AB+%26+Ana%2B1%3B+100%25%3Dok&userID=user-id&userToken=access-token&jellyfinHost=http%3A%2F%2F192.168.0.10%3A8096"
+        )
+        XCTAssertEqual(request.formValue(for: "userName"), "Zoë & Ana+1; 100%=ok")
+    }
+
+    // MARK: - The response
+
+    func testRegistrationDecodesTheCapitalisedPayload() async throws {
+        URLProtocolStub.handler = successResponse()
+
+        let registration = try await TestFixtures.stubbedBackend().register(account)
+
+        XCTAssertEqual(registration.user, "pat")
+        XCTAssertTrue(registration.created)
+        XCTAssertTrue(registration.saved)
+        XCTAssertEqual(registration.playlistSuffix, "_automatic")
+        XCTAssertEqual(registration.serverPlaylist, "Server Mix")
+    }
+
+    /// A known user gets 200 ("already registered"), a new one 201. Both are
+    /// success with the same body — treating 200 as an error would make every
+    /// second Save in settings fail.
+    func testAlreadyRegisteredAnswerOf200IsSuccess() async throws {
+        URLProtocolStub.handler = successResponse(statusCode: 200)
+
+        let registration = try await TestFixtures.stubbedBackend().register(account)
+
+        XCTAssertEqual(registration.playlistSuffix, "_automatic")
+    }
+
+    /// The backend's `detail` is written for humans and says which part of
+    /// the sign-in was refused — it has to survive into the thrown error
+    /// rather than collapse into a bare status code.
+    func testRejectionSurfacesTheBackendDetail() async throws {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            let body = Data(#"{"detail":"User credentials submitted for pat could not be validated"}"#.utf8)
+            return (response, body)
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().register(account)
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User credentials submitted for pat could not be validated"))
+            XCTAssertTrue(error.userFacingMessage.contains("could not be validated"))
+        }
+    }
+
+    /// A failure body the app cannot parse must not hide the failure behind a
+    /// decoding error — the status is the reliable part of the story.
+    func testRejectionWithoutAParseableBodyStillReportsTheStatus() async throws {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 500,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "text/html"]
+                )
+            )
+            return (response, Data("<html>boom</html>".utf8))
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().register(account)
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 500, detail: nil))
+            XCTAssertTrue(error.userFacingMessage.contains("500"))
+        }
+    }
+
+    // MARK: - Sign out
+
+    /// `DELETE /delete-me` rides with the same four credentials the
+    /// registration carries — the backend checks them against the Jellyfin
+    /// server before deleting anything — and answers the registration's own
+    /// shape with `Saved: false`: the account is off the books. A drift here
+    /// is a 422 nobody sees until Sign Out quietly stops working.
+    func testSignOutDeletesWithTheCredentialsAsQueryParameters() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"User":"pat","Created":false,"Saved":false,"PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().deleteAccount(account)
+
+        XCTAssertFalse(answer.saved, "The account is no longer on the books")
+        XCTAssertFalse(answer.created)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/delete-me")
+        XCTAssertEqual(request.value(for: "userName"), "pat")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "userToken"), "access-token")
+        XCTAssertEqual(request.value(for: "jellyfinHost"), "http://192.168.0.10:8096")
+    }
+
+    /// Credentials the backend cannot validate answer 401 with its own words,
+    /// and nothing was deleted — the refusal has to reach the sheet rather
+    /// than read as a signed-out account.
+    func testASignOutWithRefusedCredentialsSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User credentials submitted for pat could not be validated"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().deleteAccount(account)
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User credentials submitted for pat could not be validated"))
+        }
+    }
+
+    // MARK: - Ping
+
+    /// The settings sheet gates everything on a 200 from /ping. The body is
+    /// decoration; the status is the answer.
+    func testPingIsSatisfiedWithAPlain200() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"message":"pong","now":1234}"#.utf8)
+            )
+        }
+
+        try await TestFixtures.stubbedBackend().ping()
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/ping")
+    }
+
+    func testPingRefusesAnythingButSuccess() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 500), Data())
+        }
+
+        do {
+            try await TestFixtures.stubbedBackend().ping()
+            XCTFail("Expected a failure")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 500, detail: nil))
+        }
+    }
+
+    // MARK: - Server Playlist
+
+    /// The blend endpoints key off `userID` alone, and the answer arrives
+    /// lower-cased-first — unlike the registration's capitalised shape.
+    func testServerPlaylistStatusReadsTheLowerCasedAnswer() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            // The deployed backend answers this read with 201 (copied status
+            // code); any 2xx has to do.
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","inServerPlaylist":true}"#.utf8)
+            )
+        }
+
+        let status = try await TestFixtures.stubbedBackend().serverPlaylistStatus(userID: "user-id")
+
+        XCTAssertEqual(status.id, "user-id")
+        XCTAssertTrue(status.inServerPlaylist)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/server-playlist")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    func testJoiningTheBlendIsAPostTheBackendConfirms() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","inServerPlaylist":true}"#.utf8)
+            )
+        }
+
+        let status = try await TestFixtures.stubbedBackend().joinServerPlaylist(userID: "user-id")
+
+        XCTAssertTrue(status.inServerPlaylist)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/server-playlist")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+    }
+
+    func testLeavingTheBlendIsADeleteTheBackendConfirms() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"id":"user-id","inServerPlaylist":false}"#.utf8)
+            )
+        }
+
+        let status = try await TestFixtures.stubbedBackend().leaveServerPlaylist(userID: "user-id")
+
+        XCTAssertFalse(status.inServerPlaylist)
+        XCTAssertEqual(recorder.all.first?.method, "DELETE")
+    }
+
+    /// Blend endpoints only know registered users; the 401 they answer for
+    /// everybody else has to read as the backend's refusal, not a mystery.
+    func testBlendForAnUnknownUserSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User user-id does not seem to exist"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().serverPlaylistStatus(userID: "user-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User user-id does not seem to exist"))
+        }
+    }
+
+    // MARK: - Mixtape limits
+
+    /// The limits read arrives 201 like the blend status — a copied status
+    /// code — with fields lower-cased-first, and the numbers are the
+    /// backend's own defaults (album 3, artist 5) for an account that
+    /// never set any.
+    func testLimitsReadsTheLowerCasedAnswer() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","sameAlbumLimit":3,"sameArtistLimit":5}"#.utf8)
+            )
+        }
+
+        let limits = try await TestFixtures.stubbedBackend().limits(userID: "user-id")
+
+        XCTAssertEqual(limits.id, "user-id")
+        XCTAssertEqual(limits.sameAlbumLimit, 3)
+        XCTAssertEqual(limits.sameArtistLimit, 5)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/limits")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    /// `/limits` takes the pair as one setting: both numbers travel even
+    /// when only one was touched, and the answer echoes what the backend
+    /// stored. A drifted field name is a silent 422, so the form body is
+    /// asserted as it rides.
+    func testSettingLimitsSendsTheWholePair() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"id":"user-id","sameAlbumLimit":4,"sameArtistLimit":7}"#.utf8)
+            )
+        }
+
+        let limits = try await TestFixtures.stubbedBackend().setLimits(
+            userID: "user-id",
+            sameAlbumLimit: 4,
+            sameArtistLimit: 7
+        )
+
+        XCTAssertEqual(limits.sameAlbumLimit, 4)
+        XCTAssertEqual(limits.sameArtistLimit, 7)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/limits")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "sameAlbumLimit"), "4")
+        XCTAssertEqual(request.formValue(for: "sameArtistLimit"), "7")
+    }
+
+    /// Limits belong to a backend account like everything else here: an
+    /// unknown user gets the 401, and its words have to reach the sheet.
+    func testLimitsForAnUnknownUserSurfaceTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User user-id not valid"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().setLimits(
+                userID: "user-id",
+                sameAlbumLimit: 3,
+                sameArtistLimit: 5
+            )
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User user-id not valid"))
+        }
+    }
+
+    // MARK: - Bans
+
+    /// `/ban` is a POST keyed on `userID` and `itemID` alone — the kind of
+    /// the banned item is the backend's business, not the app's, because
+    /// stored bans are matched against the ids each candidate song carries.
+    /// Drift here is a 422 nobody sees until banning silently does nothing.
+    func testBanningPostsOneItemIDAndReadsTheAnswer() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Items":{},"Success":true,"AlreadyBanned":false}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().ban(userID: "user-id", itemID: "song-id")
+
+        XCTAssertTrue(answer.success)
+        XCTAssertFalse(answer.alreadyBanned)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/ban")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "itemID"), "song-id")
+    }
+
+    /// Re-banning answers `Success: false, AlreadyBanned: true` with a 201
+    /// — the state the user asked for holds either way, so the flags must
+    /// decode as an accepted ban, not a failure. The item echo in `Items`
+    /// arrives as whole Jellyfin DTOs in a shape `GET /bans` is still
+    /// settling; it must not take the answer down with it.
+    func testAnAlreadyBannedItemStillReadsAsASuccessfulBan() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Items":{"Audio":[{"Id":"song-id","Name":"Ban Me","Type":"Audio"}]},"Success":false,"AlreadyBanned":true}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().ban(userID: "user-id", itemID: "song-id")
+
+        XCTAssertFalse(answer.success)
+        XCTAssertTrue(answer.alreadyBanned)
+    }
+
+    /// A backend that doesn't know this account answers 401 for bans just
+    /// as it does for the blend — its `detail` has to reach the alert.
+    func testBanningForAnUnknownUserSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 401),
+                Data(#"{"detail":"User user-id does not seem to exist"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().ban(userID: "user-id", itemID: "song-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 401, detail: "User user-id does not seem to exist"))
+        }
+    }
+
+    /// `GET /bans` answers with whole server DTOs under the type that was
+    /// banned, and the screen needs them as real items — names to show, ids
+    /// to navigate and unban by. The SDK's lenient date parser is part of
+    /// this contract: Jellyfin timestamps carry fractional seconds that a
+    /// plain `JSONDecoder` trips over, which would fail the entire read.
+    func testTheBanListGroupsWholeServerItemsByKind() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), bansPayload)
+        }
+
+        let bans = try await TestFixtures.stubbedBackend().bans(userID: "user-id")
+
+        XCTAssertEqual(bans.artists.map(\.id), ["artist-2", "artist-1"])
+        XCTAssertEqual(bans.albums.map(\.displayName), ["Bad Songs"])
+        XCTAssertEqual(bans.songs.map(\.displayName), ["Ban Me Too"])
+        // The fields the rows read arrive with the items.
+        XCTAssertEqual(bans.songs.first?.album, "Bad Songs")
+        XCTAssertEqual(bans.songs.first?.albumID, "album-1")
+        XCTAssertEqual(bans.songs.first?.artists, ["Bad Artist", "Worse Artist"])
+        XCTAssertEqual(bans.albums.first?.albumArtist, "Bad Artist")
+        // A kind the app neither shows nor bans from here is ignored, not fatal.
+        XCTAssertFalse(bans.artists.contains { $0.id == "genre-1" })
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/bans")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    /// A kind nobody has banned has no entry in `Items` at all — that reads
+    /// as an empty section, not a failed decode.
+    func testTheBanListToleratesMissingCategories() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Items":{"Audio":[{"Id":"song-1","Name":"Ban Me","Type":"Audio"}]},"Success":true,"AlreadyBanned":true}"#.utf8)
+            )
+        }
+
+        let bans = try await TestFixtures.stubbedBackend().bans(userID: "user-id")
+
+        XCTAssertEqual(bans.songs.map(\.id), ["song-1"])
+        XCTAssertTrue(bans.artists.isEmpty)
+        XCTAssertTrue(bans.albums.isEmpty)
+    }
+
+    /// Unbanning is `DELETE /ban` keyed on the same two parameters the ban
+    /// was made with.
+    func testUnbanningDeletesTheItemIDForTheUser() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Items":{},"Success":true,"AlreadyBanned":true}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().unban(userID: "user-id", itemID: "song-id")
+
+        XCTAssertTrue(answer.success)
+        XCTAssertTrue(answer.alreadyBanned)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/ban")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "itemID"), "song-id")
+    }
+
+    /// `DELETE /reset-bans` takes the user alone — the whole list is the
+    /// unit, and the 201 the handler declares (copied status codes being
+    /// this backend's style) is success like any other 2xx.
+    func testResettingBansIsOneDeleteForTheWholeUser() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Items":{},"Success":true,"AlreadyBanned":false}"#.utf8)
+            )
+        }
+
+        try await TestFixtures.stubbedBackend().resetBans(userID: "user-id")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/reset-bans")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    // MARK: - Mixtapes
+
+    /// `GET /tapes` answers the account's recipes, switches and all: every
+    /// field of every tape is in the answer because the backend's response
+    /// model fills them, and the four switches arrive as the stored
+    /// strings — lower-cased `"true"` and `"false"` — that its builder
+    /// compares against. The `User` echo is not the app's business.
+    func testTheTapeListReadsTheRecipesAndTheirSwitches() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"User":{"name":"patrick","id":"user-id"},"Playlists":[{"userID":"user-id","name":"Weekend Haul","recents":"true","favourites":"false","fingerprint":"true","alchemyPercent":30,"freshAlchemy":"true","songCount":150},{"userID":"user-id","name":"Quiet Nights","recents":"false","favourites":"true","fingerprint":"false","alchemyPercent":50,"freshAlchemy":"false","songCount":80}]}"#.utf8)
+            )
+        }
+
+        let tapes = try await TestFixtures.stubbedBackend().tapes(userID: "user-id")
+
+        XCTAssertEqual(tapes.tapes.map(\.name), ["Weekend Haul", "Quiet Nights"])
+        let weekend = tapes.tapes[0]
+        XCTAssertTrue(weekend.usesRecents)
+        XCTAssertFalse(weekend.usesFavourites)
+        XCTAssertTrue(weekend.usesFingerprint)
+        XCTAssertTrue(weekend.usesFreshAlchemy)
+        XCTAssertEqual(weekend.alchemyPercent, 30)
+        XCTAssertEqual(weekend.songCount, 150)
+        // The second tape answers as off wherever it wrote "false" — the
+        // string decides, nothing else reads as on.
+        let quiet = tapes.tapes[1]
+        XCTAssertFalse(quiet.usesRecents)
+        XCTAssertTrue(quiet.usesFavourites)
+        XCTAssertFalse(quiet.usesFingerprint)
+        XCTAssertFalse(quiet.usesFreshAlchemy)
+        XCTAssertEqual(quiet.alchemyPercent, 50)
+        XCTAssertEqual(quiet.songCount, 80)
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/tapes")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+    }
+
+    /// A tape set up is eight form fields — the account, the name, and
+    /// every choice the composer made. FastAPI parses booleans from text,
+    /// so each switch travels as `"true"`/`"false"`. A drifted name here
+    /// is a 422 nobody can see until creation quietly stops working.
+    func testCreatingATapeSendsEveryChoice() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Created":true,"Updated":false,"Details":{"userID":"user-id","name":"Weekend Haul","recents":"true","favourites":"false","fingerprint":"true","alchemyPercent":30,"freshAlchemy":"true","songCount":150}}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().createTape(
+            BackendTapeDraft(
+                name: "  Weekend Haul  ",
+                recents: true,
+                favourites: false,
+                fingerprint: true,
+                freshAlchemy: true,
+                alchemyPercent: 30,
+                songCount: 150
+            ),
+            userID: "user-id"
+        )
+
+        XCTAssertTrue(answer.created)
+        XCTAssertFalse(answer.updated)
+        XCTAssertEqual(answer.tape.name, "Weekend Haul")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "POST")
+        XCTAssertEqual(request.path, "/new-tape")
+        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "name"), "Weekend Haul") // trimmed before sending
+        XCTAssertEqual(request.formValue(for: "recents"), "true")
+        XCTAssertEqual(request.formValue(for: "favourites"), "false")
+        XCTAssertEqual(request.formValue(for: "fingerprint"), "true")
+        XCTAssertEqual(request.formValue(for: "alchemyPercent"), "30")
+        XCTAssertEqual(request.formValue(for: "freshAlchemy"), "true")
+        XCTAssertEqual(request.formValue(for: "songCount"), "150")
+    }
+
+    /// A second send under a name the account already uses answers
+    /// `Updated: true` with the rewrite's full details — a replacement,
+    /// not an error: the composer may well be re-setting an existing tape.
+    func testRecreatingATapeUnderItsNameIsAnUpdateNotAFailure() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 201),
+                Data(#"{"Created":true,"Updated":true,"Details":{"userID":"user-id","name":"Weekend Haul","recents":"false","favourites":"false","fingerprint":"false","alchemyPercent":100,"freshAlchemy":"false","songCount":50}}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().createTape(
+            BackendTapeDraft(name: "Weekend Haul", recents: false, favourites: false, fingerprint: false, freshAlchemy: false, alchemyPercent: 100, songCount: 50),
+            userID: "user-id"
+        )
+
+        XCTAssertTrue(answer.created)
+        XCTAssertTrue(answer.updated)
+        XCTAssertEqual(answer.tape.songCount, 50)
+        XCTAssertEqual(answer.tape.alchemyPercent, 100)
+    }
+
+    /// The least a tape needs to be worth sending. The backend takes any
+    /// integers it is handed — a zero-song tape, a 120% alchemy tape — so
+    /// the form's numbers are checked here before a request spends them.
+    func testADraftMustHaveANameAndASizeToSend() {
+        func draft(
+            name: String = "Weekend Haul",
+            alchemyPercent: Int = 10,
+            songCount: Int = 100
+        ) -> BackendTapeDraft {
+            BackendTapeDraft(
+                name: name,
+                recents: true,
+                favourites: false,
+                fingerprint: false,
+                freshAlchemy: true,
+                alchemyPercent: alchemyPercent,
+                songCount: songCount
+            )
+        }
+
+        XCTAssertTrue(draft().isSendable)
+        XCTAssertFalse(draft(name: "").isSendable)
+        XCTAssertFalse(draft(name: "   ").isSendable)
+        XCTAssertFalse(draft(songCount: 0).isSendable)
+        XCTAssertFalse(draft(songCount: -1).isSendable)
+        XCTAssertFalse(draft(alchemyPercent: 101).isSendable)
+        XCTAssertFalse(draft(alchemyPercent: -1).isSendable)
+    }
+
+    /// The tapes endpoint refuses strangers with a 404 rather than the
+    /// 401 its siblings answer — a different code, the same job: the
+    /// backend's own words have to reach the sheet that showed them.
+    func testTapesForAnUnknownUserSurfaceTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 404),
+                Data(#"{"detail":"User user-id not found"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().tapes(userID: "user-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 404, detail: "User user-id not found"))
+        }
+    }
+
+    /// Retiring a tape is `DELETE /delete-tape` keyed on the user and the
+    /// recipe's own name — stored without the suffix, so what the sheet
+    /// shows is what gets sent, punctuation and all.
+    func testDeletingATapeIsADeleteKeyedOnItsName() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Deleted":true,"Name":"Weekend Haul"}"#.utf8)
+            )
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().deleteTape(name: "Weekend Haul", userID: "user-id")
+
+        XCTAssertTrue(answer.deleted)
+        XCTAssertEqual(answer.name, "Weekend Haul")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "DELETE")
+        XCTAssertEqual(request.path, "/delete-tape")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "name"), "Weekend Haul")
+    }
+
+    /// `/new-tape` stores a name verbatim from its form body, so the query
+    /// that deletes it has to carry it verbatim too. A bare `+` reads as a
+    /// space on the backend: `Rock + Roll` would arrive as `Rock   Roll`,
+    /// answer 404, and the optimistic delete would leave the tape in place.
+    func testDeletingATapeKeepsAPlusInItsName() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Deleted":true,"Name":"Rock + Roll"}"#.utf8)
+            )
+        }
+
+        _ = try await TestFixtures.stubbedBackend().deleteTape(name: "Rock + Roll", userID: "user-id")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.serverQueryValue(for: "name"), "Rock + Roll")
+        XCTAssertEqual(request.serverQueryValue(for: "userID"), "user-id")
+    }
+
+    /// A name the backend no longer has answers 404 with its reasons —
+    /// the sheet reading it decides whether "already gone" is a failure;
+    /// the detail at least has to survive to be asked about.
+    func testDeletingAGoneTapeSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 404),
+                Data(#"{"detail":"Can't find playlist Gone Tape for user user-id"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().deleteTape(name: "Gone Tape", userID: "user-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 404, detail: "Can't find playlist Gone Tape for user user-id"))
+        }
+    }
+
+    /// The settings-screen factory for the saved address: a parseable
+    /// address builds a client, anything else is simply no client — the
+    /// screens read that as "nothing to ask", never as a failed request.
+    func testTheSavedAddressBuildsAClientOrNothing() throws {
+        let good = JellyJamsBackend.configured(address: "backend.example.com", deviceInfo: TestFixtures.deviceInfo)
+        XCTAssertEqual(good?.baseURL.absoluteString, "https://backend.example.com")
+        XCTAssertNil(JellyJamsBackend.configured(address: "", deviceInfo: TestFixtures.deviceInfo))
+        XCTAssertNil(JellyJamsBackend.configured(address: "not a url", deviceInfo: TestFixtures.deviceInfo))
+    }
+
+    // MARK: - Address normalisation
+
+    /// The backend is an internet service by design, so a bare host gets
+    /// `https` — the opposite default to Jellyfin's LAN-facing `http`.
+    func testAddressWithoutASchemeDefaultsToHTTPS() throws {
+        XCTAssertEqual(
+            try JellyJamsBackend.normalizeAddress("jellyjams.example.net"),
+            URL(string: "https://jellyjams.example.net")
+        )
+    }
+
+    /// Someone running the backend on their LAN typed the scheme themselves;
+    /// it must be kept, not upgraded.
+    func testExplicitHTTPSchemeIsKept() throws {
+        XCTAssertEqual(
+            try JellyJamsBackend.normalizeAddress(" http://192.168.0.10:8000 "),
+            URL(string: "http://192.168.0.10:8000")
+        )
+    }
+
+    /// Endpoints are built by appending to the stored address, so a trailing
+    /// slash left in place would double it (`/backend//register`).
+    func testTrailingSlashesAreRemoved() throws {
+        XCTAssertEqual(
+            try JellyJamsBackend.normalizeAddress("https://jellyjams.example.net/api/"),
+            URL(string: "https://jellyjams.example.net/api")
+        )
+    }
+
+    func testNonsenseAddressesAreRefused() {
+        for raw in ["", "   ", "not a url", "ftp://example.net", "https://user:pass@example.net"] {
+            XCTAssertThrowsError(
+                try JellyJamsBackend.normalizeAddress(raw),
+                raw
+            ) { error in
+                XCTAssertEqual(error as? BackendError, .invalidServerURL)
+            }
+        }
+    }
+
+    // MARK: - Infinite Queue
+
+    private static let extendedQueuePayload = Data(#"{"NewTrackIDs":["x1","x2"],"Count":2}"#.utf8)
+
+    private func extendedQueueResponse() -> (URLRequest) throws -> (HTTPURLResponse, Data) {
+        return { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Self.extendedQueuePayload)
+        }
+    }
+
+    /// `/extend-queue` carries its song list as one `existingQueue` query
+    /// parameter formatted as a comma-separated string — a GET has no body to
+    /// put it in. A drift on either side (a list in the query instead, a body,
+    /// a POST) is a 422 nobody sees until Infinite Queue quietly stops
+    /// extending.
+    func testExtendingTheQueueSendsTheExistingQueueAsACommaSeparatedQueryParameter() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.extendedQueueResponse()(request)
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().extendQueue(
+            userID: "user-id",
+            existingQueue: ["a", "b", "c"]
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/extend-queue")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "existingQueue"), "a,b,c")
+        XCTAssertTrue(request.body.isEmpty)
+        XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
+        XCTAssertEqual(answer.count, 2)
+    }
+
+    /// The album variant names the album in the query and carries no body.
+    func testExtendingByAlbumNamesTheAlbumInTheQuery() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.extendedQueueResponse()(request)
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().extendQueueByAlbum(
+            userID: "user-id",
+            currentAlbumID: "album-1"
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/extend-queue-by-album")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "currentAlbumID"), "album-1")
+        XCTAssertTrue(request.body.isEmpty)
+        XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
+    }
+
+    /// An account the backend does not know answers 404 with a human detail,
+    /// which must surface like every other refusal rather than vanish.
+    func testAnExtensionForAnUnknownUserSurfacesTheRefusal() async throws {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 404,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"detail":"User user-id not found"}"#.utf8))
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().extendQueue(userID: "user-id", existingQueue: [])
+            XCTFail("Expected a refusal")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 404, detail: "User user-id not found"))
+        }
+    }
+
+    // MARK: - Text to Tunes
+
+    /// `/text-to-tunes` is a GET whose free-text description and song count
+    /// ride the query string, answered with the queue-extension shape — the
+    /// picked ids in the order they should play. A drift on either side is a
+    /// 422 nobody sees until the Home screen's sparkles button quietly stops
+    /// making music.
+    func testTextToTunesSendsTheQueryAndLimitAndReadsThePicks() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.extendedQueueResponse()(request)
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().textToTunes(
+            userID: "user-id",
+            query: "Up tempo folk about Canada",
+            limit: 30
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/text-to-tunes")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "query"), "Up tempo folk about Canada")
+        XCTAssertEqual(request.value(for: "limit"), "30")
+        XCTAssertTrue(request.body.isEmpty)
+        XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
+        XCTAssertEqual(answer.count, 2)
+    }
+}

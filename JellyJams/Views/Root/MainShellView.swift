@@ -8,10 +8,13 @@ import SwiftUI
 ///   portrait on iPad.
 ///
 /// The persistent ``NowPlayingBar`` is hosted as an iOS 26 tab bar accessory
-/// where available, docked inside each tab's content on earlier iOS, and docked
-/// below the tab view on macOS.
+/// on iOS — every supported version has the API — and docked below the tab
+/// view on macOS.
 struct MainShellView: View {
     @State private var selection: LibrarySection = .home
+    /// Raised by the Home toolbar's sparkles button; the sheet itself is
+    /// hosted above the tabs in ``body``, like the player and settings ones.
+    @State private var isPresentingTextToTunes = false
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var playerPresentation: PlayerPresentation
     @EnvironmentObject private var downloads: DownloadStore
@@ -21,23 +24,27 @@ struct MainShellView: View {
     @EnvironmentObject private var settingsPresentation: SettingsPresentation
     #endif
 
-    /// The library sections the sidebar offers, AI Radio among them only while
-    /// the feature is switched on.
+    /// The library sections the sidebar offers, Mixtapes among them only while
+    /// the app is registered with a backend.
     private var librarySections: [LibrarySection] {
-        LibrarySection.libraryGroup(showingAIRadio: preferences.isAIRadioActive)
+        LibrarySection.libraryGroup(showingMixtapes: preferences.isMixtapesActive)
     }
 
     var body: some View {
         settingsHost
             .sheet(isPresented: $playerPresentation.isShowingPlayer) { PlayerView() }
+            // Hosted here rather than by the toolbar button that raises it,
+            // for the settings sheet's own reason: a sheet owned by a
+            // toolbar item dies with the tab bar teardown on iOS.
+            .sheet(isPresented: $isPresentingTextToTunes) { TextToTunesSheet() }
             .onChange(of: session.serverReachable, initial: true) { _, reachable in
                 if !reachable { selection = .downloads }
             }
-            // Turning AI Radio off removes its tab from under the selection;
-            // left alone the shell would be showing a destination that no
-            // longer exists.
-            .onChange(of: preferences.isAIRadioActive) { _, active in
-                if !active, selection == .aiRadio { selection = .albums }
+            // Losing the registration removes Mixtapes from under the
+            // selection; left alone the shell would be showing a destination
+            // that no longer exists.
+            .onChange(of: preferences.isMixtapesActive) { _, active in
+                if !active, selection == .mixtapes { selection = .albums }
             }
     }
 
@@ -72,15 +79,18 @@ struct MainShellView: View {
     // MARK: - iPhone tabs
 
     #if os(iOS)
-    /// The mini player is docked inside each tab rather than around the tab
-    /// view so that it floats above the tab bar instead of covering it. On
-    /// iOS 26.1+ the tab bar hosts it as a bottom accessory instead.
+    /// The tab bar hosts the mini player as a bottom accessory (iOS 26.1+,
+    /// which is every supported iOS), floating it above the bar instead of
+    /// covering it.
     private var tabLayout: some View {
         TabView(selection: $selection) {
             Tab(LibrarySection.home.title, systemImage: LibrarySection.home.systemImage, value: LibrarySection.home) {
                 LibraryNavigationStack {
                     HomeView()
-                        .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
+                        .toolbar {
+                            ToolbarItem(placement: .primaryAction) { textToTunesButton }
+                            ToolbarItem(placement: .primaryAction) { AccountMenu() }
+                        }
                 }
             }
 
@@ -149,14 +159,32 @@ struct MainShellView: View {
     }
 
     /// One sidebar tab: the section's root wrapped in its own navigation stack.
-    /// On iOS the mini player docks inside the content on OS versions without
-    /// the tab bar accessory; on macOS the bar is docked around the tab view.
+    /// On iOS the mini player rides the tab bar accessory applied to the whole
+    /// layout; on macOS the shell docks the bar below the tab view.
     @ViewBuilder private func sectionTab(_ section: LibrarySection) -> some View {
         let content = LibraryNavigationStack {
             SectionRootView(section: section)
-                .toolbar { ToolbarItem(placement: .primaryAction) { AccountMenu() } }
+                .toolbar {
+                    // Text to Tunes is a Home-screen feature, so its button is
+                    // offered there alone — declared first, which is the slot
+                    // to the left of the account menu.
+                    if section == .home {
+                        ToolbarItem(placement: .primaryAction) { textToTunesButton }
+                    }
+                    ToolbarItem(placement: .primaryAction) { AccountMenu() }
+                }
         }
         content
+    }
+
+    /// The Home toolbar's Text to Tunes button: it raises the sheet hosted
+    /// above the tabs rather than owning one itself.
+    private var textToTunesButton: some View {
+        Button {
+            isPresentingTextToTunes = true
+        } label: {
+            Label("Text to Tunes", systemImage: "sparkles.2")
+        }
     }
 
     /// The Downloads tab icon: a live progress ring while batches run, the

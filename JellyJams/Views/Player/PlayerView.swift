@@ -9,6 +9,7 @@ struct PlayerView: View {
     @EnvironmentObject private var player: PlayerController
     @EnvironmentObject private var clock: PlaybackClock
     @EnvironmentObject private var downloads: DownloadStore
+    @EnvironmentObject private var preferences: PreferencesStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var isScrubbing = false
@@ -64,6 +65,12 @@ struct PlayerView: View {
             }
             Spacer()
             if let item = player.currentItem {
+                // The same submenu the song's context menu offers — the song,
+                // its album, its artists — shown icon-only, and nothing at
+                // all when the backend can't take bans.
+                BanMenu(item: item)
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(Color.secondary)
                 FavouriteButton(item: item, size: .title3)
             }
         }
@@ -120,7 +127,24 @@ struct PlayerView: View {
         }
     }
 
-    private var secondaryControls: some View {
+    @ViewBuilder private var secondaryControls: some View {
+        #if os(macOS)
+        // Equal-width flexible sides keep the buttons centred under the
+        // transport while the volume slider sits at the trailing edge.
+        HStack(spacing: 16) {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
+            secondaryButtons.fixedSize()
+            VolumeSlider()
+                .frame(minWidth: 80, maxWidth: 160)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal)
+        #else
+        secondaryButtons
+        #endif
+    }
+
+    private var secondaryButtons: some View {
         HStack(spacing: 44) {
             #if os(iOS)
             AirPlayPicker()
@@ -135,6 +159,16 @@ struct PlayerView: View {
             Button { player.cycleRepeatMode() } label: {
                 Image(systemName: player.repeatMode.systemImage)
                     .foregroundStyle(player.repeatMode == .repeatNone ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+            }
+            .buttonStyle(.plain)
+
+            // The same preference in the backend settings sheet's toggle edits —
+            // Infinite Queue is one switch with two handles. Lit while on;
+            // when the backend cannot be reached it simply does nothing rather
+            // than refusing the tap.
+            Button { preferences.infiniteQueueEnabled.toggle() } label: {
+                Image(systemName: "infinity")
+                    .foregroundStyle(preferences.infiniteQueueEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
             .buttonStyle(.plain)
 

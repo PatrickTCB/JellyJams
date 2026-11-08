@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Combine
 import OSLog
 #if os(iOS)
 import UIKit
@@ -68,11 +69,46 @@ final class PlayerController: ObservableObject {
     @Published var repeatMode: RepeatMode = .repeatNone {
         didSet { updateNowPlaying() }
     }
+    #if os(macOS)
+    /// The app's playback volume, from 0 to 1, remembered across launches.
+    /// iOS has no in-app volume: the hardware buttons and system controls own it.
+    @Published var volume: Float = PlayerController.storedVolume {
+        didSet {
+            let clamped = min(max(volume, 0), 1)
+            if clamped != volume { volume = clamped; return }
+            player.volume = volume
+            UserDefaults.standard.set(volume, forKey: Self.volumeKey)
+        }
+    }
+    private static let volumeKey = "jellyjams.volume"
+    private static var storedVolume: Float {
+        guard UserDefaults.standard.object(forKey: volumeKey) != nil else { return 1 }
+        return min(max(UserDefaults.standard.float(forKey: volumeKey), 0), 1)
+    }
+    #endif
 
     private let player = AVPlayer()
     private var client: JellyfinService?
     private weak var downloads: DownloadStore?
     private weak var preferences: PreferencesStore?
+    private var preferencesObservation: AnyCancellable?
+    /// The Infinite Queue fetcher, configured from ``AppServices`` as the
+    /// session and backend settings describe. Nil — or unconfigured — while
+    /// there is no backend account to extend a queue with.
+    private var queueExtender: QueueExtender?
+
+    /// The user's favourite overrides, so the Now Playing transport — the
+    /// lock screen heart — can flip the current track's favourite state exactly
+    /// like an in-app tap does.
+    private var favourites: FavouriteStore?
+    /// Replaced whenever the queue is swapped wholesale or deliberately cut
+    /// short, so an extension fetched for an older queue can never land in
+    /// the new one — the same guard ``BanStore`` keeps over its ban lists.
+    private var queueGeneration = UUID()
+    /// Whether an extension request is in flight. Extension checks run on
+    /// every queue event, which arrive far faster than the backend answers;
+    /// without this, one slow fetch would stack identical ones behind it.
+    private var isExtendingQueue = false
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var originalQueue: [QueueEntry]?
@@ -111,6 +147,24 @@ final class PlayerController: ObservableObject {
 
     var hasQueue: Bool { !queue.isEmpty }
 
+    /// Whether the track currently playing is favourited, resolved through the
+    /// store so a session override beats the server snapshot.
+    var isCurrentItemFavourite: Bool {
+        guard let item = currentItem, let favourites else { return false }
+        return favourites.isFavourite(item)
+    }
+
+    /// How many already-played tracks the queue UI keeps visible above the
+    /// current one.
+    static let visibleHistoryCount = 2
+
+    /// The first queue index the queue UI shows. Older played entries stay in
+    /// ``queue`` — so Previous and Repeat All still reach them — but are hidden.
+    var visibleQueueStartIndex: Int {
+        guard let index = currentIndex, queue.indices.contains(index) else { return 0 }
+        return max(0, index - Self.visibleHistoryCount)
+    }
+
     var canGoNext: Bool {
         guard let index = currentIndex else { return false }
         return index + 1 < queue.count || (repeatMode == .repeatAll && !queue.isEmpty)
@@ -120,6 +174,10 @@ final class PlayerController: ObservableObject {
 
     init() {
         player.actionAtItemEnd = .pause
+        player.automaticallyWaitsToMinimizeStalling = true
+        #if os(macOS)
+        player.volume = volume
+        #endif
         setupTimeObserver()
         setupEndObserver()
         setupFailureObserver()
@@ -131,7 +189,8 @@ final class PlayerController: ObservableObject {
             toggle: { [weak self] in self?.togglePlayPause() },
             next: { [weak self] in self?.next() },
             previous: { [weak self] in self?.previous() },
-            seek: { [weak self] time in self?.seek(to: time) }
+            seek: { [weak self] time in self?.seek(to: time) },
+            like: { [weak self] in self?.toggleFavourite() }
         ))
     }
 
@@ -145,11 +204,43 @@ final class PlayerController: ObservableObject {
 
     func configure(preferences: PreferencesStore?) {
         self.preferences = preferences
+        // Turning Infinite Queue on mid-listen should top the queue up right
+        // away, not at the next track change — a listener sitting on the last
+        // track would otherwise watch the toggle do nothing. The check hops
+        // through a `Task` because `@Published` emits in `willSet`: run
+        // synchronously from the emission, `infiniteQueueEnabled` still reads
+        // the old value and the fresh choice is missed. `dropFirst()` skips
+        // the subscription's replay of the current value: wiring is not a
+        // request to extend.
+        preferencesObservation = preferences?.$infiniteQueueEnabled
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in self?.maybeExtendQueue() }
+            }
+    }
+
+    func configure(queueExtender: QueueExtender?) {
+        self.queueExtender = queueExtender
+    }
+
+    func configure(favourites: FavouriteStore?) {
+        self.favourites = favourites
     }
 
     // MARK: - State Persistence
 
     private let playbackStateKey = "jellyjams.playbackState"
+
+    /// Forgets what the player persists — the resume point on iOS, the
+    /// remembered volume on macOS — returning both to what a fresh install
+    /// reads. The queue itself is ``clearQueue()``'s business, which the
+    /// sign-out wiring runs alongside this.
+    func forgetEverything() {
+        UserDefaults.standard.removeObject(forKey: playbackStateKey)
+        #if os(macOS)
+        volume = 1
+        #endif
+    }
 
     func savePlaybackState() {
         #if os(iOS)
@@ -218,6 +309,9 @@ final class PlayerController: ObservableObject {
         }
 
         let entries = resolvedItems.map(QueueEntry.init)
+        // A restored queue is a fresh queue: any extension in flight when
+        // the app went away belongs to a listen that no longer exists.
+        queueGeneration = UUID()
         queue = entries
         isShuffled = state.isShuffled
         repeatMode = state.repeatMode
@@ -259,6 +353,9 @@ final class PlayerController: ObservableObject {
         let audioItems = indexedAudioItems.map(\.element)
         guard !audioItems.isEmpty else { return }
         reportStopped()
+        // A whole new queue retires any extension still in flight for the
+        // old one.
+        queueGeneration = UUID()
         let entries = audioItems.map(QueueEntry.init)
         originalQueue = nil
         if shuffled {
@@ -299,6 +396,7 @@ final class PlayerController: ObservableObject {
                 originalQueue?.append(contentsOf: entries)
             }
         }
+        maybeExtendQueue()
     }
 
     func addToQueue(_ items: [BaseItemDto]) {
@@ -316,6 +414,16 @@ final class PlayerController: ObservableObject {
 
     func togglePlayPause() {
         isPlaying ? pause() : resume()
+    }
+
+    /// The lock screen / Control Centre heart: flips the current track's
+    /// favourite state through the store, which persists to the server like
+    /// any other favourite write, then refreshes the now playing state so the
+    /// heart reflects the new favourite.
+    func toggleFavourite() {
+        guard let item = currentItem else { return }
+        favourites?.toggle(item)
+        updateNowPlaying()
     }
 
     /// Play/resume for the system transport ("Hey Siri, play", the Control
@@ -454,6 +562,7 @@ final class PlayerController: ObservableObject {
 
     func clearQueue() {
         reportStopped()
+        queueGeneration = UUID()
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
         player.replaceCurrentItem(with: nil)
@@ -479,6 +588,10 @@ final class PlayerController: ObservableObject {
             clearQueue()
             return
         }
+        // Cutting the queue short is the listener ending it on purpose — an
+        // extension in flight for the longer queue must not refill what was
+        // just removed.
+        queueGeneration = UUID()
         removeFromQueue(atOffsets: IndexSet(integersIn: (index + 1) ..< queue.count))
     }
 
@@ -508,6 +621,9 @@ final class PlayerController: ObservableObject {
             let target = min(oldCurrentIndex - removedBefore, queue.count - 1)
             startPlayback(at: target, reportingPreviousItem: false, resuming: isPlaying)
         }
+        // Removing upcoming tracks can leave the listener short again —
+        // Infinite Queue tops back up if it is on.
+        maybeExtendQueue()
     }
 
     func moveQueue(fromOffsets offsets: IndexSet, toOffset destination: Int) {
@@ -516,6 +632,9 @@ final class PlayerController: ObservableObject {
         if let currentEntryID {
             currentIndex = queue.firstIndex(where: { $0.id == currentEntryID })
         }
+        // A move can pull tracks out from ahead of the listener — the same
+        // shortage a removal causes.
+        maybeExtendQueue()
     }
 
     // MARK: - Shuffle
@@ -541,6 +660,58 @@ final class PlayerController: ObservableObject {
         }
         isShuffled = enabled
         updateNowPlaying()
+    }
+
+    // MARK: - Infinite Queue
+
+    /// How many tracks may still be coming before Infinite Queue tops the
+    /// queue up. Small enough that the fetch has room to land before the
+    /// listener runs out, large enough that a few skipped tracks don't each
+    /// fire a request of their own.
+    private static let extensionThreshold = 3
+
+    /// Tops the queue up from the backend when the listener is near its end
+    /// and Infinite Queue is on: an album in order continues with the next
+    /// album the backend picks, anything else grows with alchemy seeded from
+    /// the queue so far (``QueueExtensionPlan``).
+    ///
+    /// Best-effort by design. The check runs on every queue event and is
+    /// plain arithmetic when it declines; the fetch runs detached, one at a
+    /// time, and a backend that cannot be reached just leaves the queue as it
+    /// is — a failed top-up is not a playback failure and never surfaces as
+    /// one. Appended tracks keep their picked order and skip anything already
+    /// queued, so alchemy echoing a song back cannot duplicate it.
+    private func maybeExtendQueue() {
+        guard let preferences, preferences.infiniteQueueEnabled else { return }
+        guard let extender = queueExtender, extender.canExtend, let client else { return }
+        guard let index = currentIndex, !isExtendingQueue else { return }
+        guard queue.count - index - 1 <= Self.extensionThreshold else { return }
+
+        let plan = QueueExtensionPlan.detect(queue: queue, currentIndex: index, isShuffled: isShuffled)
+        let existingIDs = queue.compactMap(\.item.id)
+        // Captured so the answer can be checked against the queue it was
+        // fetched for: a play, a clear or a clear-upcoming while the request
+        // was in flight means these tracks belong to a listen that is gone.
+        let generation = queueGeneration
+        isExtendingQueue = true
+        playbackLogger.debug("Infinite Queue extending (\(plan == .general ? "alchemy" : "next album"), \(existingIDs.count) sources)")
+        Task {
+            defer { isExtendingQueue = false }
+            do {
+                let tracks = try await extender.tracks(for: plan, existingQueueIDs: existingIDs, client: client)
+                guard generation == queueGeneration else {
+                    playbackLogger.debug("Discarded an Infinite Queue extension for a queue that has gone")
+                    return
+                }
+                let queued = Set(queue.compactMap(\.item.id))
+                let fresh = tracks.filter { !queued.contains($0.id ?? "") }
+                guard !fresh.isEmpty else { return }
+                playbackLogger.info("Infinite Queue appended \(fresh.count) tracks")
+                addToQueue(fresh)
+            } catch {
+                playbackLogger.error("Infinite Queue could not extend the queue: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     // MARK: - Playback internals
@@ -612,6 +783,7 @@ final class PlayerController: ObservableObject {
             isPlaying = false
             updateNowPlaying()
         }
+        maybeExtendQueue()
     }
 
     private func finishPlayback() {
@@ -983,7 +1155,8 @@ final class PlayerController: ObservableObject {
             artworkURL: currentItem.flatMap { client?.artworkURL(for: $0, size: 600) },
             localArtworkURL: currentItem.flatMap { downloads?.localArtworkURL(for: $0) },
             canGoNext: canGoNext,
-            canGoPrevious: canGoPrevious
+            canGoPrevious: canGoPrevious,
+            isFavourite: isCurrentItemFavourite
         )
     }
 

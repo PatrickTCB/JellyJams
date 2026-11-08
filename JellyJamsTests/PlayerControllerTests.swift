@@ -3,6 +3,27 @@ import XCTest
 
 @MainActor
 final class PlayerControllerTests: XCTestCase {
+    #if os(iOS)
+    /// The resume point goes with everything else a server sign-out forgets:
+    /// a fresh install has nothing to resume.
+    func testForgettingEverythingDropsTheSavedPlaybackState() {
+        let key = "jellyjams.playbackState"
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved {
+                UserDefaults.standard.set(saved, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.set(Data("stale".utf8), forKey: key)
+
+        PlayerController().forgetEverything()
+
+        XCTAssertNil(UserDefaults.standard.object(forKey: key))
+    }
+    #endif
+
     func testDuplicateTracksKeepDistinctQueueIdentity() {
         let player = PlayerController()
         let track = TestFixtures.item(id: "duplicate-track")
@@ -78,5 +99,33 @@ final class PlayerControllerTests: XCTestCase {
 
         XCTAssertTrue(player.queue.isEmpty)
         XCTAssertNil(player.currentIndex)
+    }
+
+    func testTheLockScreenHeartTogglesTheCurrentTracksFavourite() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), Data(#"{"Key":"k"}"#.utf8))
+        }
+        defer { URLProtocolStub.handler = nil }
+
+        let player = PlayerController()
+        player.configure(client: TestFixtures.offlineClient())
+        let favourites = FavouriteStore()
+        favourites.configure(client: TestFixtures.stubbedClient())
+        player.configure(favourites: favourites)
+
+        let track = TestFixtures.item(id: "a", isFavourite: false)
+        player.play([track])
+        XCTAssertFalse(player.isCurrentItemFavourite)
+
+        player.toggleFavourite()
+        for _ in 0 ..< 400 {
+            if !favourites.isBusy(track) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        XCTAssertTrue(player.isCurrentItemFavourite)
+        XCTAssertTrue(favourites.isFavourite(track))
     }
 }

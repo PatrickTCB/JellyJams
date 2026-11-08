@@ -5,9 +5,9 @@ import Foundation
 ///
 /// Shared by every surface that answers "play something" with nothing named:
 /// the system play button (``PlayerController/playOrResume()``) and Siri's
-/// default-playback sentinel (``SiriPlayback``). A missing setting, or one
-/// whose item has vanished from the server, falls back to the favourites
-/// shuffle rather than failing.
+/// default-playback sentinel (``SiriPlayback``). A missing setting, one whose
+/// item has vanished from the server, or one whose item yields no tracks
+/// falls back to the favourites shuffle rather than failing.
 enum DefaultPlaybackResolver {
     struct Resolved: Sendable {
         let tracks: [BaseItemDto]

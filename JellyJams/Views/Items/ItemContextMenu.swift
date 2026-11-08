@@ -69,6 +69,7 @@ struct ItemContextMenu: ViewModifier {
         Button { perform(.shuffle) } label: { Label("Shuffle", systemImage: "shuffle") }
         Button { perform(.playNext) } label: { Label("Play Next", systemImage: "text.insert") }
         Button { perform(.addToQueue) } label: { Label("Add to Queue", systemImage: "text.append") }
+        InstantMixButton(item: item)
 
         Divider()
 
@@ -90,6 +91,19 @@ struct ItemContextMenu: ViewModifier {
             }
         } label: {
             Label("Add to Playlist", systemImage: "text.badge.plus")
+        }
+
+        // Bans only appear for the kinds that can be banned, and only while
+        // the backend can take them; playlists offer neither.
+        BanMenu(item: item)
+
+        // The artist page loads from the server, so browsing downloads
+        // doesn't offer it — the rule Instant Mix follows.
+        if item.itemType == .musicAlbum, !offlineBrowsing, let artist = item.artistNavigationItem {
+            Divider()
+            Button { navigator.open(artist) } label: {
+                Label("View Artist", systemImage: "person")
+            }
         }
 
         Divider()
@@ -139,7 +153,7 @@ struct ItemContextMenu: ViewModifier {
 
         if isPlaylist {
             Divider()
-            // Opening a playlist's contents. AI Radio stations play on a tap
+            // Opening a playlist's contents. Mixtapes play on a tap
             // instead, so this is their only way in; ordinary playlists get it
             // too, so the action lives in one place whatever the list.
             Button { navigator.open(item) } label: {

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// A compact navigation row with artwork, title and subtitle. Used by the
-/// search results and the genre screen, which present the same mix of artists,
-/// albums and genres.
+/// lists that present a mix of item kinds — search results, the genre screen
+/// and the default-playback picker.
 struct ItemRow: View {
     let item: BaseItemDto
     var circular = false

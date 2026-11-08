@@ -5,8 +5,9 @@ struct PlaylistsView: View {
     @EnvironmentObject private var preferences: PreferencesStore
     @ObservedObject var model: PagedItems
 
-    /// The playlists the user made. While AI Radio is on, the ones AudioMuse-AI
-    /// generated belong to that section instead and are left out of this list.
+    /// The playlists the user made. While the app is registered with a
+    /// backend, the mixtapes it builds belong to that section instead and are
+    /// left out of this list.
     private var query: LibraryQuery {
         model.query(nameFilter: preferences.playlistNameFilter(for: model.list))
     }

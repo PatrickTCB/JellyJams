@@ -4,10 +4,10 @@ import Foundation
 
 /// An album in the Jellyfin library, in the form Siri understands.
 ///
-/// `songs` is deliberately empty: Siri only needs the album's identity to hand
-/// it to ``PlayAudioIntent``, which fetches the track list itself when
-/// performing. Schema properties are computed from the stored ``item``
-/// snapshot.
+/// `songs` is deliberately empty: Siri only needs the album's identity, and
+/// the play intents fetch the track list themselves — through
+/// ``SiriPlayback`` — when performing. Schema properties are computed from
+/// the stored ``item`` snapshot.
 @AppEntity(schema: .audio.album)
 struct AlbumEntity {
     static let defaultQuery = AlbumQuery()

@@ -20,7 +20,8 @@ extension View {
 extension View {
     /// Docks the mini player inside a tab's content on OS versions without the
     /// tab bar accessory API. On iOS 26.1+ the tab view hosts the bar via
-    /// ``nowPlayingTabAccessory()`` instead, so this is a no-op there.
+    /// ``nowPlayingTabAccessory()`` instead, so this is a no-op there — which,
+    /// at this deployment target, is every supported system.
     @ViewBuilder func nowPlayingTabContentDock() -> some View {
         if #available(iOS 26.1, *) {
             self

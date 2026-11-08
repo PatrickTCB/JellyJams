@@ -70,4 +70,36 @@ extension JellyfinAPI.BaseItemDto {
     var mediaSourceID: String? {
         mediaSources?.first?.id
     }
+
+    /// A minimal artist item that can be pushed to open this item's artist
+    /// page: an album's first album artist, a song's first track artist. The
+    /// id is what routing loads by, so a stub carries a full page (see
+    /// ``AlbumDetailView``). `nil` when no artist carries an id to route on.
+    var artistNavigationItem: BaseItemDto? {
+        guard let pair = itemType == .musicAlbum ? albumArtists?.first : artistItems?.first,
+              let id = pair.id
+        else { return nil }
+        return BaseItemDto(id: id, name: pair.name, type: .musicArtist)
+    }
+
+    /// One minimal artist item per artist on this item, in order — a song
+    /// with several artists yields one entry each, so a menu can offer a
+    /// button per artist. Artists without an id to route on are dropped,
+    /// as is any repeat of an id already offered. See
+    /// ``artistNavigationItem`` for the first-artist form.
+    var artistNavigationItems: [BaseItemDto] {
+        let pairs = itemType == .musicAlbum ? albumArtists : artistItems
+        var seen = Set<String>()
+        return (pairs ?? []).compactMap { pair in
+            guard let id = pair.id, seen.insert(id).inserted else { return nil }
+            return BaseItemDto(id: id, name: pair.name, type: .musicArtist)
+        }
+    }
+
+    /// A minimal album item that can be pushed to open the album this song
+    /// belongs to, or `nil` for anything without an album id.
+    var albumNavigationItem: BaseItemDto? {
+        guard let id = albumID else { return nil }
+        return BaseItemDto(id: id, name: album, type: .musicAlbum)
+    }
 }

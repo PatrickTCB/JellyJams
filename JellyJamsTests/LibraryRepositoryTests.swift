@@ -95,20 +95,20 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(request.value(for: "sortOrder"), "Ascending")
     }
 
-    // MARK: - AI Radio playlist split
+    // MARK: - Mixtape playlist split
 
-    /// AudioMuse-AI's playlists are recognised by their name, which Jellyfin
+    /// The backend's mixtapes are recognised by their name, which Jellyfin
     /// cannot query for, so the split is applied to what the server returns.
-    func testAIRadioPlaylistsKeepOnlyTheGeneratedNames() async throws {
+    func testMixtapePlaylistsKeepOnlyTheGeneratedNames() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
 
-        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+        let result = try await splitPage(of: .mixtapePlaylists, .endsWith("_automatic"))
 
         XCTAssertEqual(result.items?.compactMap(\.id), ["Chill_automatic", "Focus_AUTOMATIC"])
     }
 
     /// The ordinary playlist list is the other half of the same split: a
-    /// station shown in both places is a station the user cannot find.
+    /// mixtape shown in both places is a mixtape the user cannot find.
     func testPlaylistListGivesUpTheGeneratedNames() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
 
@@ -123,7 +123,7 @@ final class LibraryRepositoryTests: XCTestCase {
     func testASplitListReportsTheNumberOfPlaylistsItKept() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_AUTOMATIC"])
 
-        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+        let result = try await splitPage(of: .mixtapePlaylists, .endsWith("_automatic"))
 
         XCTAssertEqual(result.totalRecordCount, 2)
         XCTAssertEqual(result.startIndex, 0)
@@ -133,7 +133,7 @@ final class LibraryRepositoryTests: XCTestCase {
     func testASplitListWithNoMatchesIsEmpty() async throws {
         stubPlaylists(["Road Trip", "Gym"])
 
-        let result = try await splitPage(of: .aiRadioPlaylists, .endsWith("_automatic"))
+        let result = try await splitPage(of: .mixtapePlaylists, .endsWith("_automatic"))
 
         XCTAssertEqual(result.items, [])
         XCTAssertEqual(result.totalRecordCount, 0)
@@ -143,7 +143,7 @@ final class LibraryRepositoryTests: XCTestCase {
     /// match beyond it: a split list is fetched whole, in one request.
     func testASplitListIsFetchedWhole() async throws {
         let request = try await recordPage(
-            for: LibraryQuery(list: .aiRadioPlaylists, nameFilter: .endsWith("_automatic")),
+            for: LibraryQuery(list: .mixtapePlaylists, nameFilter: .endsWith("_automatic")),
             startIndex: 40,
             limit: 20
         )
@@ -582,16 +582,82 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertEqual(similar.compactMap(\.id), ["album-1", "album-2"])
     }
 
+    // MARK: - Instant mix
+
+    func testInstantMixRequestsTheItemsInstantMixEndpointForTheSeed() async throws {
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        _ = try await TestFixtures.stubbedRepository().instantMix(
+            for: TestFixtures.item(id: "album-id", type: .musicAlbum)
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(recorder.all.count, 1)
+        XCTAssertEqual(request.path, "/jellyfin/Items/album-id/InstantMix")
+        XCTAssertEqual(request.value(for: "userId"), "user-id")
+        XCTAssertEqual(request.value(for: "limit"), "200")
+    }
+
+    /// The result goes straight to the player, so anything that isn't a song
+    /// must not reach the queue.
+    func testInstantMixKeepsOnlySongsInServerOrder() async throws {
+        URLProtocolStub.handler = { request in
+            let payload = itemsPayload([
+                ("song-2", "Audio"),
+                ("album-1", "MusicAlbum"),
+                ("song-1", "Audio")
+            ])
+            return (try emptyResponse(for: request, statusCode: 200), payload)
+        }
+
+        let mix = try await TestFixtures.stubbedRepository().instantMix(
+            for: TestFixtures.item(id: "artist-id", type: .musicArtist)
+        )
+
+        XCTAssertEqual(mix.compactMap(\.id), ["song-2", "song-1"])
+    }
+
+    func testInstantMixRequiresAnItemIdentifier() async {
+        do {
+            _ = try await TestFixtures.stubbedRepository().instantMix(for: BaseItemDto(name: "No ID"))
+            XCTFail("Expected missingItemIdentifier")
+        } catch {
+            XCTAssertEqual(error as? JellyfinError, .missingItemIdentifier)
+        }
+    }
+
+    func testInstantMixIsOfferedForSongsAlbumsArtistsAndPlaylistsOnly() {
+        for type in [ItemType.audio, .musicAlbum, .musicArtist, .playlist] {
+            XCTAssertTrue(TestFixtures.item(id: "id", type: type).supportsInstantMix, "\(type)")
+        }
+        for type in [ItemType.musicGenre, .genre, .folder] {
+            XCTAssertFalse(TestFixtures.item(id: "id", type: type).supportsInstantMix, "\(type)")
+        }
+        XCTAssertFalse(BaseItemDto(name: "No ID", type: .musicAlbum).supportsInstantMix)
+    }
+
     // MARK: - Home
 
-    func testLatestItemsAsksTheLatestEndpointForTheRightKind() async throws {
+    /// Each home row asks `/Items` for its own kind, newest first, sorted by
+    /// the date that makes the kind "new": albums by the day they joined
+    /// the library, artists by premiere date.
+    func testLatestItemsAskTheItemsEndpointSortedByTheKindsOwnDate() async throws {
         let albums = try await recordLatest(.albums)
-        XCTAssertEqual(albums.path, "/jellyfin/Items/Latest")
+        XCTAssertEqual(albums.path, "/jellyfin/Items")
         XCTAssertEqual(albums.values(for: "includeItemTypes"), ["MusicAlbum"])
+        XCTAssertEqual(albums.values(for: "sortBy"), ["DateCreated", "SortName"])
+        XCTAssertEqual(albums.value(for: "sortOrder"), "Descending")
+        XCTAssertEqual(albums.value(for: "recursive"), "true")
         XCTAssertEqual(albums.value(for: "limit"), "10")
 
         let artists = try await recordLatest(.artists)
         XCTAssertEqual(artists.values(for: "includeItemTypes"), ["MusicArtist"])
+        XCTAssertEqual(artists.values(for: "sortBy"), ["PremiereDate", "SortName"])
+        XCTAssertEqual(artists.value(for: "sortOrder"), "Descending")
+        XCTAssertEqual(artists.value(for: "recursive"), "true")
     }
 
     func testIdLookupForwardsEveryId() async throws {
@@ -629,15 +695,15 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertTrue(recorder.all.isEmpty)
     }
 
-    func testAIRadioStationsKeepOnlyStationsAndStopAtTheLimit() async throws {
+    func testMixtapesKeepOnlyMixtapesAndStopAtTheLimit() async throws {
         stubPlaylists(["Chill_automatic", "Road Trip", "Focus_automatic", "Workout_automatic"])
 
-        let stations = try await TestFixtures.stubbedRepository().aiRadioStations(
+        let mixtapes = try await TestFixtures.stubbedRepository().mixtapes(
             nameFilter: .endsWith("_automatic"),
             limit: 3
         )
 
-        XCTAssertEqual(stations.compactMap(\.id), ["Chill_automatic", "Focus_automatic", "Workout_automatic"])
+        XCTAssertEqual(mixtapes.compactMap(\.id), ["Chill_automatic", "Focus_automatic", "Workout_automatic"])
     }
 
     // MARK: - Signed out
@@ -673,10 +739,13 @@ final class LibraryRepositoryTests: XCTestCase {
             _ = try await repository.latestItems(.albums, limit: 10)
         }
         await assertNotAuthenticated {
+            _ = try await repository.instantMix(for: TestFixtures.item(id: "album-id", type: .musicAlbum))
+        }
+        await assertNotAuthenticated {
             _ = try await repository.items(withIds: ["album-id"])
         }
         await assertNotAuthenticated {
-            _ = try await repository.aiRadioStations(nameFilter: .endsWith("_automatic"), limit: 3)
+            _ = try await repository.mixtapes(nameFilter: .endsWith("_automatic"), limit: 3)
         }
     }
 
@@ -729,12 +798,12 @@ final class LibraryRepositoryTests: XCTestCase {
         return try XCTUnwrap(recorder.all.first)
     }
 
-    /// Sends one latest-media request and returns what reached the network.
+    /// Sends one home latest-items request and returns what reached the network.
     private func recordLatest(_ kind: LibraryRepository.LatestKind) async throws -> RecordedRequest {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
-            return (try emptyResponse(for: request, statusCode: 200), Data("[]".utf8))
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
         }
 
         _ = try await TestFixtures.stubbedRepository().latestItems(kind, limit: 10)

@@ -1,13 +1,19 @@
 import SwiftUI
 
 /// The Pinned row: what the user marked from any album, artist, playlist or
-/// station's context menu.
+/// mixtape's context menu.
 ///
 /// Pins are resolved against the server by ``PinnedItemsStore`` before they
 /// reach here, and they never disappear on their own: an item deleted
 /// server-side keeps its tile, shown from the stored name alone, and tapping
 /// it asks the server again — present, the item opens; gone, the removal of
 /// the pin is offered.
+///
+/// The user sets the row's order themselves. With more than one pin, a tile
+/// can be dragged along the row — long-press on iOS, click-drag on macOS —
+/// and dropping it moves the pin there. The new order is persisted with the
+/// pins. Before macOS 27, which lacks SwiftUI's reordering API, the row
+/// keeps its order.
 struct PinnedItemsSection: View {
     let entries: [PinnedItemsStore.Entry]
 
@@ -26,8 +32,20 @@ struct PinnedItemsSection: View {
             Text("Pinned")
                 .font(.title2.bold())
                 .padding(.horizontal)
-            HomeItemRow(items: entries) { entry in
-                tile(for: entry)
+            // A single pin has no order to change, and a lone draggable
+            // tile would only fight its long-press menu — so the row
+            // rearranges while it holds two or more.
+            if entries.count > 1 {
+                ReorderableHomeItemRow(
+                    items: entries,
+                    move: { entry, index in pinnedItems.move(entry.pin, to: index) }
+                ) { entry in
+                    tile(for: entry)
+                }
+            } else {
+                HomeItemRow(items: entries) { entry in
+                    tile(for: entry)
+                }
             }
         }
         .confirmationDialog(
@@ -51,8 +69,8 @@ struct PinnedItemsSection: View {
     private func tile(for entry: PinnedItemsStore.Entry) -> some View {
         switch entry.state {
         case .resolved(let item):
-            if preferences.isAIRadioStation(item) {
-                StationTile(station: item)
+            if preferences.isMixtape(item) {
+                MixtapeTile(mixtape: item)
             } else {
                 HomeItemTile(item: item)
             }
@@ -67,16 +85,16 @@ struct PinnedItemsSection: View {
     }
 
     /// The tap on an unresolved or missing pin: ask the server about it now.
-    /// Answered present, the item opens — or plays, for a station; answered
+    /// Answered present, the item opens — or plays, for a mixtape; answered
     /// gone, the removal is offered; failed to answer, the error surfaces and
     /// the pin stays.
     private func use(_ entry: PinnedItemsStore.Entry) async {
         switch await pinnedItems.use(entry, using: session.library) {
         case .resolved(let item):
-            if preferences.isAIRadioStation(item) {
-                StationPlayback.play(
+            if preferences.isMixtape(item) {
+                MixtapePlayback.play(
                     item,
-                    stationName: preferences.aiRadioStationName(for: item),
+                    mixtapeName: preferences.mixtapeName(for: item),
                     library: session.library,
                     player: player,
                     playlistStore: playlistStore

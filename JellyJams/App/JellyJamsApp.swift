@@ -14,7 +14,9 @@ final class CheckForUpdatesViewModel: ObservableObject {
 }
 
 // This is the view for the Check for Updates menu item
-// Note: this intermediate view is necessary for the disabled state on the menu item to work properly before Monterey.
+// Note: the intermediate view was necessary for the disabled state on the menu
+// item to update on pre-Monterey systems — long before this app's deployment
+// target — and is kept because Sparkle's own sample ships it this way.
 // See https://stackoverflow.com/questions/68553092/menu-not-updating-swiftui-bug for more info
 struct CheckForUpdatesView: View {
     @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
@@ -22,8 +24,6 @@ struct CheckForUpdatesView: View {
     
     init(updater: SPUUpdater) {
         self.updater = updater
-        
-        // Create our view model for our CheckForUpdatesView
         self.checkForUpdatesViewModel = CheckForUpdatesViewModel(updater: updater)
     }
     
@@ -50,6 +50,7 @@ struct JellyJamsApp: App {
     @StateObject private var playlistStore: PlaylistStore
     @StateObject private var libraryCache: LibraryCache
     @StateObject private var favourites: FavouriteStore
+    @StateObject private var bans: BanStore
     @StateObject private var settingsPresentation: SettingsPresentation
     @StateObject private var preferences: PreferencesStore
     @StateObject private var downloads: DownloadStore
@@ -70,14 +71,15 @@ struct JellyJamsApp: App {
         _playlistStore = StateObject(wrappedValue: services.playlistStore)
         _libraryCache = StateObject(wrappedValue: services.libraryCache)
         _favourites = StateObject(wrappedValue: services.favourites)
+        _bans = StateObject(wrappedValue: services.bans)
         _settingsPresentation = StateObject(wrappedValue: services.settingsPresentation)
         _preferences = StateObject(wrappedValue: services.preferences)
         _downloads = StateObject(wrappedValue: services.downloads)
         _pinnedItems = StateObject(wrappedValue: services.pinnedItems)
         _networkStatus = StateObject(wrappedValue: services.networkStatus)
         #if os(macOS)
-        // If you want to start the updater manually, pass false to startingUpdater and call .startUpdater() later
-        // This is where you can also pass an updater delegate if you need one
+        // Don't start the updater during test runs: its scheduled checks and
+        // installer services have no place in a test host.
         let runningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
         updaterController = SPUStandardUpdaterController(startingUpdater: !runningTests, updaterDelegate: nil, userDriverDelegate: nil)
@@ -94,6 +96,7 @@ struct JellyJamsApp: App {
                 .environmentObject(playlistStore)
                 .environmentObject(libraryCache)
                 .environmentObject(favourites)
+                .environmentObject(bans)
                 .environmentObject(settingsPresentation)
                 .environmentObject(preferences)
                 .environmentObject(downloads)
@@ -119,10 +122,24 @@ struct JellyJamsApp: App {
 
         #if os(macOS)
         Settings {
+            // The backend settings sheet browses — the bans screen opens
+            // real album and artist pages, whose rows reach every store a
+            // library screen uses — so the settings scene carries the same
+            // service graph as the main window rather than the handful the
+            // settings forms once needed alone.
             SettingsView()
                 .environmentObject(session)
                 .environmentObject(preferences)
                 .environmentObject(downloads)
+                .environmentObject(player)
+                .environmentObject(player.clock)
+                .environmentObject(playerPresentation)
+                .environmentObject(playlistStore)
+                .environmentObject(libraryCache)
+                .environmentObject(favourites)
+                .environmentObject(bans)
+                .environmentObject(pinnedItems)
+                .environmentObject(networkStatus)
         }
         // A settings scene is fixed to its content's size by default, which
         // leaves no way to widen the window when a long server address or a

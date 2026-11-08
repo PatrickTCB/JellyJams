@@ -8,7 +8,7 @@ struct ItemGrid: View {
     var emptyMessage = "Nothing here yet"
     var emptySystemImage = "music.note"
     /// Replaces navigation as the tap action, for a grid whose items are not
-    /// opened but acted on — the AI Radio stations, which start playing.
+    /// opened but acted on — the Mixtapes grid, whose tiles start playing.
     var onSelect: ((BaseItemDto) -> Void)?
     /// Replaces each cell's title, for a grid that calls its items something
     /// other than what the server named them. See ``ItemGridCell/title``.
