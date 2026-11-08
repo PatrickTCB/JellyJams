@@ -47,9 +47,15 @@ struct FavouritesView: View {
 
             switch tab {
             case .songs: songsList
-            case .albums: ItemGrid(model: albums, emptyMessage: "No favourite albums", emptySystemImage: "heart")
-            case .artists: ItemGrid(model: artists, minCellWidth: 150, emptyMessage: "No favourite artists", emptySystemImage: "heart")
-            case .playlists: ItemGrid(model: playlists, emptyMessage: "No favourite playlists", emptySystemImage: "heart")
+            case .albums: ItemGrid(model: albums, emptyMessage: "No favourite albums", emptySystemImage: "heart").refreshable {
+                Task { await albums.reload() }
+            }
+            case .artists: ItemGrid(model: artists, minCellWidth: 150, emptyMessage: "No favourite artists", emptySystemImage: "heart").refreshable {
+                Task { await artists.reload() }
+            }
+            case .playlists: ItemGrid(model: playlists, emptyMessage: "No favourite playlists", emptySystemImage: "heart").refreshable {
+                Task { await playlists.reload() }
+            }
             }
         }
         .navigationTitle("Favourites")
