@@ -61,6 +61,8 @@ final class NowPlayingCenter {
             Task { @MainActor in handlers.seek(position) }
             return .success
         }
+        center.likeCommand.localizedTitle = "Favourite"
+        center.likeCommand.localizedShortTitle = "Favourite"
         center.likeCommand.addTarget { _ in
             Task { @MainActor in handlers.like() }
             return .success
@@ -203,10 +205,13 @@ final class NowPlayingCenter {
         center.nextTrackCommand.isEnabled = hasItem && canGoNext
         center.previousTrackCommand.isEnabled = hasItem && canGoPrevious
         center.changePlaybackPositionCommand.isEnabled = hasItem && canSeek
-        // The like command is offered while a track is loaded and reflects the
-        // user's favourite state for it — the heart on the lock screen and in
-        // Control Centre.
+        // The action is a binary favourite, not a star rating, so only the
+        // like command may surface — the heart. The rating, dislike and
+        // bookmark commands stay disabled so the system can't offer a star.
         center.likeCommand.isEnabled = hasItem
         center.likeCommand.isActive = isFavourite
+        center.ratingCommand.isEnabled = false
+        center.dislikeCommand.isEnabled = false
+        center.bookmarkCommand.isEnabled = false
     }
 }
