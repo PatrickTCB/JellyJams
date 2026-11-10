@@ -51,6 +51,7 @@ final class PreferencesStore: ObservableObject {
         static let sameArtistLimit = "sameArtistLimit"
         static let defaultPlayback = "defaultPlayback"
         static let infiniteQueueEnabled = "infiniteQueueEnabled"
+        static let audioNormalizationEnabled = "audioNormalizationEnabled"
     }
 
     /// The whole reset a Jellyfin server sign-out performs: every setting
@@ -62,6 +63,7 @@ final class PreferencesStore: ObservableObject {
         showsSimilarItems = true
         showsCompleteAlbumsOnly = true
         defaultPlayback = nil
+        audioNormalizationEnabled = false
     }
 
     /// Whether album and artist screens look up similar music.
@@ -202,6 +204,14 @@ final class PreferencesStore: ObservableObject {
         didSet { defaults.set(infiniteQueueEnabled, forKey: Key.infiniteQueueEnabled) }
     }
 
+    /// Whether the app loudness-normalizes playback against the server's
+    /// measured audio level, applying each track's loudness normalization gain
+    /// — or its album's — as a gain on top of the player's volume. Off by
+    /// default: normalization is a listening preference the user opts into.
+    @Published var audioNormalizationEnabled: Bool {
+        didSet { defaults.set(audioNormalizationEnabled, forKey: Key.audioNormalizationEnabled) }
+    }
+
     private let defaults: UserDefaults
 
     /// The repeat limits the backend answers with for an account that never
@@ -227,6 +237,7 @@ final class PreferencesStore: ObservableObject {
         }
         // Off until asked for: an absent key must not switch the feature on.
         infiniteQueueEnabled = defaults.object(forKey: Key.infiniteQueueEnabled) as? Bool ?? false
+        audioNormalizationEnabled = defaults.object(forKey: Key.audioNormalizationEnabled) as? Bool ?? false
     }
 
     /// The ending to match, or nil when there is nothing to match with.

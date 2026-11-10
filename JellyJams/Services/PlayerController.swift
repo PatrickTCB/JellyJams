@@ -76,7 +76,7 @@ final class PlayerController: ObservableObject {
         didSet {
             let clamped = min(max(volume, 0), 1)
             if clamped != volume { volume = clamped; return }
-            player.volume = volume
+            applyNormalizationGain()
             UserDefaults.standard.set(volume, forKey: Self.volumeKey)
         }
     }
@@ -87,11 +87,33 @@ final class PlayerController: ObservableObject {
     }
     #endif
 
+    /// The current track's loudness normalization, in dB — the server's gain
+    /// for the track or its album, or none when the normalization feature is
+    /// off or the item carries no gain. Applied on top of the player's volume
+    /// so the user's own volume control keeps full say over the final level;
+    /// `0` is no normalization, which is also the neutral multiplier.
+    private var normalizationGain: Double = 0 {
+        didSet { applyNormalizationGain() }
+    }
+
+    /// Pushes the user's volume times the current track's normalization into
+    /// the player, so a track change and a volume change apply the same math.
+    private func applyNormalizationGain() {
+        let multiplier = normalizationGain == 0 ? 1 : pow(10, normalizationGain / 20)
+        #if os(macOS)
+        let userVolume = min(max(volume, 0), 1)
+        player.volume = userVolume * Float(multiplier)
+        #else
+        player.volume = Float(multiplier)
+        #endif
+    }
+
     private let player = AVPlayer()
     private var client: JellyfinService?
     private weak var downloads: DownloadStore?
     private weak var preferences: PreferencesStore?
     private var preferencesObservation: AnyCancellable?
+    private var normalizationObservation: AnyCancellable?
     /// The Infinite Queue fetcher, configured from ``AppServices`` as the
     /// session and backend settings describe. Nil — or unconfigured — while
     /// there is no backend account to extend a queue with.
@@ -216,6 +238,16 @@ final class PlayerController: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in self?.maybeExtendQueue() }
+            }
+        normalizationObservation = preferences?.$audioNormalizationEnabled
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.normalizationGain = self.preferences?.audioNormalizationEnabled == true
+                        ? self.currentItem?.loudnessNormalizationGain ?? 0
+                        : 0
+                }
             }
     }
 
@@ -766,6 +798,13 @@ final class PlayerController: ObservableObject {
         currentIndex = index
         playSessionId = nextPlaySessionId
         errorMessage = nil
+        // The loudness normalization this track was measured at, in dB — the
+        // track's own gain or its album's, or none when the feature is off or
+        // the item carries no gain. `0` is no normalization, which applies no
+        // gain and leaves the player's volume as the user's own level.
+        normalizationGain = preferences?.audioNormalizationEnabled == true
+            ? item.loudnessNormalizationGain
+            : 0
         let asset = AVURLAsset(url: streamURL)
         let playerItem = AVPlayerItem(asset: asset)
         observeStatus(of: playerItem)
@@ -1168,6 +1207,7 @@ final class PlayerController: ObservableObject {
             canSeek: true,
             isMuted: false,
             isPaused: !isPlaying,
+            item: item,
             itemID: itemId,
             mediaSourceID: item.mediaSourceID,
             playMethod: .directPlay,
@@ -1182,6 +1222,7 @@ final class PlayerController: ObservableObject {
         guard let item = currentItem, let itemId = item.id else { return nil }
         return PlaybackStopInfo(
             isFailed: failed,
+            item: item,
             itemID: itemId,
             mediaSourceID: item.mediaSourceID,
             playSessionID: playSessionId,

@@ -28,6 +28,14 @@ extension JellyfinAPI.BaseItemDto {
 
     var runtimeSeconds: Double? { Ticks.seconds(fromTicks: runTimeTicks) }
 
+    /// The loudness normalization gain for this item, in dB — the server's
+    /// playback normalisation for the track, falling back to its album when
+    /// the track carries none. `0` means no normalization, which is also what
+    /// an item with neither gain reports.
+    var loudnessNormalizationGain: Double {
+        Double(normalizationGain ?? albumNormalizationGain ?? 0)
+    }
+
     var subtitleArtist: String? {
         if let artists, !artists.isEmpty { return artists.joined(separator: ", ") }
         if let albumArtist, !albumArtist.isEmpty { return albumArtist }

@@ -76,6 +76,14 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Normalize Volume", isOn: $preferences.audioNormalizationEnabled)
+            } header: {
+                Text("Audio")
+            } footer: {
+                Text("Normalizes volume for each track using Jellyfin's data. Off by default.")
+            }
+
+            Section {
                 Button {
                     isShowingBackendSettings = true
                 } label: {
