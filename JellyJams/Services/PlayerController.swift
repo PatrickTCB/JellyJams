@@ -96,10 +96,18 @@ final class PlayerController: ObservableObject {
         didSet { applyNormalizationGain() }
     }
 
+    /// The linear multiplier a loudness normalization gain, in dB, calls for:
+    /// the neutral `1` when there is none, `10^(gain/20)` otherwise — a gain
+    /// of `+6` dB doubles the level, `-6` halves it. Pure so the server-reported
+    /// gain can be unit-tested without an `AVPlayer` in the middle of the math.
+    nonisolated static func normalizationMultiplier(forGain dB: Double) -> Double {
+        dB == 0 ? 1 : pow(10, dB / 20)
+    }
+
     /// Pushes the user's volume times the current track's normalization into
     /// the player, so a track change and a volume change apply the same math.
     private func applyNormalizationGain() {
-        let multiplier = normalizationGain == 0 ? 1 : pow(10, normalizationGain / 20)
+        let multiplier = Self.normalizationMultiplier(forGain: normalizationGain)
         #if os(macOS)
         let userVolume = min(max(volume, 0), 1)
         player.volume = userVolume * Float(multiplier)
