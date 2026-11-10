@@ -26,8 +26,6 @@ No guarantee I'll do any of these things in the next version, but these are all 
 seem kind of fun and so I will do them at some point.
 
 * transcoding
-* lyrics
-* Audio normalization
 * gapless/crossfade
 * sleep timer
 * widgets
