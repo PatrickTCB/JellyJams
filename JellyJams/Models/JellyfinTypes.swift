@@ -4,6 +4,7 @@ import JellyfinAPI
 typealias BaseItemDto = JellyfinAPI.BaseItemDto
 typealias NameIDPair = JellyfinAPI.NameIDPair
 typealias BaseItemDtoQueryResult = JellyfinAPI.BaseItemDtoQueryResult
+typealias LyricDto = JellyfinAPI.LyricDto
 typealias ItemType = JellyfinAPI.BaseItemKind
 typealias ItemFilter = JellyfinAPI.ItemFilter
 typealias SortOrder = JellyfinAPI.SortOrder
@@ -20,6 +21,11 @@ extension JellyfinAPI.BaseItemDto {
     }
 
     var isFavorite: Bool { userData?.isFavorite ?? false }
+
+    /// Whether the server holds lyrics for this item, behind the
+    /// `/Audio/{itemId}/Lyrics` lookup. The server flags the items it could
+    /// fetch lyrics for; the button that opens them waits on this.
+    var supportsLyrics: Bool { hasLyrics == true }
 
     var runtime: Duration? {
         guard let runTimeTicks else { return nil }

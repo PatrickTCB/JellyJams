@@ -264,6 +264,16 @@ final class JellyfinService: Sendable {
         return try validated(result)
     }
 
+    // MARK: - Lyrics
+
+    /// The lyrics for one item (`GET /Audio/{itemId}/Lyrics`), when the server
+    /// has any — `nil` when the item carries no lyrics the server could find.
+    func lyrics(for item: BaseItemDto) async throws -> LyricDto? {
+        guard let itemId = item.id else { throw JellyfinError.missingItemIdentifier }
+        let request = Paths.getLyrics(itemID: itemId)
+        return try await apiClient.send(request).value
+    }
+
     func getPlaylistItems(playlistId: String?) async throws -> BaseItemDtoQueryResult {
         let userId = try requireUserId()
         guard let playlistId else { throw JellyfinError.missingItemIdentifier }

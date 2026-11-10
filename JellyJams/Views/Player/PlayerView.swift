@@ -15,6 +15,7 @@ struct PlayerView: View {
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
     @State private var showingQueue = false
+    @State private var isPresentingLyrics = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -50,6 +51,7 @@ struct PlayerView: View {
         .frame(minWidth: 360, minHeight: 520)
         .clearsInitialKeyboardFocus()
         .sheet(isPresented: $showingQueue) { QueueView() }
+        .sheet(isPresented: $isPresentingLyrics) { LyricsView() }
     }
 
     private var handle: some View {
@@ -145,11 +147,21 @@ struct PlayerView: View {
     }
 
     private var secondaryButtons: some View {
-        HStack(spacing: 44) {
+        HStack(spacing: 32) {
             #if os(iOS)
             AirPlayPicker()
             #endif
             
+            // The current track's lyrics, when the server has them — the
+            // music.microphone the queue's listening neighbour gets. Only the
+            // now playing screen offers lyrics for the track it holds.
+            if let currentItem = player.currentItem, currentItem.supportsLyrics {
+                Button { isPresentingLyrics = true } label: {
+                    Image(systemName: "music.microphone")
+                }
+                .buttonStyle(.plain)
+            }
+
             Button { player.toggleShuffle() } label: {
                 Image(systemName: "shuffle")
                     .foregroundStyle(player.isShuffled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
