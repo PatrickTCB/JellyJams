@@ -88,7 +88,13 @@ struct MainShellView: View {
                 LibraryNavigationStack {
                     HomeView()
                         .toolbar {
-                            ToolbarItem(placement: .primaryAction) { textToTunesButton }
+                            // Text to Tunes rides the backend's registration, so
+                            // it is offered only while one is standing — the same
+                            // flag that hides the Mixtapes tab and raises the
+                            // sheet.
+                            if preferences.isMixtapesActive {
+                                ToolbarItem(placement: .primaryAction) { textToTunesButton }
+                            }
                             ToolbarItem(placement: .primaryAction) { AccountMenu() }
                         }
                 }
@@ -167,8 +173,9 @@ struct MainShellView: View {
                 .toolbar {
                     // Text to Tunes is a Home-screen feature, so its button is
                     // offered there alone — declared first, which is the slot
-                    // to the left of the account menu.
-                    if section == .home {
+                    // to the left of the account menu — and only while a
+                    // backend is registered to serve it.
+                    if section == .home, preferences.isMixtapesActive {
                         ToolbarItem(placement: .primaryAction) { textToTunesButton }
                     }
                     ToolbarItem(placement: .primaryAction) { AccountMenu() }
