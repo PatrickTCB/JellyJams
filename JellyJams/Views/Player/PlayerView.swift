@@ -154,12 +154,16 @@ struct PlayerView: View {
             
             // The current track's lyrics, when the server has them — the
             // music.microphone the queue's listening neighbour gets. Only the
-            // now playing screen offers lyrics for the track it holds.
-            if let currentItem = player.currentItem, currentItem.supportsLyrics {
+            // now playing screen offers lyrics for the track it holds. The
+            // button stays visible, but greyed out, for tracks the server
+            // has no lyrics for.
+            if let currentItem = player.currentItem {
                 Button { isPresentingLyrics = true } label: {
                     Image(systemName: "music.microphone")
+                        .foregroundStyle(currentItem.supportsLyrics ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 }
                 .buttonStyle(.plain)
+                .disabled(!currentItem.supportsLyrics)
             }
 
             Button { player.toggleShuffle() } label: {
