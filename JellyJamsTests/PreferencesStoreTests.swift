@@ -325,4 +325,42 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertTrue(PreferencesStore(defaults: defaults).infiniteQueueEnabled)
         XCTAssertEqual(defaults.object(forKey: "infiniteQueueEnabled") as? Bool, true)
     }
+
+    // MARK: - Audio normalization
+
+    /// Off before anyone has chosen: an absent key must not ship the feature
+    /// on, which is why the read goes through `object(forKey:)` rather than
+    /// `bool(forKey:)`.
+    func testAudioNormalizationIsOffBeforeTheUserHasChosen() {
+        XCTAssertFalse(PreferencesStore(defaults: defaults).audioNormalizationEnabled)
+    }
+
+    /// The opt-in survives a relaunch, so a listener who turned normalization
+    /// on keeps it — and turning it back off does too, rather than falling back
+    /// to the default.
+    func testTurningAudioNormalizationOnSurvivesRelaunch() {
+        PreferencesStore(defaults: defaults).audioNormalizationEnabled = true
+
+        XCTAssertTrue(PreferencesStore(defaults: defaults).audioNormalizationEnabled)
+        XCTAssertEqual(defaults.object(forKey: "audioNormalizationEnabled") as? Bool, true)
+    }
+
+    func testTurningAudioNormalizationOffSurvivesRelaunch() {
+        PreferencesStore(defaults: defaults).audioNormalizationEnabled = true
+        PreferencesStore(defaults: defaults).audioNormalizationEnabled = false
+
+        XCTAssertFalse(PreferencesStore(defaults: defaults).audioNormalizationEnabled)
+        XCTAssertEqual(defaults.object(forKey: "audioNormalizationEnabled") as? Bool, false)
+    }
+
+    /// The sign-out reset returns it to the fresh-install state: normalization
+    /// is a listening preference, so it does not survive being signed out.
+    func testForgettingEverythingTurnsAudioNormalizationOff() {
+        let store = PreferencesStore(defaults: defaults)
+        store.audioNormalizationEnabled = true
+
+        store.forgetEverything()
+
+        XCTAssertFalse(store.audioNormalizationEnabled)
+    }
 }
