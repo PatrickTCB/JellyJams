@@ -571,6 +571,35 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - Lyrics
+
+    func testLyricsRequestsTheAudioLyricsEndpoint() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (
+                try emptyResponse(for: request, statusCode: 200),
+                Data(#"{"Lyrics":[{"Cues":null,"Start":0,"Text":"Line one"},{"Cues":null,"Start":1000,"Text":"Line two"}],"Metadata":{"Artist":"Artist","Title":"Song"}}"#.utf8)
+            )
+        }
+
+        let lyrics = try await makeClient().lyrics(for: TestFixtures.item(id: "song-id", type: .audio))
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.path, "/jellyfin/Audio/song-id/Lyrics")
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(lyrics?.lyrics?.count, 2)
+    }
+
+    func testLyricsRequiresAnItemIdentifier() async {
+        do {
+            _ = try await makeClient().lyrics(for: BaseItemDto(type: .audio))
+            XCTFail("Expected a missing item id to be rejected")
+        } catch {
+            XCTAssertEqual(error as? JellyfinError, .missingItemIdentifier)
+        }
+    }
+
     // MARK: - Playlist reordering
 
     func testMoveItemInPlaylistPostsASingleMoveRequest() async throws {

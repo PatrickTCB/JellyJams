@@ -116,6 +116,14 @@ final class ItemPresentationTests: XCTestCase {
         XCTAssertNil(BaseItemDto().primaryImageTag)
     }
 
+    /// The server flags the items it could fetch lyrics for; the button that
+    /// opens the lyrics sheet waits on this before offering it.
+    func testSupportsLyricsReadsTheServerFlag() {
+        XCTAssertTrue(BaseItemDto(hasLyrics: true, id: "t").supportsLyrics)
+        XCTAssertFalse(BaseItemDto(hasLyrics: false, id: "t").supportsLyrics)
+        XCTAssertFalse(BaseItemDto(hasLyrics: nil, id: "t").supportsLyrics)
+    }
+
     func testMediaSourceIDUsesTheFirstSource() {
         let item = BaseItemDto(mediaSources: [
             MediaSourceInfo(id: "source-1"),
