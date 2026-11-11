@@ -87,8 +87,7 @@ enum QueueExtensionPlan: Equatable, Sendable {
 /// account, a saved address that parses, and a registration — because both
 /// endpoints key off the `userID` that `/register` put on the backend's books.
 /// Configured from ``AppServices`` on the same publisher trio, for the same
-/// reasons: the settings sheet edits the address one keystroke at a time, so
-/// every value arrives from the publisher rather than being read back.
+/// reason: every value arrives from the publisher rather than being read back.
 @MainActor
 final class QueueExtender {
     /// How many of the queue's ids seed one alchemy request. The queue of a
@@ -151,10 +150,8 @@ final class QueueExtender {
         return try await client.tracks(byIds: answer.newTrackIDs)
     }
 
-    /// The client for the address the extender points at, built per fetch
-    /// rather than in `configure`, for the reason ``BanStore`` builds per
-    /// send: the settings field edits the address live, and a client saved
-    /// along with it would be rebuilt — and abandoned — as it was typed.
+    /// The client for the address the extender points at, built per fetch,
+    /// the way ``BanStore`` builds one per send.
     private func makeBackend() -> JellyJamsBackend? {
         guard let backendURL, let deviceInfo else { return nil }
         return JellyJamsBackend(
