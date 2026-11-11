@@ -390,6 +390,17 @@ struct LibraryRepository: Sendable {
         return (result.items ?? []).filter { $0.itemType == .audio }
     }
 
+    // MARK: - Lyrics
+
+    /// `item`'s lyrics, laid out to read along with the song — empty when the
+    /// server has none. An item the server hasn't flagged as having lyrics
+    /// isn't asked about at all.
+    func lyrics(for item: BaseItemDto) async throws -> LyricTimeline {
+        let client = try requireClient()
+        guard item.supportsLyrics else { return LyricTimeline() }
+        return LyricTimeline(try await client.lyrics(for: item))
+    }
+
     // MARK: - Search
 
     struct SearchResults: Sendable, Equatable {
