@@ -482,7 +482,10 @@ final class CarPlayController: NSObject {
 
     private func pushDownloadedTracks(for group: DownloadStore.DownloadGroup) {
         guard let downloads else { return }
-        let tracks = downloads.tracks(in: group)
+        // The store lists an album's songs in the order they were downloaded;
+        // they play — and list — in the order the album runs, as on the phone.
+        let saved = downloads.tracks(in: group)
+        let tracks = group.kind == .album ? saved.inAlbumOrder() : saved
         let template = CPListTemplate(title: group.title, sections: [
             CPListSection(items: trackItems(tracks)),
         ])
