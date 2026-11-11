@@ -196,12 +196,11 @@ final class BanStore: ObservableObject {
         // is a lost registration: that is a backend sign-out, which deleted
         // the account and its bans server-side, and a list kept in memory
         // would answer for whichever backend the user registers with next.
-        // The address alone changing must not clear the list, though: the
-        // settings field edits it one keystroke at a time, and the bans
-        // screen may be open behind it — which is also why this watches the
-        // registration rather than the parsed URL, which comes and goes
-        // mid-typing. Retiring the generation strands any read the old
-        // state had in flight.
+        // The address alone changing must not clear the list, though: only
+        // the account and its registration say whose bans these are, which
+        // is why this watches the registration rather than the parsed URL.
+        // Retiring the generation strands any read the old state had in
+        // flight.
         if userID != self.userID || (!registered && backendURL != nil) {
             loadGeneration = UUID()
             clearLists()
@@ -316,10 +315,7 @@ final class BanStore: ObservableObject {
 
     // MARK: - Plumbing
 
-    /// The client for the address the store points at, built per send rather
-    /// than in `configure`: the settings field edits the address one
-    /// keystroke at a time, and a client saved along with it would be
-    /// rebuilt — and abandoned, URLSession and all — as it was typed.
+    /// The client for the address the store points at, built per send.
     private func makeBackend() -> JellyJamsBackend? {
         guard let backendURL, let deviceInfo else { return nil }
         return JellyJamsBackend(
