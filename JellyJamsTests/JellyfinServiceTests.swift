@@ -600,6 +600,29 @@ final class JellyfinServiceTests: XCTestCase {
         }
     }
 
+    /// The server answers "no lyrics for this item" with a 404, which must
+    /// read as nothing to show rather than a failure to report.
+    func testLyricsAreNilWhenTheServerHasNone() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 404), Data())
+        }
+
+        let lyrics = try await makeClient().lyrics(for: TestFixtures.item(id: "song-id", type: .audio))
+
+        XCTAssertNil(lyrics)
+    }
+
+    func testLyricsFailuresOtherThanNotFoundStillThrow() async {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 500), Data())
+        }
+
+        do {
+            _ = try await makeClient().lyrics(for: TestFixtures.item(id: "song-id", type: .audio))
+            XCTFail("Expected a server error to be reported")
+        } catch {}
+    }
+
     // MARK: - Playlist reordering
 
     func testMoveItemInPlaylistPostsASingleMoveRequest() async throws {

@@ -639,6 +639,40 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertFalse(BaseItemDto(name: "No ID", type: .musicAlbum).supportsInstantMix)
     }
 
+    // MARK: - Lyrics
+
+    func testLyricsAreFetchedAndLaidOutForItemsTheServerFlags() async throws {
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            let payload = Data(#"{"Lyrics":[{"Start":0,"Text":"Line one"},{"Start":10000000,"Text":"Line two"}]}"#.utf8)
+            return (try emptyResponse(for: request, statusCode: 200), payload)
+        }
+
+        let timeline = try await TestFixtures.stubbedRepository().lyrics(
+            for: BaseItemDto(hasLyrics: true, id: "song-id", type: .audio)
+        )
+
+        XCTAssertEqual(recorder.all.map(\.path), ["/jellyfin/Audio/song-id/Lyrics"])
+        XCTAssertEqual(timeline.lines, ["Line one", "Line two"])
+        XCTAssertEqual(timeline.currentLineIndex(at: 1), 1)
+    }
+
+    /// The server only has lyrics for the items it flags, so asking about any
+    /// other would be a wasted round trip ending in a 404.
+    func testLyricsAreNotRequestedForItemsWithoutThem() async throws {
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 404), Data())
+        }
+
+        let timeline = try await TestFixtures.stubbedRepository().lyrics(
+            for: BaseItemDto(hasLyrics: false, id: "song-id", type: .audio)
+        )
+
+        XCTAssertTrue(timeline.isEmpty)
+        XCTAssertTrue(recorder.all.isEmpty)
+    }
+
     // MARK: - Home
 
     /// Each home row asks `/Items` for its own kind, newest first, sorted by
@@ -746,6 +780,9 @@ final class LibraryRepositoryTests: XCTestCase {
         }
         await assertNotAuthenticated {
             _ = try await repository.mixtapes(nameFilter: .endsWith("_automatic"), limit: 3)
+        }
+        await assertNotAuthenticated {
+            _ = try await repository.lyrics(for: BaseItemDto(hasLyrics: true, id: "song-id", type: .audio))
         }
     }
 

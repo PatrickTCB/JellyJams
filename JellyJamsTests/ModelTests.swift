@@ -116,8 +116,8 @@ final class ItemPresentationTests: XCTestCase {
         XCTAssertNil(BaseItemDto().primaryImageTag)
     }
 
-    /// The server flags the items it could fetch lyrics for; the button that
-    /// opens the lyrics sheet waits on this before offering it.
+    /// The server flags the items it has lyrics for; the now playing screen's
+    /// lyrics button is enabled only for those.
     func testSupportsLyricsReadsTheServerFlag() {
         XCTAssertTrue(BaseItemDto(hasLyrics: true, id: "t").supportsLyrics)
         XCTAssertFalse(BaseItemDto(hasLyrics: false, id: "t").supportsLyrics)
@@ -162,6 +162,81 @@ final class TickConversionTests: XCTestCase {
         let recovered = try XCTUnwrap(Ticks.seconds(fromTicks: Ticks.ticks(fromSeconds: position)))
 
         XCTAssertEqual(recovered, position, accuracy: 0.0001)
+    }
+}
+
+/// Which lyric line is being sung. The server times lines in ticks, may send
+/// them in any order, and marks instrumental breaks with blank lines, so a
+/// mistake here puts the highlight on the wrong words.
+final class LyricTimelineTests: XCTestCase {
+    func testALineIsCurrentFromItsStartUntilTheNextLineStarts() {
+        let timeline = LyricTimeline(lyrics([(0, "One"), (2 * Ticks.perSecond, "Two")]))
+
+        XCTAssertEqual(timeline.currentLineIndex(at: 0), 0)
+        XCTAssertEqual(timeline.currentLineIndex(at: 1.99), 0)
+        XCTAssertEqual(timeline.currentLineIndex(at: 2), 1)
+    }
+
+    /// A start of ten million ticks is one second, not ten million.
+    func testStartsAreScaledFromTicksToSeconds() {
+        let timeline = LyricTimeline(lyrics([(Ticks.perSecond, "One")]))
+
+        XCTAssertNil(timeline.currentLineIndex(at: 0.5))
+        XCTAssertEqual(timeline.currentLineIndex(at: 1), 0)
+    }
+
+    func testNothingIsCurrentBeforeTheFirstLine() {
+        let timeline = LyricTimeline(lyrics([(5 * Ticks.perSecond, "One")]))
+
+        XCTAssertNil(timeline.currentLineIndex(at: 0))
+        XCTAssertNil(timeline.currentLineIndex(at: 4.99))
+    }
+
+    func testTheLastLineHoldsUntilTheTrackEnds() {
+        let timeline = LyricTimeline(lyrics([(0, "One"), (Ticks.perSecond, "Two")]))
+
+        XCTAssertEqual(timeline.currentLineIndex(at: 3_600), 1)
+    }
+
+    func testUnsyncedLyricsAreShownButNeverCurrent() {
+        let timeline = LyricTimeline(lyrics([(nil, "One"), (nil, "Two")]))
+
+        XCTAssertEqual(timeline.lines, ["One", "Two"])
+        XCTAssertNil(timeline.currentLineIndex(at: 0))
+        XCTAssertNil(timeline.currentLineIndex(at: 120))
+    }
+
+    /// Lines are shown in the order the server sent them, but which one is
+    /// current goes by time.
+    func testLinesArrivingOutOfOrderStillResolveByTime() {
+        let timeline = LyricTimeline(lyrics([(2 * Ticks.perSecond, "Two"), (0, "One")]))
+
+        XCTAssertEqual(timeline.lines, ["Two", "One"])
+        XCTAssertEqual(timeline.currentLineIndex(at: 1), 1)
+        XCTAssertEqual(timeline.currentLineIndex(at: 3), 0)
+    }
+
+    func testABlankLineIsHiddenButStillEndsTheLineBeforeIt() {
+        let timeline = LyricTimeline(lyrics([
+            (0, "Verse"),
+            (5 * Ticks.perSecond, " "),
+            (10 * Ticks.perSecond, "Chorus"),
+        ]))
+
+        XCTAssertEqual(timeline.lines, ["Verse", "Chorus"])
+        XCTAssertEqual(timeline.currentLineIndex(at: 4), 0)
+        XCTAssertNil(timeline.currentLineIndex(at: 7))
+        XCTAssertEqual(timeline.currentLineIndex(at: 10), 1)
+    }
+
+    func testNoLyricsGiveAnEmptyTimeline() {
+        XCTAssertTrue(LyricTimeline().isEmpty)
+        XCTAssertTrue(LyricTimeline(LyricDto(lyrics: [])).isEmpty)
+        XCTAssertNil(LyricTimeline().currentLineIndex(at: 0))
+    }
+
+    private func lyrics(_ lines: [(start: Int?, text: String)]) -> LyricDto {
+        LyricDto(lyrics: lines.map { LyricLine(start: $0.start, text: $0.text) })
     }
 }
 
