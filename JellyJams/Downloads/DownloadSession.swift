@@ -39,6 +39,10 @@ final class DownloadSession: @unchecked Sendable {
     /// expose the original).
     let configuration: URLSessionConfiguration
 
+    /// Whether this is a background session: one the system runs transfers
+    /// for on the app's behalf, even while the app is suspended.
+    var isBackground: Bool { configuration.identifier != nil }
+
     /// Builds the session from `configuration`, which is where a stubbed
     /// protocol or a shared default is carried in.
     init(configuration: URLSessionConfiguration) {
@@ -194,7 +198,12 @@ final class DownloadSession: @unchecked Sendable {
 
         #if os(iOS)
         func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-            DownloadSession.systemCompletion.takeAndCall()
+            // The handler came from UIKit, which requires it be called on the
+            // main thread. Queued there, it also runs after the filing of the
+            // files just delivered, which hops to the main actor first.
+            DispatchQueue.main.async {
+                DownloadSession.systemCompletion.takeAndCall()
+            }
         }
         #endif
 
@@ -231,8 +240,8 @@ final class DownloadSession: @unchecked Sendable {
 
 #if os(iOS)
 /// A thread-safe box for one held closure: the app delegate stores the
-/// system's handler on the main thread, the session's queue takes and calls
-/// it when event delivery finishes.
+/// system's handler on the main thread, and the session's delegate hands it
+/// back to the main thread to call when event delivery finishes.
 private final class SystemCompletionBox: @unchecked Sendable {
     private let lock = NSLock()
     private var handler: (() -> Void)?

@@ -46,15 +46,18 @@ import JellyfinAPI
 ///
 /// Nothing in the browse path (`groups`, `tracks`, `localURL`, `localArtworkURL`)
 /// touches the network or needs a signed-in session: the manifest holds every
-/// byte of metadata those screens render. It is rewritten after every change, so
-/// downloads survive relaunches. They do not survive a sign-out: leaving the
+/// byte of metadata those screens render. It is rewritten after every change —
+/// at once for removals and for a batch starting or finishing, within moments
+/// for each song a running batch saves — so downloads survive relaunches. They
+/// do not survive a sign-out: leaving the
 /// server is a clean break back to the fresh-install state, and ``removeAll()``
 /// — files, artwork, manifest and all — is part of the reset it runs.
 ///
-/// Transfers survive the app too. On iOS they run on a background session:
-/// they continue while the app is suspended, and the system finishes them even
-/// if the app dies, delivering the files to the next launch, which adopts them
-/// and resumes every batch the manifest recorded as active. Removals always
+/// Transfers survive the app too. On iOS they run on a background session,
+/// every song of a batch handed to it at once: they continue while the app is
+/// suspended, and the system finishes them even if the app dies, delivering
+/// the files to the next launch, which adopts them and resumes every batch the
+/// manifest recorded as active. Removals always
 /// win against downloads: deleting cancels the batches it covers, and a
 /// cancelled transfer's file is discarded rather than resurrecting what was
 /// just deleted.
@@ -291,6 +294,25 @@ final class DownloadStore: ObservableObject {
     /// Whether the batches a previous process persisted have been resumed
     /// this launch.
     var hasResumedInterruptedBatches = false
+    /// The token of each batch's current run. A cancelled run keeps unwinding
+    /// after its batch is gone — or has started again under the same id — so
+    /// its progress updates and final cleanup check they still belong to the
+    /// current run before touching anything.
+    var batchRunTokens: [String: UUID] = [:]
+    /// Transfers in flight, keyed by what they fetch, each with the downloads
+    /// waiting on it: a second download of the same song or cover waits for
+    /// the first rather than fetching — and filing — it again.
+    var transfersInFlight: [String: [CheckedContinuation<Void, Never>]] = [:]
+    /// The highest download order handed out; see ``reserveOrders(count:)``.
+    var lastReservedOrder = 0
+    /// Identifies the running artist-artwork sync, so a cancelled one that is
+    /// still unwinding can't clear the state of the sync started after it.
+    var artistArtworkSyncToken: UUID?
+    /// Writes the manifest, in order; see ``persist()`` and ``persistSoon()``.
+    let manifestWriter = ManifestWriter()
+    /// Counts manifest snapshots, so the writer can drop a stale one.
+    var manifestRevision = 0
+    var isManifestWriteScheduled = false
 
     var client: JellyfinService?
     let directory: URL
@@ -328,7 +350,19 @@ final class DownloadStore: ObservableObject {
         }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: artworkDirectory, withIntermediateDirectories: true)
+        Self.excludeFromBackup(dir)
         loadManifest()
+    }
+
+    /// Downloads can be fetched from the server again whenever they're
+    /// wanted, so they stay out of iCloud and Time Machine backups, where
+    /// gigabytes of music would eat into the user's quota. Excluding the
+    /// folder covers everything inside it.
+    private static func excludeFromBackup(_ directory: URL) {
+        var directory = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? directory.setResourceValues(values)
     }
 
     /// Removes every download — always available, even mid-download: running
@@ -340,8 +374,10 @@ final class DownloadStore: ObservableObject {
     func removeAll() {
         for task in batchTasks.values { task.cancel() }
         batchTasks = [:]
+        batchRunTokens = [:]
         artistArtworkTask?.cancel()
         artistArtworkTask = nil
+        artistArtworkSyncToken = nil
         isSyncingArtistArtwork = false
         batches = []
         activeBatchItems = [:]
@@ -388,17 +424,46 @@ final class DownloadStore: ObservableObject {
         errorMessage = nil
     }
 
+    /// Writes the manifest now. For the changes the next launch must find
+    /// whatever happens next — a batch starting or finishing, a removal, the
+    /// wipe — which are also rare enough that writing on the spot costs
+    /// nothing worth deferring.
     func persist() {
-        let manifest = Manifest(
+        manifestRevision += 1
+        manifestWriter.write(currentManifest, revision: manifestRevision, to: manifestURL)
+    }
+
+    /// Saves the manifest shortly, off the main thread: for the per-song
+    /// changes a running download makes, several a second while songs land.
+    /// A burst shares one write, which records whatever has changed by the
+    /// time it runs. Should the process die first, nothing is lost that the
+    /// batch's resume doesn't re-fetch.
+    func persistSoon() {
+        guard !isManifestWriteScheduled else { return }
+        isManifestWriteScheduled = true
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard let self else { return }
+            isManifestWriteScheduled = false
+            manifestRevision += 1
+            let manifest = currentManifest
+            let revision = manifestRevision
+            let writer = manifestWriter
+            let url = manifestURL
+            Task.detached(priority: .utility) {
+                writer.write(manifest, revision: revision, to: url)
+            }
+        }
+    }
+
+    private var currentManifest: Manifest {
+        Manifest(
             tracks: entries,
             playlists: playlists,
             artwork: artworkEntries,
             pendingTransfers: pendingTransfers,
             activeBatches: activeBatchItems
         )
-        if let data = try? JSONEncoder().encode(manifest) {
-            try? data.write(to: manifestURL, options: .atomic)
-        }
     }
 }
 

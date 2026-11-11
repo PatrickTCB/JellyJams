@@ -91,6 +91,13 @@ extension DownloadStore {
         )
     }
 
+    /// Songs still to come across every running batch — what the Downloads
+    /// tab's badge counts. A batch whose track list hasn't resolved yet adds
+    /// nothing, so the badge only ever shows a count it can stand behind.
+    var remainingDownloadCount: Int {
+        batches.reduce(0) { $0 + max(0, $1.total - $1.completed - $1.failed) }
+    }
+
     /// Live download throughput as of `now`, or `nil` when no bytes have
     /// landed within the tracker's window. Safe to call from any context so
     /// the status bar can re-read it on its own tick.
@@ -102,6 +109,12 @@ extension DownloadStore {
     func localURL(forItemId id: String) -> URL? {
         guard let filename = entries[id]?.filename else { return nil }
         return Self.existingFile(in: directory, named: filename)
+    }
+
+    /// The track snapshot saved with a downloaded song, or `nil` when the song
+    /// isn't downloaded — enough to queue it with no server at all.
+    func downloadedTrack(id: String) -> BaseItemDto? {
+        entries[id]?.track
     }
 
     /// The saved artwork file for `item`, or `nil` when there is none.

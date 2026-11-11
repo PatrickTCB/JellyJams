@@ -1,11 +1,34 @@
 import Foundation
 import JellyfinAPI
 import OSLog
+import Synchronization
 
 private let downloadLog = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "net.aseriesoftubes.JellyJams",
     category: "Downloads"
 )
+
+/// Writes manifest snapshots to disk one at a time, and never lets an older
+/// snapshot land over a newer one: each carries the revision it was taken at,
+/// and a write whose revision isn't newer than the last one written is
+/// dropped. That is what lets ``DownloadStore/persistSoon()`` write off the
+/// main thread while ``DownloadStore/persist()`` still leaves the latest state
+/// on disk the moment it returns.
+final class ManifestWriter: Sendable {
+    private let lastWrittenRevision = Mutex(0)
+
+    func write(_ manifest: DownloadStore.Manifest, revision: Int, to url: URL) {
+        lastWrittenRevision.withLock { lastWritten in
+            guard revision > lastWritten else { return }
+            do {
+                try JSONEncoder().encode(manifest).write(to: url, options: .atomic)
+                lastWritten = revision
+            } catch {
+                downloadLog.error("Download manifest could not be saved: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+}
 
 // MARK: - Manifest
 

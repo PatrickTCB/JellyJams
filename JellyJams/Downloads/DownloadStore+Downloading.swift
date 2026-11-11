@@ -5,6 +5,34 @@ import JellyfinAPI
 // MARK: - Downloading
 
 extension DownloadStore {
+    /// One run of a batch. The id is the item the batch downloads — what its
+    /// progress row and ``isBusy(_:)`` go by — and the token tells this run
+    /// apart from a later one under the same id, so a cancelled run that is
+    /// still unwinding can't update or finish the run that replaced it.
+    struct BatchRun: Sendable, Equatable {
+        let id: String
+        let token = UUID()
+    }
+
+    /// One song to save: the track as it will be stored, the source id it is
+    /// saved for, and the album and artist attribution the derived groups are
+    /// built from.
+    struct TrackDownload: Sendable {
+        let track: BaseItemDto
+        let source: String
+        let albumSongCount: Int?
+        let artistKeys: Set<String>
+    }
+
+    /// How many songs one batch transfers at a time. A background session
+    /// (iOS) is handed every song at once: the system schedules them, and they
+    /// keep going while the app is suspended — when it can't start new ones.
+    /// A foreground session queues whatever exceeds its connection limit, and
+    /// a queued transfer can time out waiting, so it runs a few at a time.
+    private var transferConcurrency: Int {
+        downloadSession.isBackground ? .max : 4
+    }
+
     /// Batches a previous process persisted get started again at the first
     /// sign-in. ``download(_:)`` counts tracks already on disk as done without
     /// re-fetching them, so a resume downloads exactly what the interrupted
@@ -46,30 +74,28 @@ extension DownloadStore {
 
         switch item.itemType {
         case .audio:
-            var batch = Batch(id: id)
-            batch.total = 1
-            batches.append(batch)
+            let run = startBatch(id, total: 1)
+            let order = reserveOrders(count: 1)
+            let song = TrackDownload(track: item, source: id, albumSongCount: nil, artistKeys: Self.artistKeys(of: item))
             batchTasks[id] = Task {
-                await downloadOne(
-                    item,
-                    source: id,
-                    batchId: id,
-                    via: client,
-                    albumSongCount: nil,
-                    artistKeys: Self.artistKeys(of: item)
-                )
-                finishBatch(id)
+                await downloadOne(song, order: order, run: run, via: client)
+                finishBatch(run)
             }
         case .musicArtist:
-            batches.append(Batch(id: id))
+            let run = startBatch(id)
             batchTasks[id] = Task {
                 do {
                     let albums = try await client.albums(forArtistId: id)
                     guard !albums.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
+                    // Every album's songs are listed first and then downloaded
+                    // together, so the whole catalogue is in flight at once
+                    // rather than one album at a time.
+                    var songs: [TrackDownload] = []
                     for album in albums {
                         try Task.checkCancellation()
-                        await downloadCollection(album, into: id, via: client)
+                        songs += await collectionDownloads(album, via: client) ?? []
                     }
+                    await downloadTracks(songs, run: run, via: client)
                     // The artist's own picture, saved under the artist's id —
                     // one request, so their rows never need the server for it
                     // and an album cover stays what an artist *without* a
@@ -81,21 +107,15 @@ extension DownloadStore {
                         errorMessage = "Couldn’t download “\(item.displayName)”. \(error.userFacingMessage)"
                     }
                 }
-                finishBatch(id)
+                finishBatch(run)
             }
         case .playlist:
-            batches.append(Batch(id: id))
+            let run = startBatch(id)
             batchTasks[id] = Task {
                 do {
                     let tracks = try await client.tracks(for: item)
                     guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
-                    updateBatch(id) { $0.total = tracks.count }
-                    let trackIDs = try await downloadPlaylistTracks(
-                        tracks,
-                        source: id,
-                        batchId: id,
-                        via: client
-                    )
+                    let trackIDs = try await downloadPlaylistTracks(tracks, source: id, run: run, via: client)
                     // A removal while the tracks were landing wins over the
                     // membership: saving the record now would resurrect the
                     // playlist the user just deleted.
@@ -126,13 +146,15 @@ extension DownloadStore {
                         errorMessage = "Couldn’t download “\(item.displayName)”. \(error.userFacingMessage)"
                     }
                 }
-                finishBatch(id)
+                finishBatch(run)
             }
         default:
-            batches.append(Batch(id: id))
+            let run = startBatch(id)
             batchTasks[id] = Task {
-                await downloadCollection(item, into: id, via: client)
-                finishBatch(id)
+                if let songs = await collectionDownloads(item, via: client) {
+                    await downloadTracks(songs, run: run, via: client)
+                }
+                finishBatch(run)
             }
         }
     }
@@ -144,7 +166,7 @@ extension DownloadStore {
     func refreshPlaylist(_ id: String) {
         guard let client, let existing = playlists[id] else { return }
         guard !batches.contains(where: { $0.id == id }) else { return }
-        batches.append(Batch(id: id))
+        let run = startBatch(id)
         activeBatchItems[id] = BaseItemDto(id: id, name: existing.title, type: .playlist)
         persist()
         batchTasks[id] = Task {
@@ -152,13 +174,7 @@ extension DownloadStore {
                 let stub = BaseItemDto(id: id, name: existing.title, type: .playlist)
                 let tracks = try await client.tracks(for: stub)
                 guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(existing.title) }
-                updateBatch(id) { $0.total = tracks.count }
-                let trackIDs = try await downloadPlaylistTracks(
-                    tracks,
-                    source: id,
-                    batchId: id,
-                    via: client
-                )
+                let trackIDs = try await downloadPlaylistTracks(tracks, source: id, run: run, via: client)
                 try Task.checkCancellation()
                 for dropped in existing.trackIDs where !trackIDs.contains(dropped) {
                     unreference(dropped, source: id)
@@ -177,7 +193,7 @@ extension DownloadStore {
                     errorMessage = "Couldn’t refresh “\(existing.title)”. \(error.userFacingMessage)"
                 }
             }
-            finishBatch(id)
+            finishBatch(run)
         }
     }
 
@@ -214,34 +230,58 @@ extension DownloadStore {
     }
 
     /// Stops a running batch: the task is cancelled, the progress row goes,
-    /// and a relaunch will not resume it. The cancelled task's own
-    /// ``finishBatch(_:)`` still runs when it unwinds: its sweep finds the
-    /// batch state already cleared, and it drops any pending-transfer records
-    /// the cancelled task did not clear itself.
+    /// and a relaunch will not resume it. The cancelled run keeps unwinding
+    /// for a moment — its transfers clear their own records as they fail —
+    /// but its run token is retired here, so none of it can touch the batch
+    /// that is gone, or one started again in its place.
     private func cancelBatch(_ id: String) {
         guard let task = batchTasks.removeValue(forKey: id) else { return }
         task.cancel()
         batches.removeAll { $0.id == id }
+        batchRunTokens[id] = nil
         activeBatchItems[id] = nil
+        // Records a previous launch left for this batch: its own cleanup
+        // would have swept them, and a retired run no longer cleans up.
+        dropPendingTransfers(forBatch: id)
         persist()
     }
 
     // MARK: - Internals
 
-    /// Downloads every track of a collection (album, genre, anything else with
-    /// children), each file referencing the collection. An album's songs also
-    /// gain the album's track count and attribution, which is what lets the
-    /// album view be derived from them later.
-    private func downloadCollection(_ item: BaseItemDto, into batchId: String, via client: JellyfinService) async {
-        guard let id = item.id else { return }
+    /// Starts a run of the batch `id`: its progress row, and the token its
+    /// progress updates and final cleanup are checked against.
+    private func startBatch(_ id: String, total: Int = 0) -> BatchRun {
+        let run = BatchRun(id: id)
+        var batch = Batch(id: id)
+        batch.total = total
+        batches.append(batch)
+        batchRunTokens[id] = run.token
+        return run
+    }
+
+    /// Hands out `count` consecutive download orders, above every order saved
+    /// or already handed out. A batch reserves its block when its track list
+    /// is known, so its songs list in the order the server returned them
+    /// however its side-by-side transfers happen to finish.
+    func reserveOrders(count: Int) -> Int {
+        let first = max(lastReservedOrder, entries.values.map(\.order).max() ?? 0) + 1
+        lastReservedOrder = first + max(count, 1) - 1
+        return first
+    }
+
+    /// The songs of a collection — an album, a genre, anything else with
+    /// children — each referencing the collection. An album's songs also gain
+    /// the album's track count and attribution, which is what lets the album
+    /// view be derived from them later. A collection that can't be listed is
+    /// reported and yields nothing.
+    private func collectionDownloads(_ item: BaseItemDto, via client: JellyfinService) async -> [TrackDownload]? {
+        guard let id = item.id else { return nil }
         do {
             let tracks = try await client.tracks(for: item)
             guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
             let isAlbum = item.itemType == .musicAlbum
             let collectionKeys = Self.artistKeys(of: item)
-            updateBatch(batchId) { $0.total += tracks.count }
-            for track in tracks {
-                try Task.checkCancellation()
+            return tracks.map { track in
                 // An album's songs are stored with the album's own attribution
                 // filled in, so the derived album view and the download
                 // reference agree on the album's id.
@@ -251,11 +291,9 @@ extension DownloadStore {
                 // artist under two keys. The collection is the fallback for
                 // songs that say nothing.
                 let trackKeys = Self.artistKeys(of: stored)
-                await downloadOne(
-                    stored,
+                return TrackDownload(
+                    track: stored,
                     source: id,
-                    batchId: batchId,
-                    via: client,
                     albumSongCount: isAlbum ? tracks.count : nil,
                     artistKeys: trackKeys.isEmpty ? collectionKeys : trackKeys
                 )
@@ -263,6 +301,33 @@ extension DownloadStore {
         } catch {
             if !error.isCancellation {
                 errorMessage = "Couldn’t download “\(item.displayName)”. \(error.userFacingMessage)"
+            }
+            return nil
+        }
+    }
+
+    /// Downloads `songs` side by side, ``transferConcurrency`` at a time, each
+    /// saved under the order it holds in the list whatever order the
+    /// transfers finish in. A song listed twice is fetched once.
+    private func downloadTracks(_ songs: [TrackDownload], run: BatchRun, via client: JellyfinService) async {
+        var seen = Set<String>()
+        let unique = songs.filter { song in song.track.id.map { seen.insert($0).inserted } ?? true }
+        guard !unique.isEmpty else { return }
+        updateBatch(run) { $0.total += unique.count }
+        let firstOrder = reserveOrders(count: unique.count)
+        let limit = transferConcurrency
+        await withTaskGroup(of: Void.self) { group in
+            var running = 0
+            for (offset, song) in unique.enumerated() {
+                guard !Task.isCancelled else { break }
+                if running >= limit {
+                    await group.next()
+                    running -= 1
+                }
+                group.addTask {
+                    await self.downloadOne(song, order: firstOrder + offset, run: run, via: client)
+                }
+                running += 1
             }
         }
     }
@@ -316,25 +381,27 @@ extension DownloadStore {
     private func downloadPlaylistTracks(
         _ tracks: [BaseItemDto],
         source: String,
-        batchId: String,
+        run: BatchRun,
         via client: JellyfinService
     ) async throws -> [String] {
         let albums = await albumMetadata(for: tracks, via: client)
+        try Task.checkCancellation()
         var trackIDs: [String] = []
+        var seen = Set<String>()
+        var songs: [TrackDownload] = []
         for track in tracks {
-            try Task.checkCancellation()
-            if let trackId = track.id, !trackIDs.contains(trackId) { trackIDs.append(trackId) }
+            if let trackId = track.id, seen.insert(trackId).inserted { trackIDs.append(trackId) }
             let album = track.albumID.flatMap { albums[$0] }
             let stored = album.map { Self.completingAlbumFields(of: track, from: $0) } ?? track
-            await downloadOne(
-                stored,
+            songs.append(TrackDownload(
+                track: stored,
                 source: source,
-                batchId: batchId,
-                via: client,
                 albumSongCount: album?.childCount,
                 artistKeys: Self.artistKeys(of: stored)
-            )
+            ))
         }
+        await downloadTracks(songs, run: run, via: client)
+        try Task.checkCancellation()
         return trackIDs
     }
 
@@ -352,33 +419,30 @@ extension DownloadStore {
     }
 
     private func downloadOne(
-        _ track: BaseItemDto,
-        source: String,
-        batchId: String,
-        via client: JellyfinService,
-        albumSongCount: Int?,
-        artistKeys: Set<String>
+        _ song: TrackDownload,
+        order: Int,
+        run: BatchRun,
+        via client: JellyfinService
     ) async {
         guard !Task.isCancelled else { return }
+        let track = song.track
         guard let id = track.id else {
-            updateBatch(batchId) { $0.failed += 1 }
+            updateBatch(run) { $0.failed += 1 }
             return
         }
+        // Another batch is already fetching this song — an album and a
+        // playlist sharing it, started together: wait for that transfer
+        // rather than fetch and file a second copy over the first.
+        let transferKey = "audio|\(id)"
+        await waitForTransfer(transferKey)
+        guard !Task.isCancelled else { return }
         // Already saved: just gain the new reference, no second copy.
-        if var entry = entries[id] {
-            entry.sources.insert(source)
-            if entry.albumSongCount == nil { entry.albumSongCount = albumSongCount }
-            entry.artistKeys.formUnion(artistKeys)
-            // A song saved from a bare payload — one that landed before its
-            // album was resolved — is healed by what this fetch knows; only
-            // the attribution its snapshot lacks is filled.
-            entry.track = Self.completingMissingAlbumFields(of: entry.track, from: track)
-            entries[id] = entry
-            referenceArtwork(for: entry.track, trackId: id)
-            persist()
-            updateBatch(batchId) { $0.completed += 1 }
+        if addReference(to: id, for: song) {
+            updateBatch(run) { $0.completed += 1 }
             return
         }
+        beginTransfer(transferKey)
+        defer { endTransfer(transferKey) }
         var pendingKey: String?
         do {
             let remote = try client.streamURL(itemId: id, mediaSourceId: track.mediaSourceID)
@@ -394,12 +458,12 @@ extension DownloadStore {
             pendingTransfers[key] = .audio(
                 track: track,
                 filename: filename,
-                source: source,
-                batchId: batchId,
-                albumSongCount: albumSongCount,
-                artistKeys: artistKeys
+                source: song.source,
+                batchId: run.id,
+                albumSongCount: song.albumSongCount,
+                artistKeys: song.artistKeys
             )
-            persist()
+            persistSoon()
             let (tempFile, response) = try await downloadSession.download(from: remote)
             pendingTransfers[key] = nil
             // The transfer can finish just before a removal cancels it; the
@@ -416,6 +480,14 @@ extension DownloadStore {
                     reason: (response as? HTTPURLResponse).map { "HTTP \($0.statusCode)" } ?? "unknown response"
                 )
             }
+            // The song can have been filed while this transfer ran — a copy
+            // the system kept across a relaunch, adopted meanwhile. That copy
+            // stays; this one only adds its reference.
+            if addReference(to: id, for: song) {
+                try? FileManager.default.removeItem(at: tempFile)
+                updateBatch(run) { $0.completed += 1 }
+                return
+            }
             let destination = directory.appending(path: filename)
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: tempFile, to: destination)
@@ -423,10 +495,10 @@ extension DownloadStore {
                 track: track,
                 filename: filename,
                 fileSize: Self.byteSize(of: destination),
-                order: (entries.values.map(\.order).max() ?? 0) + 1,
-                sources: [source],
-                albumSongCount: albumSongCount,
-                artistKeys: artistKeys
+                order: order,
+                sources: [song.source],
+                albumSongCount: song.albumSongCount,
+                artistKeys: song.artistKeys
             )
             // The song's cover is the album's, and the same pair is used to
             // request it, key it and resolve it — so one file serves every song
@@ -434,16 +506,60 @@ extension DownloadStore {
             if let pair = Self.artworkPair(for: track) {
                 await downloadArtwork(ownerID: pair.owner, imageTag: pair.tag, holderID: id, via: client)
             }
-            persist()
-            updateBatch(batchId) { $0.completed += 1 }
+            persistSoon()
+            updateBatch(run) { $0.completed += 1 }
         } catch {
             if let pendingKey { pendingTransfers[pendingKey] = nil }
             if !error.isCancellation {
-                playbackLogDownloadFailure(track, error)
+                reportDownloadFailure(track, error)
             }
-            updateBatch(batchId) { $0.failed += 1 }
+            updateBatch(run) { $0.failed += 1 }
         }
     }
+
+    /// Adds `song`'s reference to the saved copy of `id`, when there is one,
+    /// and reports whether there was. A song saved from a bare payload — one
+    /// that landed before its album was resolved — is healed by what this
+    /// fetch knows; only the attribution its snapshot lacks is filled.
+    private func addReference(to id: String, for song: TrackDownload) -> Bool {
+        guard var entry = entries[id] else { return false }
+        entry.sources.insert(song.source)
+        if entry.albumSongCount == nil { entry.albumSongCount = song.albumSongCount }
+        entry.artistKeys.formUnion(song.artistKeys)
+        entry.track = Self.completingMissingAlbumFields(of: entry.track, from: song.track)
+        entries[id] = entry
+        referenceArtwork(for: entry.track, trackId: id)
+        persistSoon()
+        return true
+    }
+
+    // MARK: - Transfers in flight
+
+    /// Waits while another download fetches what `key` names — a song or a
+    /// cover — and returns at once when nothing is fetching it. The caller
+    /// re-checks what is saved afterwards: the transfer it waited on can have
+    /// failed, or been cancelled with its batch.
+    func waitForTransfer(_ key: String) async {
+        while transfersInFlight[key] != nil {
+            await withCheckedContinuation { (waiter: CheckedContinuation<Void, Never>) in
+                transfersInFlight[key, default: []].append(waiter)
+            }
+        }
+    }
+
+    /// Marks `key` as being fetched. Paired with ``endTransfer(_:)`` in a
+    /// `defer`, so every path out of the transfer releases its waiters.
+    func beginTransfer(_ key: String) {
+        transfersInFlight[key] = []
+    }
+
+    func endTransfer(_ key: String) {
+        for waiter in transfersInFlight.removeValue(forKey: key) ?? [] {
+            waiter.resume()
+        }
+    }
+
+    // MARK: - Orphaned transfers
 
     /// The key a transfer is recorded under: a hash of its request URL, which
     /// is what the system echoes back with a completion it kept across a
@@ -493,7 +609,7 @@ extension DownloadStore {
                     track: track,
                     filename: filename,
                     fileSize: Self.byteSize(of: destination),
-                    order: (entries.values.map(\.order).max() ?? 0) + 1,
+                    order: reserveOrders(count: 1),
                     sources: [source],
                     albumSongCount: albumSongCount,
                     artistKeys: artistKeys
@@ -531,6 +647,8 @@ extension DownloadStore {
         }
         persist()
     }
+
+    // MARK: - Removal
 
     /// Deletes many songs' files and entries in one sweep. A deleted song
     /// keeps its place in any playlist's membership record: a record naming a
@@ -590,33 +708,49 @@ extension DownloadStore {
         }
     }
 
-    private func playbackLogDownloadFailure(_ track: BaseItemDto, _ error: Error) {
+    // MARK: - Batch bookkeeping
+
+    private func reportDownloadFailure(_ track: BaseItemDto, _ error: Error) {
         errorMessage = "Couldn’t download “\(track.displayName)”. \(error.userFacingMessage)"
     }
 
-    private func finishBatch(_ id: String) {
-        if let batch = batches.first(where: { $0.id == id }), batch.failed > 0, errorMessage == nil {
+    private func finishBatch(_ run: BatchRun) {
+        // A cancelled run only now unwinding has nothing left to finish: the
+        // cancel already tidied up after it, and the batch may since have
+        // started again under the same id — a run whose row and task are not
+        // this one's to remove.
+        guard batchRunTokens[run.id] == run.token else { return }
+        batchRunTokens[run.id] = nil
+        if let batch = batches.first(where: { $0.id == run.id }), batch.failed > 0, errorMessage == nil {
             errorMessage = batch.total == 1
                 ? nil // The per-file message already named the one track.
                 : "Couldn’t download \(batch.failed) of \(batch.total) tracks."
         }
-        batches.removeAll { $0.id == id }
-        batchTasks[id] = nil
-        activeBatchItems[id] = nil
+        batches.removeAll { $0.id == run.id }
+        batchTasks[run.id] = nil
+        activeBatchItems[run.id] = nil
         // Transfers recorded for this batch are done with it: whatever is
         // still listed belonged to a task that failed or was cancelled before
-        // it could clear its own record.
+        // it could clear its own record, or to a previous launch's run.
+        dropPendingTransfers(forBatch: run.id)
+        deleteUnreferenced()
+        persist()
+    }
+
+    private func dropPendingTransfers(forBatch id: String) {
         for (key, transfer) in pendingTransfers {
             if case let .audio(_, _, _, batchID, _, _) = transfer, batchID == id {
                 pendingTransfers[key] = nil
             }
         }
-        deleteUnreferenced()
-        persist()
     }
 
-    private func updateBatch(_ id: String, _ change: (inout Batch) -> Void) {
-        guard let index = batches.firstIndex(where: { $0.id == id }) else { return }
+    /// Applies `change` to the run's progress row — unless the run has been
+    /// cancelled, in which case the row is gone or belongs to a newer run.
+    private func updateBatch(_ run: BatchRun, _ change: (inout Batch) -> Void) {
+        guard batchRunTokens[run.id] == run.token,
+              let index = batches.firstIndex(where: { $0.id == run.id })
+        else { return }
         change(&batches[index])
     }
 

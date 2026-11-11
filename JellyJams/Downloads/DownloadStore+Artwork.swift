@@ -8,6 +8,11 @@ extension DownloadStore {
     /// the image plus its tag. Awaited by the caller but fire-and-forget in
     /// spirit: failures are silent, because audio is the priority and the
     /// header falls back to a placeholder.
+    ///
+    /// The songs of an album download side by side and share its cover, so
+    /// only the first fetches it: the rest wait for that transfer and then
+    /// reference what it saved, rather than each saving — and overwriting the
+    /// references of — a copy of their own.
     func downloadArtwork(
         ownerID: String?,
         imageTag: String?,
@@ -15,12 +20,15 @@ extension DownloadStore {
         via client: JellyfinService
     ) async {
         guard let imageTag, !imageTag.isEmpty else { return }
+        let transferKey = "artwork|\(Self.artworkKey(ownerID: ownerID, tag: imageTag))"
+        await waitForTransfer(transferKey)
+        guard !Task.isCancelled else { return }
 
         // Already have this artwork — including a tag-only entry carried over
         // from a v1 manifest, which is the same picture: just add the reference
         // rather than saving a second copy.
         if referenceExistingArtwork(ownerID: ownerID, imageTag: imageTag, holderID: holderID) {
-            persist()
+            persistSoon()
             return
         }
 
@@ -32,6 +40,8 @@ extension DownloadStore {
             quality: 90,
             type: .primary
         ) else { return }
+        beginTransfer(transferKey)
+        defer { endTransfer(transferKey) }
 
         // Saved as JPG (the format requested), namespaced by its owner so
         // two items sharing an image tag can't overwrite each other.
@@ -41,7 +51,7 @@ extension DownloadStore {
         // a process death is filed by the same adoption path.
         let key = Self.pendingKey(for: artworkUrl)
         pendingTransfers[key] = .artwork(ownerID: ownerID, imageTag: imageTag, filename: filename, holderID: holderID)
-        persist()
+        persistSoon()
 
         do {
             let (tempFile, response) = try await downloadSession.download(from: artworkUrl)
@@ -66,7 +76,7 @@ extension DownloadStore {
                 fileSize: Self.byteSize(of: destination)
             )
             artworkEntries[entry.key] = entry
-            persist()
+            persistSoon()
         } catch {
             pendingTransfers[key] = nil
             // Artwork is optional; a missing cover is a placeholder, not an error.
@@ -103,10 +113,16 @@ extension DownloadStore {
     func startArtistArtworkSync() {
         guard artistArtworkTask == nil else { return }
         isSyncingArtistArtwork = true
+        let token = UUID()
+        artistArtworkSyncToken = token
         artistArtworkTask = Task {
             await syncArtistArtwork()
+            // A wipe cancels the run and can start another before this one
+            // finishes unwinding; only the current run clears the state.
+            guard artistArtworkSyncToken == token else { return }
             isSyncingArtistArtwork = false
             artistArtworkTask = nil
+            artistArtworkSyncToken = nil
         }
     }
 
