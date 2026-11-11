@@ -20,4 +20,4 @@ Standard SwiftUI controls, behaviours, and design patterns should always be pref
 
 ## Architecture & Tech
 - **DI**: Core services are provided via `EnvironmentObject` (see `JellyJamsApp.swift`).
-- **SDK**: Pinned to `jellyfin-sdk-swift` v3.1.0.
+- **SDK**: Not pinned but should only be updated by human hands.
