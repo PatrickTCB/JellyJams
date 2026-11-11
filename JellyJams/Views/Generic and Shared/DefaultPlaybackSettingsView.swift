@@ -161,7 +161,7 @@ struct DefaultPlaybackSettingsView: View {
     @ViewBuilder private var overlay: some View {
         if searchFailed {
             ContentUnavailableView {
-                Label("Couldn't Search", systemImage: "exclamationcircle.triangle")
+                Label("Couldn't Search", systemImage: "exclamationmark.triangle")
             } actions: {
                 Button("Try Again") { Task { await runSearch() } }
             }
