@@ -8,7 +8,7 @@ private let nowPlayingLogger = Logger(
 )
 
 /// Handlers the system remote-command center invokes (media keys, Control
-/// Centre, lock screen, headphones).
+/// Centre, lock screen, headphones, CarPlay's Now Playing screen).
 struct RemoteCommandHandlers: Sendable {
     var play: @MainActor @Sendable () -> Void
     var pause: @MainActor @Sendable () -> Void
@@ -17,10 +17,16 @@ struct RemoteCommandHandlers: Sendable {
     var previous: @MainActor @Sendable () -> Void
     var seek: @MainActor @Sendable (Double) -> Void
     var like: @MainActor @Sendable () -> Void
+    var shuffle: @MainActor @Sendable (Bool) -> Void
+    var repeatMode: @MainActor @Sendable (RepeatMode) -> Void
 }
 
 /// Bridges playback state to `MPNowPlayingInfoCenter` and wires up
 /// `MPRemoteCommandCenter`. Works on both macOS and iOS.
+///
+/// Updated when playback *changes* — play, pause, seek, a new track, the
+/// queue, shuffle, repeat — never on a clock tick: the system works out the
+/// elapsed time between updates from the last one and the playback rate.
 @MainActor
 final class NowPlayingCenter {
     static let shared = NowPlayingCenter()
@@ -67,13 +73,31 @@ final class NowPlayingCenter {
             Task { @MainActor in handlers.like() }
             return .success
         }
+        center.changeShuffleModeCommand.addTarget { event in
+            guard let event = event as? MPChangeShuffleModeCommandEvent else { return .commandFailed }
+            let enabled = event.shuffleType != .off
+            Task { @MainActor in handlers.shuffle(enabled) }
+            return .success
+        }
+        center.changeRepeatModeCommand.addTarget { event in
+            guard let event = event as? MPChangeRepeatModeCommandEvent else { return .commandFailed }
+            let mode: RepeatMode = switch event.repeatType {
+            case .one: .repeatOne
+            case .all: .repeatAll
+            default: .repeatNone
+            }
+            Task { @MainActor in handlers.repeatMode(mode) }
+            return .success
+        }
         setCommandAvailability(
             hasItem: false,
             isPlaying: false,
             canGoNext: false,
             canGoPrevious: false,
             canSeek: false,
-            isFavourite: false
+            isFavourite: false,
+            isShuffled: false,
+            repeatMode: .repeatNone
         )
     }
 
@@ -86,7 +110,9 @@ final class NowPlayingCenter {
         localArtworkURL: URL?,
         canGoNext: Bool,
         canGoPrevious: Bool,
-        isFavourite: Bool
+        isFavourite: Bool,
+        isShuffled: Bool,
+        repeatMode: RepeatMode
     ) {
         guard let item else { clear(); return }
         setCommandAvailability(
@@ -95,7 +121,9 @@ final class NowPlayingCenter {
             canGoNext: canGoNext,
             canGoPrevious: canGoPrevious,
             canSeek: duration > 0,
-            isFavourite: isFavourite
+            isFavourite: isFavourite,
+            isShuffled: isShuffled,
+            repeatMode: repeatMode
         )
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: item.displayName,
@@ -113,12 +141,25 @@ final class NowPlayingCenter {
             info[MPMediaItemPropertyArtwork] = existing
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        #if os(macOS)
+        // macOS alone reads this, and its remote controls rely on it being
+        // set whenever playback starts or stops.
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+        #endif
 
         if artworkURL != self.artworkURL || localArtworkURL != self.localArtworkURL {
             self.artworkURL = artworkURL
             self.localArtworkURL = localArtworkURL
             loadArtwork(local: localArtworkURL, remote: artworkURL)
         }
+    }
+
+    /// Updates only the heart, for a favourite changed while the track plays
+    /// — from a row, a menu, the player — without rebuilding the rest.
+    func updateFavourite(_ isFavourite: Bool) {
+        let likeCommand = MPRemoteCommandCenter.shared().likeCommand
+        guard likeCommand.isEnabled else { return }
+        likeCommand.isActive = isFavourite
     }
 
     private func loadArtwork(local: URL?, remote: URL?) {
@@ -180,13 +221,18 @@ final class NowPlayingCenter {
         artworkURL = nil
         localArtworkURL = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        #if os(macOS)
+        MPNowPlayingInfoCenter.default().playbackState = .stopped
+        #endif
         setCommandAvailability(
             hasItem: false,
             isPlaying: false,
             canGoNext: false,
             canGoPrevious: false,
             canSeek: false,
-            isFavourite: false
+            isFavourite: false,
+            isShuffled: false,
+            repeatMode: .repeatNone
         )
     }
 
@@ -196,7 +242,9 @@ final class NowPlayingCenter {
         canGoNext: Bool,
         canGoPrevious: Bool,
         canSeek: Bool,
-        isFavourite: Bool
+        isFavourite: Bool,
+        isShuffled: Bool,
+        repeatMode: RepeatMode
     ) {
         let center = MPRemoteCommandCenter.shared()
         center.playCommand.isEnabled = hasItem && !isPlaying
@@ -205,6 +253,14 @@ final class NowPlayingCenter {
         center.nextTrackCommand.isEnabled = hasItem && canGoNext
         center.previousTrackCommand.isEnabled = hasItem && canGoPrevious
         center.changePlaybackPositionCommand.isEnabled = hasItem && canSeek
+        center.changeShuffleModeCommand.isEnabled = hasItem
+        center.changeShuffleModeCommand.currentShuffleType = isShuffled ? .items : .off
+        center.changeRepeatModeCommand.isEnabled = hasItem
+        center.changeRepeatModeCommand.currentRepeatType = switch repeatMode {
+        case .repeatNone: .off
+        case .repeatOne: .one
+        case .repeatAll: .all
+        }
         // The action is a binary favourite, not a star rating, so only the
         // like command may surface — the heart. The rating, dislike and
         // bookmark commands stay disabled so the system can't offer a star.
