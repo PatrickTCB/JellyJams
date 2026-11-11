@@ -362,21 +362,22 @@ final class JellyJamsBackend: Sendable {
     /// everything it holds for it — the tape recipes, the bans, the Server
     /// Playlist membership. The credentials ride along because the backend
     /// checks them against the Jellyfin server before deleting anything:
-    /// only the account's own sign-in can take it off the books.
+    /// only the account's own sign-in can take it off the books. They travel
+    /// in a form body, as the registration's do, so the token stays out of
+    /// the URL and any access log that records one.
     ///
     /// The answer is the registration's own shape with `saved` false, and an
     /// account the backend never had answers the same way — the state asked
     /// for already holds, so a repeated sign-out reads as the success it is
     /// rather than a failure.
     func deleteAccount(_ account: JellyfinAccount) async throws -> BackendRegistration {
-        let data = try await perform(.delete, path: "delete-me", queryItems: accountParameters(account))
+        let data = try await perform(.delete, path: "delete-me", formFields: accountParameters(account))
         return try JSONDecoder().decode(BackendRegistration.self, from: data)
     }
 
-    /// The four credentials both account endpoints ride with — the backend
-    /// checks them against the Jellyfin server before it saves, or deletes,
-    /// anything. `/register` takes them as form fields, `/delete-me` in its
-    /// query string.
+    /// The four credentials both account endpoints ride with, as form fields
+    /// — the backend checks them against the Jellyfin server before it saves,
+    /// or deletes, anything.
     private func accountParameters(_ account: JellyfinAccount) -> [URLQueryItem] {
         [
             URLQueryItem(name: "userName", value: account.userName),
@@ -716,10 +717,11 @@ final class JellyJamsBackend: Sendable {
     /// out, with anything outside 2xx turned into a `BackendError` carrying
     /// the backend's own human-readable refusal when it bothers to send one.
     ///
-    /// The GETs and DELETEs take all of their input in the query string.
-    /// Every POST is declared with FastAPI `Form` parameters instead: it
-    /// reads an `application/x-www-form-urlencoded` body and ignores the
-    /// query string entirely, so a POST's input goes in `formFields`.
+    /// The GETs and DELETEs take their input in the query string — except
+    /// `/delete-me`, which carries the account's token. Every POST is
+    /// declared with FastAPI `Form` parameters instead, as `/delete-me` is:
+    /// it reads an `application/x-www-form-urlencoded` body and ignores the
+    /// query string entirely, so that input goes in `formFields`.
     private func perform(
         _ method: Method,
         path: String,
