@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import XCTest
 @testable import JellyJams
 
@@ -7,6 +8,7 @@ final class DownloadStoreTests: XCTestCase {
     override func tearDown() {
         URLProtocolStub.handler = nil
         URLProtocolStub.responseDelay = nil
+        URLProtocolStub.taskObserver = nil
         super.tearDown()
     }
 
@@ -1105,6 +1107,141 @@ final class DownloadStoreTests: XCTestCase {
         }
     }
 
+    // MARK: - Covers alongside songs
+
+    /// A batch's covers go to the session with its songs, not after them: on
+    /// iOS a transfer started while the app is in the background is left to
+    /// the system's discretion, so a cover requested only once its song had
+    /// landed could hold the song — and the batch — back for hours.
+    func testABatchStartsItsCoversAlongsideItsSongs() async throws {
+        stubCollections([
+            "al1": [
+                trackInAlbum("a1", albumID: "al1", album: "One", imageTag: "cover"),
+                trackInAlbum("a2", albumID: "al1", album: "One", imageTag: "cover"),
+            ],
+        ])
+        let log = RequestStartLog()
+        URLProtocolStub.handler = Self.recordingStarts(in: log, of: try XCTUnwrap(URLProtocolStub.handler))
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/stream") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+
+        let firstSong = try XCTUnwrap(log.starts { $0.hasSuffix("/stream") }.min())
+        let covers = log.starts { $0.contains("/Images/") }
+        XCTAssertEqual(covers.count, 1, "One cover for the album")
+        let cover = try XCTUnwrap(covers.first)
+        XCTAssertLessThan(cover.timeIntervalSince(firstSong), 0.25, "The cover was requested before any song landed")
+        XCTAssertEqual(
+            store.artworkEntries["al1|cover"]?.requiredBy,
+            ["a1", "a2"],
+            "The songs hold the cover now; the batch's claim ended with it"
+        )
+    }
+
+    /// A playlist's own cover goes to the session with its songs too.
+    func testAPlaylistsCoverIsRequestedAlongsideItsSongs() async throws {
+        stubCollections(["pl1": [TrackStub(id: "x")]])
+        let log = RequestStartLog()
+        URLProtocolStub.handler = Self.recordingStarts(in: log, of: try XCTUnwrap(URLProtocolStub.handler))
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/stream") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(BaseItemDto(id: "pl1", imageTags: ["Primary": "cover-tag"], name: "pl1", type: .playlist))
+        try await waitForBatch(store, id: "pl1")
+
+        let song = try XCTUnwrap(log.starts { $0.hasSuffix("/stream") }.first)
+        let cover = try XCTUnwrap(log.starts { $0.contains("/Images/") }.first)
+        XCTAssertLessThan(cover.timeIntervalSince(song), 0.25, "The cover was requested before the song landed")
+        XCTAssertNotNil(store.artworkEntries["pl1|cover-tag"])
+    }
+
+    /// The batch's claim on a cover it fetched ahead of its songs ends with
+    /// the batch: when none of the songs landed, nothing holds the cover, and
+    /// it goes.
+    func testACoverFetchedForSongsThatAllFailedIsReclaimed() async throws {
+        stubCollections(["al1": [trackInAlbum("a1", albumID: "al1", album: "One", imageTag: "cover")]])
+        let serving = try XCTUnwrap(URLProtocolStub.handler)
+        URLProtocolStub.handler = { request in
+            if request.url?.path.hasSuffix("/stream") == true {
+                return (try emptyResponse(for: request, statusCode: 500), Data())
+            }
+            return try serving(request)
+        }
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+
+        XCTAssertTrue(store.entries.isEmpty, "The song failed")
+        XCTAssertTrue(store.artworkEntries.isEmpty, "Nothing holds the cover")
+        XCTAssertTrue(artworkFiles(in: directory).isEmpty)
+    }
+
+    /// Removing a download that is still running takes the cover it fetched
+    /// ahead of its songs with it, and nothing it had in flight lands after.
+    func testRemovingADownloadMidwayReclaimsTheCoverFetchedAheadOfItsSongs() async throws {
+        stubCollections(["al1": [trackInAlbum("a1", albumID: "al1", album: "One", imageTag: "cover")]])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/stream") == true ? 0.5 : 0
+        }
+        let directory = newTestDirectory()
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.configure(client: TestFixtures.stubbedClient())
+        let album = albumStub(id: "al1", artist: "Artist")
+
+        store.download(album)
+        for _ in 0 ..< 200 {
+            if store.artworkEntries["al1|cover"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(store.artworkEntries["al1|cover"], "The cover landed while the song was on its way")
+
+        store.remove(album)
+
+        XCTAssertTrue(store.artworkEntries.isEmpty)
+        XCTAssertTrue(artworkFiles(in: directory).isEmpty)
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertTrue(store.entries.isEmpty, "The song doesn't land after the removal")
+        XCTAssertTrue(store.artworkEntries.isEmpty, "Nor does the cover come back")
+        XCTAssertNil(store.errorMessage, "A cancelled download is not an error")
+    }
+
+    /// A playlist's cover now lands before the record that keeps it, so the
+    /// sync pass's reclaim — which runs at sign-in, alongside resumed
+    /// downloads — leaves the cover of a playlist still downloading alone.
+    func testTheSyncPassSparesTheCoverOfAPlaylistStillDownloading() async throws {
+        stubCollections(["pl1": [TrackStub(id: "x")]])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/stream") == true ? 0.5 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(BaseItemDto(id: "pl1", imageTags: ["Primary": "cover-tag"], name: "pl1", type: .playlist))
+        for _ in 0 ..< 200 {
+            if store.artworkEntries["pl1|cover-tag"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNil(store.playlists["pl1"], "The record isn't saved until the songs are in")
+
+        await store.syncArtistArtwork()
+
+        XCTAssertNotNil(store.artworkEntries["pl1|cover-tag"], "The cover outlived the sync pass")
+        try await waitForBatch(store, id: "pl1")
+        let playlist = try XCTUnwrap(store.downloadedPlaylists().first)
+        XCTAssertNotNil(store.localArtworkURL(for: playlist))
+    }
+
     /// A v2 manifest saved one file per song, keyed by the album with each song's
     /// own tag. Loading it folds those onto the album's image pair, keeps one
     /// file, deletes the rest, and re-persists — no re-download, so the album and
@@ -1773,6 +1910,70 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("Newer"), "The newer snapshot stays on disk")
     }
 
+    /// Saves handed to the writer while it is busy — songs landing faster
+    /// than a big manifest can be written — replace one another instead of
+    /// queueing, and the newest is what ends up on disk.
+    func testSavesHandedToABusyWriterEndWithTheNewest() async throws {
+        let directory = newTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appending(path: "manifest.json")
+        let writer = ManifestWriter()
+        func manifest(titled title: String) -> DownloadStore.Manifest {
+            DownloadStore.Manifest(
+                tracks: [:],
+                playlists: ["p": DownloadStore.PlaylistRecord(id: "p", title: title, trackIDs: [])],
+                artwork: [:],
+                pendingTransfers: [:],
+                activeBatches: [:]
+            )
+        }
+
+        for revision in 1 ... 50 {
+            writer.writeSoon(manifest(titled: "Save \(revision)"), revision: revision, to: url)
+        }
+
+        var text = ""
+        for _ in 0 ..< 200 {
+            text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            if text.contains(#""Save 50""#) { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(text.contains(#""Save 50""#), "The newest save lands")
+    }
+
+    /// Songs filed while iOS has the app awake to deliver downloads are saved
+    /// before the system is told it may suspend the app again — with the
+    /// batch still running and no scheduled save due — so an app ended while
+    /// suspended doesn't lose them.
+    func testSongsFiledDuringABackgroundWakeAreSavedBeforeTheAppCanBeSuspended() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/t2/stream") == true ? 1 : 0
+        }
+        let directory = newTestDirectory()
+        // No save scheduled per song comes due during the test.
+        let store = DownloadStore(directory: directory, session: try stubbedSession(), manifestSaveDelay: .seconds(60))
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "album", artist: "Artist"))
+        for _ in 0 ..< 200 {
+            if store.entries["t1"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(store.isBusy(albumStub(id: "album")), "The batch is still running")
+
+        store.backgroundEventsDidFinish()
+
+        let reopened = DownloadStore(directory: directory, session: try stubbedSession())
+        XCTAssertNotNil(reopened.entries["t1"], "The song filed during the wake is on disk")
+        try await waitForBatch(store, id: "album")
+    }
+
     // MARK: - Download progress
 
     /// The bar's counts: present from the moment a download starts, and gone
@@ -1914,6 +2115,40 @@ final class DownloadStoreTests: XCTestCase {
         XCTFail("The download never reported throughput")
     }
 
+    // MARK: - Download session
+
+    /// A download whose caller is cancelled before the transfer starts ends
+    /// as a cancellation straight away: the task is never started, and the
+    /// caller is never left parked on a transfer that will not answer —
+    /// which, in a batch, would hold that song's transfer open for good.
+    func testADownloadCancelledBeforeItStartsEndsAsACancellation() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), Data("audio".utf8))
+        }
+        let session = DownloadSession(configuration: try stubbedSession().configuration)
+
+        let download = Task {
+            // Cancelled before it gets here, so the download starts out
+            // cancelled.
+            while !Task.isCancelled { await Task.yield() }
+            return try await session.download(
+                from: URL(string: "https://example.com/jellyfin/Audio/a/stream")!,
+                description: DownloadStore.audioTransferKey("a")
+            )
+        }
+        download.cancel()
+
+        do {
+            _ = try await download.value
+            XCTFail("A cancelled download delivered a file")
+        } catch {
+            XCTAssertTrue(error.isCancellation, "Ended as a cancellation, not \(error)")
+        }
+        XCTAssertTrue(recorder.all.isEmpty, "The transfer was never started")
+    }
+
     // MARK: - Browsing issues no requests
 
     /// The downloads section's promise, enforced on the store: every query a
@@ -1973,16 +2208,18 @@ final class DownloadStoreTests: XCTestCase {
 
     /// Writes a manifest as a process that died mid-transfer would have left
     /// it: `pendingTransfers` seeded from real values, so a test never
-    /// hand-spells the encoder's shape.
+    /// hand-spells the encoder's shape, and `activeBatches` as the raw JSON
+    /// of the batches a relaunch resumes.
     private func seedManifest(
         in directory: URL,
         tracks: String = "{}",
-        pendingTransfers: [String: DownloadStore.PendingTransfer] = [:]
+        pendingTransfers: [String: DownloadStore.PendingTransfer] = [:],
+        activeBatches: String = "{}"
     ) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let pending = String(data: try JSONEncoder().encode(pendingTransfers), encoding: .utf8)!
         let manifest = #"""
-        {"version":4,"tracks":\#(tracks),"playlists":{},"artwork":{},"pendingTransfers":\#(pending),"activeBatches":{}}
+        {"version":4,"tracks":\#(tracks),"playlists":{},"artwork":{},"pendingTransfers":\#(pending),"activeBatches":\#(activeBatches)}
         """#
         try Data(manifest.utf8).write(to: directory.appending(path: "manifest.json"))
     }
@@ -1996,9 +2233,33 @@ final class DownloadStoreTests: XCTestCase {
         return url
     }
 
+    /// A delivery as the session hands one over: the description its transfer
+    /// was started with, and what it brought.
+    private func delivery(
+        of description: String?,
+        file: URL?,
+        statusCode: Int? = 200,
+        requestURL: URL? = nil
+    ) -> DownloadSession.OrphanedTransfer {
+        DownloadSession.OrphanedTransfer(description: description, requestURL: requestURL, file: file, statusCode: statusCode)
+    }
+
+    /// A song's record, as `downloadOne` files one for batch `batchID`.
+    private func audioRecord(_ id: String, batchID: String = "album") -> DownloadStore.PendingTransfer {
+        .audio(
+            track: TestFixtures.item(id: id),
+            filename: "\(id).mp3",
+            source: batchID,
+            batchId: batchID,
+            albumSongCount: nil,
+            artistKeys: []
+        )
+    }
+
     /// The record an adoption depends on is on disk while the transfer is in
-    /// flight — keyed by a hash of the request URL, because stream URLs carry
-    /// the access token and the manifest must not.
+    /// flight — keyed by the transfer's key, which its task carries as its
+    /// description, rather than anything from the stream URL, which carries
+    /// the access token the manifest must not.
     func testAnInFlightTransferIsRecordedWithoutItsTokenOnDisk() async throws {
         let client = TestFixtures.stubbedClient(token: "s3cret-token")
         URLProtocolStub.handler = { request in
@@ -2006,12 +2267,13 @@ final class DownloadStoreTests: XCTestCase {
         }
         URLProtocolStub.responseDelay = { _ in 0.3 }
         let directory = newTestDirectory()
-        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        // Saved well within the transfer, so the record is on disk while it runs.
+        let store = DownloadStore(directory: directory, session: try stubbedSession(), manifestSaveDelay: .milliseconds(10))
         store.configure(client: client)
 
         let remote = try client.streamURL(itemId: "a", mediaSourceId: nil)
         XCTAssertTrue(remote.absoluteString.contains("s3cret-token"), "The stream URL carries the token")
-        let key = DownloadStore.pendingKey(for: remote)
+        let key = DownloadStore.audioTransferKey("a")
 
         store.download(TestFixtures.item(id: "a"))
         var text = ""
@@ -2021,7 +2283,7 @@ final class DownloadStoreTests: XCTestCase {
             if text.contains(key) { break }
             try await Task.sleep(for: .milliseconds(5))
         }
-        XCTAssertTrue(text.contains(key), "The in-flight transfer is recorded under its URL hash")
+        XCTAssertTrue(text.contains(key), "The in-flight transfer is recorded under its transfer key")
         XCTAssertFalse(text.contains("s3cret-token"), "The token never reaches the disk")
 
         try await waitForBatch(store, id: "a")
@@ -2039,9 +2301,8 @@ final class DownloadStoreTests: XCTestCase {
     /// recorded name, and the pending record consumed and persisted.
     func testAnOrphanedAudioTransferIsFiledFromItsPendingRecord() throws {
         let directory = newTestDirectory()
-        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
         try seedManifest(in: directory, pendingTransfers: [
-            DownloadStore.pendingKey(for: remote): .audio(
+            "audio|t1": .audio(
                 track: TestFixtures.item(id: "t1"),
                 filename: "t1.mp3",
                 source: "album",
@@ -2053,7 +2314,7 @@ final class DownloadStoreTests: XCTestCase {
         let store = DownloadStore(directory: directory, session: try stubbedSession())
 
         let parked = try parkedFile()
-        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+        store.adoptOrphanedTransfer(delivery(of: "audio|t1", file: parked))
 
         let entry = try XCTUnwrap(store.entries["t1"], "The kept file is filed as the song it was for")
         XCTAssertEqual(entry.filename, "t1.mp3")
@@ -2067,13 +2328,33 @@ final class DownloadStoreTests: XCTestCase {
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: parked.path), "The parked copy is consumed")
 
+        // Saved as the session asks once the system has delivered everything.
+        store.backgroundEventsDidFinish()
         let reopened = DownloadStore(directory: directory, session: try stubbedSession())
         XCTAssertNotNil(reopened.entries["t1"], "The adoption survives a relaunch")
         let text = String(
             data: try Data(contentsOf: directory.appending(path: "manifest.json")),
             encoding: .utf8
         ) ?? ""
-        XCTAssertFalse(text.contains(DownloadStore.pendingKey(for: remote)), "The pending record is consumed")
+        XCTAssertFalse(text.contains("audio|t1"), "The pending record is consumed")
+    }
+
+    /// A transfer a build from before descriptions started comes back with
+    /// none: its record, filed under the hash of its request URL, is found by
+    /// that instead.
+    func testAnOrphanFromAnEarlierBuildIsFiledByItsRequestURL() throws {
+        let directory = newTestDirectory()
+        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
+        try seedManifest(in: directory, pendingTransfers: [
+            DownloadStore.legacyRecordKey(for: remote): audioRecord("t1"),
+        ])
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let parked = try parkedFile()
+        store.adoptOrphanedTransfer(delivery(of: nil, file: parked, requestURL: remote))
+
+        XCTAssertEqual(store.entries["t1"]?.filename, "t1.mp3")
+        XCTAssertTrue(store.pendingTransfers.isEmpty, "The record is consumed")
     }
 
     /// A transfer that was in flight when the app was upgraded recorded the
@@ -2082,9 +2363,8 @@ final class DownloadStoreTests: XCTestCase {
     /// name.
     func testAPendingTransferRecordIsRepairedToThePlayableFilename() throws {
         let directory = newTestDirectory()
-        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
         try seedManifest(in: directory, pendingTransfers: [
-            DownloadStore.pendingKey(for: remote): .audio(
+            "audio|t1": .audio(
                 track: BaseItemDto(container: "mov,mp4,m4a,3gp,3g2,mj2", id: "t1", name: "t1", type: .audio),
                 filename: "t1.mov,mp4,m4a,3gp,3g2,mj2",
                 source: "album",
@@ -2096,7 +2376,7 @@ final class DownloadStoreTests: XCTestCase {
         let store = DownloadStore(directory: directory, session: try stubbedSession())
 
         let parked = try parkedFile()
-        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+        store.adoptOrphanedTransfer(delivery(of: "audio|t1", file: parked))
 
         XCTAssertEqual(store.entries["t1"]?.filename, "t1.m4a")
         XCTAssertEqual(
@@ -2110,9 +2390,8 @@ final class DownloadStoreTests: XCTestCase {
     /// the owner-plus-tag key the views resolve.
     func testAnOrphanedArtworkTransferIsFiledFromItsPendingRecord() throws {
         let directory = newTestDirectory()
-        let remote = URL(string: "https://example.com/jellyfin/Items/al1/Images/Primary")!
         try seedManifest(in: directory, pendingTransfers: [
-            DownloadStore.pendingKey(for: remote): .artwork(
+            "artwork|al1|cover": .artwork(
                 ownerID: "al1",
                 imageTag: "cover",
                 filename: "al1-cover.jpg",
@@ -2122,7 +2401,7 @@ final class DownloadStoreTests: XCTestCase {
         let store = DownloadStore(directory: directory, session: try stubbedSession())
 
         let parked = try parkedFile("jpeg-bytes")
-        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+        store.adoptOrphanedTransfer(delivery(of: "artwork|al1|cover", file: parked))
 
         let entry = try XCTUnwrap(store.artworkEntries["al1|cover"])
         XCTAssertEqual(entry.requiredBy, ["t1"])
@@ -2139,9 +2418,8 @@ final class DownloadStoreTests: XCTestCase {
     /// must not become a song.
     func testOrphanedTransfersWithoutAUsableRecordAreDiscarded() throws {
         let directory = newTestDirectory()
-        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
         try seedManifest(in: directory, pendingTransfers: [
-            DownloadStore.pendingKey(for: remote): .audio(
+            "audio|t1": .audio(
                 track: TestFixtures.item(id: "t1"),
                 filename: "t1.mp3",
                 source: "album",
@@ -2153,34 +2431,32 @@ final class DownloadStoreTests: XCTestCase {
         let store = DownloadStore(directory: directory, session: try stubbedSession())
 
         let unknown = try parkedFile()
-        store.adoptOrphanedTransfer(
-            requestURL: URL(string: "https://example.com/jellyfin/Audio/other/stream")!,
-            file: unknown,
-            statusCode: 200
-        )
+        store.adoptOrphanedTransfer(delivery(of: "audio|other", file: unknown))
         XCTAssertFalse(FileManager.default.fileExists(atPath: unknown.path), "An unrecorded file is deleted")
 
         let nameless = try parkedFile()
-        store.adoptOrphanedTransfer(requestURL: nil, file: nameless, statusCode: nil)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: nameless.path), "A delivery with no URL cannot match a record")
+        store.adoptOrphanedTransfer(delivery(of: nil, file: nameless, statusCode: nil))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: nameless.path),
+            "A delivery with neither a description nor a URL cannot match a record"
+        )
 
         XCTAssertTrue(store.entries.isEmpty, "Neither delivery filed anything")
 
         let failed = try parkedFile("<html>500</html>")
-        store.adoptOrphanedTransfer(requestURL: remote, file: failed, statusCode: 500)
+        store.adoptOrphanedTransfer(delivery(of: "audio|t1", file: failed, statusCode: 500))
         XCTAssertFalse(FileManager.default.fileExists(atPath: failed.path), "A failed transfer's file is deleted")
         XCTAssertTrue(store.entries.isEmpty, "An error page is not filed as audio")
 
+        // Saved as the session asks once the system has delivered everything.
+        store.backgroundEventsDidFinish()
         let reopened = DownloadStore(directory: directory, session: try stubbedSession())
         XCTAssertTrue(reopened.entries.isEmpty)
         let text = String(
             data: try Data(contentsOf: directory.appending(path: "manifest.json")),
             encoding: .utf8
         ) ?? ""
-        XCTAssertFalse(
-            text.contains(DownloadStore.pendingKey(for: remote)),
-            "The failed record does not linger to catch a later delivery"
-        )
+        XCTAssertFalse(text.contains("audio|t1"), "The failed record does not linger to catch a later delivery")
     }
 
     /// A resumed batch can re-fetch a song the system also kept: the entry
@@ -2188,12 +2464,11 @@ final class DownloadStoreTests: XCTestCase {
     /// than the adoption overwriting the fresher file.
     func testAnOrphanedSongAResumeAlreadyRefetchedIsDiscarded() throws {
         let directory = newTestDirectory()
-        let remote = URL(string: "https://example.com/jellyfin/Audio/t1/stream")!
         let tracks = #"""
         {"t1":{"track":{"Id":"t1","Name":"t1","Type":"Audio"},"filename":"t1.mp3","order":0,"requiredBy":["album"],"albumSongCount":1,"artistKeys":[]}}
         """#
         try seedManifest(in: directory, tracks: tracks, pendingTransfers: [
-            DownloadStore.pendingKey(for: remote): .audio(
+            "audio|t1": .audio(
                 track: TestFixtures.item(id: "t1"),
                 filename: "t1.mp3",
                 source: "album",
@@ -2206,7 +2481,7 @@ final class DownloadStoreTests: XCTestCase {
         let store = DownloadStore(directory: directory, session: try stubbedSession())
 
         let parked = try parkedFile("kept-duplicate")
-        store.adoptOrphanedTransfer(requestURL: remote, file: parked, statusCode: 200)
+        store.adoptOrphanedTransfer(delivery(of: "audio|t1", file: parked))
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: parked.path), "The kept duplicate is deleted")
         XCTAssertEqual(
@@ -2215,6 +2490,135 @@ final class DownloadStoreTests: XCTestCase {
             "The refetched file stays as it was"
         )
         XCTAssertEqual(store.entries.count, 1)
+    }
+
+    /// Every transfer carries its record's key as its description, which the
+    /// system keeps with the task and hands back with a delivery — across a
+    /// relaunch too — so the delivery finds its record.
+    func testEveryTransferCarriesItsRecordsKeyAsItsDescription() async throws {
+        stubCollections(["al1": [trackInAlbum("a1", albumID: "al1", album: "One", imageTag: "cover")]])
+        let descriptions = TaskDescriptionLog()
+        URLProtocolStub.taskObserver = { task in descriptions.record(task) }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "al1", artist: "Artist"))
+        try await waitForBatch(store, id: "al1")
+
+        XCTAssertEqual(Set(descriptions.all.compactMap { $0 }), ["audio|a1", "artwork|al1|cover"])
+    }
+
+    /// The bug this guards: a batch the app was ended in the middle of
+    /// resumed by downloading every song not yet filed — including those the
+    /// system was still fetching for the process that started them, which
+    /// were downloaded twice. The resume now waits for those transfers and
+    /// takes the songs from their delivery.
+    func testAResumedBatchWaitsForATransferTheSystemKeptRunning() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        let log = RequestStartLog()
+        URLProtocolStub.handler = Self.recordingStarts(in: log, of: try XCTUnwrap(URLProtocolStub.handler))
+        let directory = newTestDirectory()
+        try seedManifest(
+            in: directory,
+            pendingTransfers: ["audio|t1": audioRecord("t1")],
+            activeBatches: #"{"album":{"Id":"album","Name":"album","Type":"MusicAlbum"}}"#
+        )
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        // As the system lists it at launch: t1's transfer, still running.
+        store.holdTransfersRunningElsewhere([DownloadSession.RunningTransfer(description: "audio|t1", requestURL: nil)])
+        store.configure(client: TestFixtures.stubbedClient())
+
+        for _ in 0 ..< 200 {
+            if store.entries["t2"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(store.entries["t2"], "The song nothing was fetching is fetched")
+        XCTAssertTrue(store.isBusy(albumStub(id: "album")), "The batch waits for the transfer still running")
+
+        store.adoptOrphanedTransfer(delivery(of: "audio|t1", file: try parkedFile("kept-by-the-system")))
+        try await waitForBatch(store, id: "album")
+
+        XCTAssertEqual(
+            try? Data(contentsOf: directory.appending(path: "t1.mp3")),
+            Data("kept-by-the-system".utf8),
+            "The song is the delivered file"
+        )
+        XCTAssertEqual(store.entries["t1"]?.sources, ["album"])
+        XCTAssertTrue(log.starts { $0.hasSuffix("/t1/stream") }.isEmpty, "The song was not downloaded a second time")
+        XCTAssertNil(store.errorMessage)
+    }
+
+    /// When the transfer a resume was waiting on fails, the batch fetches the
+    /// song itself.
+    func testAResumedBatchFetchesASongWhoseKeptTransferFailed() async throws {
+        stubCollections(["album": [trackInAlbum("t1", albumID: "album", album: "Album")]])
+        let log = RequestStartLog()
+        URLProtocolStub.handler = Self.recordingStarts(in: log, of: try XCTUnwrap(URLProtocolStub.handler))
+        let directory = newTestDirectory()
+        try seedManifest(
+            in: directory,
+            pendingTransfers: ["audio|t1": audioRecord("t1")],
+            activeBatches: #"{"album":{"Id":"album","Name":"album","Type":"MusicAlbum"}}"#
+        )
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.holdTransfersRunningElsewhere([DownloadSession.RunningTransfer(description: "audio|t1", requestURL: nil)])
+        store.configure(client: TestFixtures.stubbedClient())
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(log.starts { $0.hasSuffix("/t1/stream") }.isEmpty, "The song is left to the transfer still running")
+
+        store.adoptOrphanedTransfer(delivery(of: "audio|t1", file: nil, statusCode: nil))
+        try await waitForBatch(store, id: "album")
+
+        XCTAssertNotNil(store.entries["t1"], "The batch fetched the song itself")
+        XCTAssertEqual(log.starts { $0.hasSuffix("/t1/stream") }.count, 1)
+    }
+
+    /// Removing a resumed batch lets go of the transfers it was waiting on —
+    /// and stops them, since nothing wants what they would deliver — so the
+    /// song can be downloaded again straight away.
+    func testRemovingAResumedBatchReleasesTheTransfersItWaitedOn() async throws {
+        stubCollections(["album": [trackInAlbum("t1", albumID: "album", album: "Album")]])
+        let directory = newTestDirectory()
+        try seedManifest(
+            in: directory,
+            pendingTransfers: ["audio|t1": audioRecord("t1")],
+            activeBatches: #"{"album":{"Id":"album","Name":"album","Type":"MusicAlbum"}}"#
+        )
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.holdTransfersRunningElsewhere([DownloadSession.RunningTransfer(description: "audio|t1", requestURL: nil)])
+        store.configure(client: TestFixtures.stubbedClient())
+        let album = albumStub(id: "album")
+        XCTAssertTrue(store.isBusy(album), "The batch resumed")
+
+        store.remove(album)
+        XCTAssertTrue(store.pendingTransfers.isEmpty, "The batch's records go with it")
+
+        store.download(TestFixtures.item(id: "t1"))
+        try await waitForBatch(store, id: "t1")
+        XCTAssertNotNil(store.entries["t1"], "The song downloads rather than waiting on a transfer nothing will deliver")
+    }
+
+    /// "Delete All" lets go of the transfers held for the system too.
+    func testDeleteAllReleasesTransfersHeldForTheSystem() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data("audio".utf8))
+        }
+        let directory = newTestDirectory()
+        try seedManifest(in: directory, pendingTransfers: ["audio|t1": audioRecord("t1")])
+        let store = DownloadStore(directory: directory, session: try stubbedSession())
+        store.holdTransfersRunningElsewhere([DownloadSession.RunningTransfer(description: "audio|t1", requestURL: nil)])
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.removeAll()
+        store.download(TestFixtures.item(id: "t1"))
+        try await waitForBatch(store, id: "t1")
+
+        XCTAssertNotNil(store.entries["t1"], "The song downloads rather than waiting on a transfer nothing will deliver")
     }
 
     /// The quarantine message's promise: the audio an unreadable manifest
@@ -2277,5 +2681,20 @@ private final class RequestStartLog: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return entries.filter { matches($0.path) }.map(\.at)
+    }
+}
+
+/// The descriptions of the tasks the stub saw start — recorded off the main
+/// thread, where the URL loading system starts them.
+private final class TaskDescriptionLog: Sendable {
+    private let descriptions = Mutex<[String?]>([])
+
+    func record(_ task: URLSessionTask) {
+        let description = task.taskDescription
+        descriptions.withLock { $0.append(description) }
+    }
+
+    var all: [String?] {
+        descriptions.withLock { $0 }
     }
 }

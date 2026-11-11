@@ -9,6 +9,9 @@ final class URLProtocolStub: URLProtocol, @unchecked Sendable {
     /// Optional per-request delivery delay. Callbacks are scheduled rather than
     /// blocking the loading thread, so a slow response can't stall the others.
     nonisolated(unsafe) static var responseDelay: ((URLRequest) -> TimeInterval)?
+    /// Sees each task as its request starts — for what only the task carries,
+    /// like its description.
+    nonisolated(unsafe) static var taskObserver: ((URLSessionTask) -> Void)?
 
     private let stopped = NSLock()
     private var isStopped = false
@@ -18,6 +21,7 @@ final class URLProtocolStub: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        if let task { Self.taskObserver?(task) }
         guard let handler = Self.handler else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
