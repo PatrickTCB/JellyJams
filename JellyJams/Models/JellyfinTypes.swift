@@ -5,6 +5,7 @@ typealias BaseItemDto = JellyfinAPI.BaseItemDto
 typealias NameIDPair = JellyfinAPI.NameIDPair
 typealias BaseItemDtoQueryResult = JellyfinAPI.BaseItemDtoQueryResult
 typealias LyricDto = JellyfinAPI.LyricDto
+typealias LyricLine = JellyfinAPI.LyricLine
 typealias ItemType = JellyfinAPI.BaseItemKind
 typealias ItemFilter = JellyfinAPI.ItemFilter
 typealias SortOrder = JellyfinAPI.SortOrder

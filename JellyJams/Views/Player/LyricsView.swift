@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The current track's lyrics, fetched from the server's
-/// `/Audio/{itemId}/Lyrics` endpoint and read off as one line per row.
+/// `/Audio/{itemId}/Lyrics` endpoint and read off as one line per row, with
+/// the line being sung at the playback moment highlighted.
 ///
 /// Opened by the music.microphone button in the now playing screen — the same
 /// sheet shape as the queue's: its own sheet, a "Done" to dismiss it, and the
@@ -9,6 +10,7 @@ import SwiftUI
 struct LyricsView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
+    @EnvironmentObject private var clock: PlaybackClock
     @Environment(\.dismiss) private var dismiss
 
     @State private var lyrics: LyricDto?
@@ -62,6 +64,7 @@ struct LyricsView: View {
                         .font(.body)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundStyle(isCurrent(row) ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
                 }
             }
         } else {
@@ -80,15 +83,33 @@ struct LyricsView: View {
     }
 
     /// One display row per lyric line the server sent, in its order, dropping
-    /// the blank and untexted lines.
+    /// the blank and untexted lines. Each row keeps the line's timestamp, in
+    /// seconds into the track, so the sheet can tell which line — if any — is
+    /// being sung at the playback moment.
     private var lyricRows: [LyricRow] {
         guard let fetched = lyrics, let lines = fetched.lyrics else { return [] }
         var rows: [LyricRow] = []
         for (index, line) in lines.enumerated() {
             guard let text = line.text, !text.isEmpty else { continue }
-            rows.append(LyricRow(id: index, text: text))
+            rows.append(LyricRow(id: index, text: text, start: Ticks.seconds(fromTicks: line.start)))
         }
         return rows
+    }
+
+    /// The fetched-line index of the line being sung right now, or nil when
+    /// the playback moment falls before the first timestamped line. The row
+    /// carrying that index is the one the sheet highlights.
+    private var currentLyricLineID: Int? {
+        guard let lines = lyrics?.lyrics else { return nil }
+        guard let line = LyricTimeline.currentLine(in: lines, at: clock.currentTime) else { return nil }
+        return lines.firstIndex(of: line)
+    }
+
+    /// Whether this row is the line being sung right now, at the playback
+    /// moment's timestamp. The current line carries the app's tint; the rest
+    /// read as the default foreground.
+    private func isCurrent(_ row: LyricRow) -> Bool {
+        row.id == currentLyricLineID
     }
 
     // MARK: - Requesting
@@ -127,9 +148,12 @@ struct LyricsView: View {
     }
 }
 
-/// A display row: a lyric line's text, keyed by its position in the fetched
-/// lines so the sheet's scroll can find it again.
+/// A display row: a lyric line's text and its timestamp, keyed by its
+/// position in the fetched lines so the sheet's scroll can find it again.
 private struct LyricRow: Identifiable {
     let id: Int
     let text: String
+    /// The line's timestamp, in seconds into the track — nil for the lines
+    /// the server sent without one, which nothing can be current with.
+    let start: Double?
 }
