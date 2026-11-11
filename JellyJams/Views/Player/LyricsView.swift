@@ -1,159 +1,132 @@
 import SwiftUI
 
-/// The current track's lyrics, fetched from the server's
-/// `/Audio/{itemId}/Lyrics` endpoint and read off as one line per row, with
-/// the line being sung at the playback moment highlighted.
+/// The current track's lyrics, read along with the song: one line per row,
+/// with the line being sung highlighted and kept in view.
 ///
-/// Opened by the music.microphone button in the now playing screen — the same
-/// sheet shape as the queue's: its own sheet, a "Done" to dismiss it, and the
-/// lines it holds while they load.
+/// Raised by the lyrics button in the now playing screen, in the queue's sheet
+/// shape — its own navigation bar and a "Done" to dismiss it. It follows the
+/// player rather than the track it was opened on, so a track change while it
+/// is open brings up the new track's lyrics.
 struct LyricsView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var clock: PlaybackClock
     @Environment(\.dismiss) private var dismiss
 
-    @State private var lyrics: LyricDto?
-    @State private var isLoading = false
-    @State private var errorMessage: String?
+    @StateObject private var loader = LoadableModel(LyricTimeline())
+
+    private var timeline: LyricTimeline { loader.value }
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    content()
+            LyricLines(timeline: timeline)
+                // A new track's lines start from the top, not from wherever
+                // the last track's were scrolled to.
+                .id(player.currentItem?.id)
+                .overlay { overlay }
+                .navigationTitle("Lyrics")
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
                 }
-                .onAppear { scrollToTop(using: proxy) }
-                .onChange(of: lyrics) { scrollToTop(using: proxy) }
-                .padding()
-            }
-            .navigationTitle("Lyrics")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
         .frame(minWidth: 360, minHeight: 420)
-        .overlay {
-            // One fetch at a time: the button that started it shows the wait.
-            if isLoading {
-                ProgressView("Loading lyrics…")
-                    .padding()
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            }
+        .task(id: player.currentItem?.id) {
+            // Kept while the new track's load runs, the last track's lines
+            // would be read against the new track's clock.
+            loader.reset()
+            await load()
         }
-        .task { await loadLyrics() }
     }
 
-    // MARK: - Content
-
-    /// Whatever the sheet holds: the lines once they arrive, the refusal when
-    /// they don't, or the empty case when the server had none.
-    @ViewBuilder
-    private func content() -> some View {
-        if errorMessage != nil {
-            errorView()
-        } else if !lyricRows.isEmpty {
-            LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(lyricRows) { row in
-                    Text(row.text)
-                        .font(.body)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .foregroundStyle(isCurrent(row) ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+    @ViewBuilder private var overlay: some View {
+        if let errorMessage = loader.errorMessage, timeline.isEmpty {
+            LoadFailureOverlay(title: "Couldn’t Load Lyrics", message: errorMessage) {
+                await load()
+                return loader.errorMessage == nil
+            }
+        } else if timeline.isEmpty, loader.isPending {
+            if session.serverReachable {
+                ProgressView()
+            } else {
+                // Offline, the request waits up to a minute for the connection
+                // to come back rather than failing, so say why nothing has
+                // arrived instead of spinning.
+                OfflineView {
+                    await load()
+                    return loader.errorMessage == nil
                 }
             }
-        } else {
+        } else if timeline.isEmpty {
             ContentUnavailableView("No Lyrics", systemImage: "music.microphone")
         }
     }
 
-    private func errorView() -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.title2)
-            Text(errorMessage ?? "The server couldn’t load these lyrics.")
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, minHeight: 320, alignment: .center)
-    }
-
-    /// One display row per lyric line the server sent, in its order, dropping
-    /// the blank and untexted lines. Each row keeps the line's timestamp, in
-    /// seconds into the track, so the sheet can tell which line — if any — is
-    /// being sung at the playback moment.
-    private var lyricRows: [LyricRow] {
-        guard let fetched = lyrics, let lines = fetched.lyrics else { return [] }
-        var rows: [LyricRow] = []
-        for (index, line) in lines.enumerated() {
-            guard let text = line.text, !text.isEmpty else { continue }
-            rows.append(LyricRow(id: index, text: text, start: Ticks.seconds(fromTicks: line.start)))
-        }
-        return rows
-    }
-
-    /// The fetched-line index of the line being sung right now, or nil when
-    /// the playback moment falls before the first timestamped line. The row
-    /// carrying that index is the one the sheet highlights.
-    private var currentLyricLineID: Int? {
-        guard let lines = lyrics?.lyrics else { return nil }
-        guard let line = LyricTimeline.currentLine(in: lines, at: clock.currentTime) else { return nil }
-        return lines.firstIndex(of: line)
-    }
-
-    /// Whether this row is the line being sung right now, at the playback
-    /// moment's timestamp. The current line carries the app's tint; the rest
-    /// read as the default foreground.
-    private func isCurrent(_ row: LyricRow) -> Bool {
-        row.id == currentLyricLineID
-    }
-
-    // MARK: - Requesting
-
-    /// `GET /Audio/{itemId}/Lyrics` for the current track, and the sheet's
-    /// whole state: a fetch in flight, the answer, or the words refused to
-    /// come.
-    private func loadLyrics() async {
-        guard let client = session.client, let item = player.currentItem else {
-            errorMessage = JellyfinError.notAuthenticated.errorDescription
-            return
-        }
-        isLoading = true
-        errorMessage = nil
-        Task {
-            defer { isLoading = false }
-            do {
-                lyrics = try await client.lyrics(for: item)
-            } catch where !error.isCancellation {
-                errorMessage = error.userFacingMessage
-            } catch {}
-        }
-    }
-
-    /// Scrolls the lyrics back to the top — the sheet's start position, the
-    /// analogue of the queue's scroll-to-current. Runs once the lines exist
-    /// to scroll to, and again whenever they arrive.
-    private func scrollToTop(using proxy: ScrollViewProxy) {
-        Task { @MainActor in
-            // Let the ScrollView lay out its rows before scrolling.
-            try? await Task.sleep(for: .milliseconds(50))
-            if let firstRow = lyricRows.first {
-                proxy.scrollTo(firstRow.id, anchor: .top)
-            }
+    private func load() async {
+        let item = player.currentItem
+        await loader.load {
+            guard let item else { return LyricTimeline() }
+            return try await session.library.lyrics(for: item)
         }
     }
 }
 
-/// A display row: a lyric line's text and its timestamp, keyed by its
-/// position in the fetched lines so the sheet's scroll can find it again.
-private struct LyricRow: Identifiable {
-    let id: Int
+/// The lines themselves, with the one being sung highlighted and scrolled to
+/// the middle of the sheet.
+///
+/// The only part of the sheet that observes ``PlaybackClock``, which ticks
+/// every half second: the current line is worked out here, once per tick, and
+/// handed to each row as a plain flag.
+private struct LyricLines: View {
+    let timeline: LyricTimeline
+
+    @EnvironmentObject private var clock: PlaybackClock
+    @State private var position = ScrollPosition(idType: Int.self)
+    /// Set while the listener scrolls the lines by hand, so following the
+    /// song doesn't drag them back mid-gesture. Following picks up again at
+    /// the next line once they let go.
+    @State private var isBrowsing = false
+
+    var body: some View {
+        let currentIndex = timeline.currentLineIndex(at: clock.currentTime)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(timeline.lines.indices, id: \.self) { index in
+                    LyricRow(text: timeline.lines[index], isCurrent: index == currentIndex)
+                }
+            }
+            .scrollTargetLayout()
+            .padding()
+        }
+        .scrollPosition($position, anchor: .center)
+        .onScrollPhaseChange { _, phase in
+            switch phase {
+            case .tracking, .interacting, .decelerating: isBrowsing = true
+            case .idle: isBrowsing = false
+            // `.animating` is the sheet's own scroll to the current line.
+            default: break
+            }
+        }
+        .onChange(of: currentIndex) { _, index in
+            guard let index, !isBrowsing else { return }
+            withAnimation { position.scrollTo(id: index, anchor: .center) }
+        }
+    }
+}
+
+/// One lyric line. Its inputs are plain values rather than the clock — the
+/// queue's rows follow the same rule — so a tick that leaves the highlight
+/// where it was doesn't re-render the row.
+private struct LyricRow: View {
     let text: String
-    /// The line's timestamp, in seconds into the track — nil for the lines
-    /// the server sent without one, which nothing can be current with.
-    let start: Double?
+    let isCurrent: Bool
+
+    var body: some View {
+        Text(text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundStyle(isCurrent ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+    }
 }
