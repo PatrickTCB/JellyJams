@@ -156,10 +156,10 @@ struct TrackListDetail: View {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
-                    .disabled(session.client == nil || downloads.isBusy(headerItem))
-                    .help(session.client == nil
-                        ? "Sign in to check this playlist for new songs"
-                        : "Check this playlist for new songs")
+                    .disabled(!session.serverReachable || downloads.isBusy(headerItem))
+                    .help(session.serverReachable
+                        ? "Check this playlist for new songs"
+                        : "Connect to your server to check this playlist for new songs")
                 }
             }
             if !selectedTracks.isEmpty {
