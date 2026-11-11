@@ -88,10 +88,12 @@ final class PreferencesStore: ObservableObject {
     }
 
     /// The address of the Jelly Jams Backend — the companion service whose
-    /// first feature is Mixtapes — exactly as it was entered, with a
-    /// successful registration replacing it with the normalised form. The
-    /// settings field edits this directly; it alone decides nothing about the
-    /// feature, because an address nobody registered with has no rules yet.
+    /// first feature is Mixtapes — as the last successful registration saved
+    /// it, in normalised form. The settings field keeps what is being typed
+    /// as a draft until Save registers it, so this — the address bans and
+    /// Infinite Queue talk to — never holds a half-typed host. It alone
+    /// decides nothing about the feature, because an address nobody
+    /// registered with has no rules yet.
     @Published var jellyJamsBackendAddress: String {
         didSet { defaults.set(jellyJamsBackendAddress, forKey: Key.jellyJamsBackendAddress) }
     }
