@@ -381,12 +381,17 @@ final class JellyfinServiceTests: XCTestCase {
         XCTAssertNil(makeClient().artworkURL(for: track, size: 96))
     }
 
-    func testArtworkURLIsAuthenticatedSoTheImageLoaderCanFetchIt() throws {
+    /// Artwork URLs leave the app — Siri and Shortcuts are handed them to draw
+    /// results — so they must not carry the access token. Jellyfin serves item
+    /// images without authentication, so the image loader does not need it.
+    func testArtworkURLDoesNotCarryTheAccessToken() throws {
         let album = BaseItemDto(id: "album-id", type: .musicAlbum)
+        let client = TestFixtures.stubbedClient(token: "s3cret-token")
 
-        let url = try XCTUnwrap(makeClient().artworkURL(for: album, size: 320))
+        let url = try XCTUnwrap(client.artworkURL(for: album, size: 320))
 
-        XCTAssertEqual(queryValue(url, "ApiKey"), "token")
+        XCTAssertNil(queryValue(url, "ApiKey"))
+        XCTAssertFalse(url.absoluteString.contains("s3cret-token"), url.absoluteString)
     }
 
     func testArtworkForAnItemWithoutAnIdentifierIsNil() {

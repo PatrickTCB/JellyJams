@@ -497,6 +497,9 @@ final class JellyfinService: Sendable {
         return url
     }
 
+    /// An item image URL. It deliberately carries no access token: Jellyfin
+    /// serves images without authentication, and these URLs are handed to Siri
+    /// and Shortcuts, outside the app.
     func artworkURL(
         itemId: String?,
         tag: String? = nil,
@@ -517,7 +520,7 @@ final class JellyfinService: Sendable {
                 format: .jpg
             )
         )
-        return apiClient.url(with: request, queryAPIKey: true)
+        return apiClient.url(with: request)
     }
 
     func artworkURL(for item: BaseItemDto, size: Int) -> URL? {

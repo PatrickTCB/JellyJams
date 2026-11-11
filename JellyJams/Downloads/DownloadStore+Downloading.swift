@@ -447,8 +447,8 @@ extension DownloadStore {
 
     /// The key a transfer is recorded under: a hash of its request URL, which
     /// is what the system echoes back with a completion it kept across a
-    /// process death. Hashed because stream and image URLs carry the access
-    /// token, and the manifest must not.
+    /// process death. Hashed because stream URLs carry the access token, and
+    /// the manifest must not.
     static func pendingKey(for url: URL) -> String {
         let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()

@@ -182,7 +182,7 @@ final class DownloadStore: ObservableObject {
     /// The record carries everything needed to file the delivered file the way
     /// the transfer would have. It is keyed by a hash of the request URL — the
     /// one thing the system echoes back that identifies the transfer — because
-    /// stream and image URLs carry the access token and the manifest must not.
+    /// stream URLs carry the access token and the manifest must not.
     enum PendingTransfer: Codable, Sendable {
         case audio(
             track: BaseItemDto,
