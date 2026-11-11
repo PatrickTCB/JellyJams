@@ -1,5 +1,8 @@
 import Combine
 import Dispatch
+#if os(iOS)
+import AppIntents
+#endif
 
 /// Owns the process-wide service graph.
 ///
@@ -71,13 +74,13 @@ final class AppServices {
         // Bans and Infinite Queue follow the backend rather than the session
         // alone: whether a "Ban" menu may offer itself — and whether a
         // running queue can be extended — depends on who is signed in, where
-        // the backend lives, and whether it knows this account yet. The
-        // settings sheet edits the address live, so every value comes from
-        // the publisher rather than being read back (`@Published` announces
-        // before the change lands, and mid-registration the suffix the store
-        // holds can still be the old one). The `registered` check is the
-        // same rule `PreferencesStore.isMixtapesActive` reads: a
-        // registration recorded a playlist-name ending.
+        // the backend lives, and whether it knows this account yet. Every
+        // value comes from the publisher rather than being read back
+        // (`@Published` announces before the change lands, and
+        // mid-registration the suffix the store holds can still be the old
+        // one). The `registered` check is the same rule
+        // `PreferencesStore.isMixtapesActive` reads: a registration recorded a
+        // playlist-name ending.
         Publishers.CombineLatest3(
             session.$currentUser,
             preferences.$jellyJamsBackendAddress,
@@ -140,6 +143,13 @@ final class AppServices {
             playlistStore.configure(client: client)
             favourites.configure(client: client)
             pinnedItems.configure(accountKey: user.map(Self.accountKey(for:)))
+            #if os(iOS)
+            // A phrase like "Play <song> in Jelly Jams" can only match the
+            // values the entity queries suggested when the system last asked
+            // — and while signed out they suggest nothing. Ask it to fetch
+            // them again now there is a library to suggest from.
+            JellyJamsShortcuts.updateAppShortcutParameters()
+            #endif
             Task {
                 await session.checkServerReachability()
                 player.restorePlaybackState()
