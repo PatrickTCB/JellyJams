@@ -47,18 +47,20 @@ import JellyfinAPI
 /// Nothing in the browse path (`groups`, `tracks`, `localURL`, `localArtworkURL`)
 /// touches the network or needs a signed-in session: the manifest holds every
 /// byte of metadata those screens render. It is rewritten after every change —
-/// at once for removals and for a batch starting or finishing, within moments
-/// for each song a running batch saves — so downloads survive relaunches. They
-/// do not survive a sign-out: leaving the
+/// at once for removals and for a batch starting or finishing, within a second
+/// for each song a running batch saves, and at once again before iOS may
+/// suspend the app after waking it to deliver downloads — so downloads survive
+/// relaunches. They do not survive a sign-out: leaving the
 /// server is a clean break back to the fresh-install state, and ``removeAll()``
 /// — files, artwork, manifest and all — is part of the reset it runs.
 ///
 /// Transfers survive the app too. On iOS they run on a background session,
-/// every song of a batch handed to it at once: they continue while the app is
-/// suspended, and the system finishes them even if the app dies, delivering
-/// the files to the next launch, which adopts them and resumes every batch the
-/// manifest recorded as active. Removals always
-/// win against downloads: deleting cancels the batches it covers, and a
+/// every song and cover of a batch handed to it at once: they continue while
+/// the app is suspended, and the system finishes them even if the app dies,
+/// delivering the files to the next launch, which adopts them and resumes
+/// every batch the manifest recorded as active — waiting for whatever the
+/// system is still fetching rather than fetching it a second time. Removals
+/// always win against downloads: deleting cancels the batches it covers, and a
 /// cancelled transfer's file is discarded rather than resurrecting what was
 /// just deleted.
 @MainActor
@@ -154,7 +156,9 @@ final class DownloadStore: ObservableObject {
         var ownerItemID: String?
         var imageTag: String
         /// Track ids — and playlist or artist ids, for a collection's own
-        /// cover or picture — that require this artwork.
+        /// cover or picture — that require this artwork. While a download
+        /// runs, the batch that fetched it ahead of its songs holds it too,
+        /// under ``DownloadStore/batchHolder(_:)``.
         var requiredBy: Set<String>
         /// The saved image's size in bytes; see ``Entry/fileSize``.
         var fileSize: Int64? = nil
@@ -183,9 +187,12 @@ final class DownloadStore: ObservableObject {
     /// even if the app dies, and delivers the file when the store next creates
     /// its session — by which point no `downloadOne` is left to receive it.
     /// The record carries everything needed to file the delivered file the way
-    /// the transfer would have. It is keyed by a hash of the request URL — the
-    /// one thing the system echoes back that identifies the transfer — because
-    /// stream URLs carry the access token and the manifest must not.
+    /// the transfer would have. It is keyed by the transfer's key —
+    /// ``audioTransferKey(_:)`` or ``artworkTransferKey(ownerID:tag:)`` —
+    /// which the task carries as its description, kept by the system and
+    /// handed back with the delivery. Records a build from before then saved
+    /// are keyed by a hash of the request URL instead
+    /// (``legacyRecordKey(for:)``).
     enum PendingTransfer: Codable, Sendable {
         case audio(
             track: BaseItemDto,
@@ -289,8 +296,15 @@ final class DownloadStore: ObservableObject {
     /// The item each running batch was started for, persisted so a relaunch
     /// can resume batches whose process died mid-download.
     var activeBatchItems: [String: BaseItemDto] = [:]
-    /// Transfers in flight, keyed by ``pendingKey(for:)`` of their request URL.
+    /// Transfers in flight, keyed by transfer key; see ``PendingTransfer``.
     var pendingTransfers: [String: PendingTransfer] = [:]
+    /// The transfers the system was still running for an earlier process when
+    /// this one started, by transfer key — held in ``transfersInFlight``, so a
+    /// fetch of the same song or cover waits for their delivery instead of
+    /// downloading it a second time.
+    var transfersRunningElsewhere: Set<String> = []
+    /// Finds those transfers, at launch; every fetch waits for it first.
+    var reconnection: Task<Void, Never>?
     /// Whether the batches a previous process persisted have been resumed
     /// this launch.
     var hasResumedInterruptedBatches = false
@@ -310,6 +324,9 @@ final class DownloadStore: ObservableObject {
     var artistArtworkSyncToken: UUID?
     /// Writes the manifest, in order; see ``persist()`` and ``persistSoon()``.
     let manifestWriter = ManifestWriter()
+    /// How long ``persistSoon()`` waits before saving, so the per-song
+    /// changes of a running download share one write.
+    let manifestSaveDelay: Duration
     /// Counts manifest snapshots, so the writer can drop a stale one.
     var manifestRevision = 0
     var isManifestWriteScheduled = false
@@ -325,12 +342,15 @@ final class DownloadStore: ObservableObject {
     /// downloads, and how the tests run on iOS too. With none injected, iOS
     /// builds a background session, so transfers survive the app being
     /// suspended, and macOS uses the shared configuration.
-    init(directory: URL? = nil, session: URLSession? = nil) {
+    /// `manifestSaveDelay` is ``persistSoon()``'s wait, which tests shorten
+    /// or stretch.
+    init(directory: URL? = nil, session: URLSession? = nil, manifestSaveDelay: Duration = .seconds(1)) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = directory ?? support.appending(path: "Downloads", directoryHint: .isDirectory)
         self.directory = dir
         self.artworkDirectory = dir.appending(path: "Artwork", directoryHint: .isDirectory)
         self.manifestURL = dir.appending(path: "manifest.json")
+        self.manifestSaveDelay = manifestSaveDelay
         if let session {
             downloadSession = DownloadSession(configuration: session.configuration)
         } else {
@@ -343,15 +363,30 @@ final class DownloadStore: ObservableObject {
             downloadSession = DownloadSession(configuration: URLSession.shared.configuration)
             #endif
         }
-        downloadSession.setOrphanedTransferHandler { [weak self] requestURL, file, statusCode in
-            Task { @MainActor in
-                self?.adoptOrphanedTransfer(requestURL: requestURL, file: file, statusCode: statusCode)
+        downloadSession.setOrphanedTransferHandler { [weak self] delivery in
+            // Queued on the main thread, in order with the save the session
+            // asks for once the system has delivered everything it held.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.adoptOrphanedTransfer(delivery)
+                }
             }
+        }
+        downloadSession.setBackgroundEventsFinishedHandler { [weak self] in
+            self?.backgroundEventsDidFinish()
         }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: artworkDirectory, withIntermediateDirectories: true)
         Self.excludeFromBackup(dir)
         loadManifest()
+        // A batch the app was ended in the middle of resumes at sign-in, and
+        // on iOS the system may still be fetching some of its songs: those
+        // are found first, so the resume waits for them instead.
+        let session = downloadSession
+        reconnection = Task { [weak self] in
+            let running = await session.transfersStartedElsewhere()
+            self?.holdTransfersRunningElsewhere(running)
+        }
     }
 
     /// Downloads can be fetched from the server again whenever they're
@@ -382,6 +417,14 @@ final class DownloadStore: ObservableObject {
         batches = []
         activeBatchItems = [:]
         pendingTransfers = [:]
+        // Fetches waiting on transfers the system kept running for an earlier
+        // process are released — they are being cancelled with the rest — and
+        // the transfers stopped: anything they delivered would be discarded.
+        for key in transfersRunningElsewhere {
+            endTransfer(key)
+        }
+        transfersRunningElsewhere = []
+        downloadSession.cancelTransfersStartedElsewhere { _ in true }
         entries = [:]
         playlists = [:]
         artworkEntries = [:]
@@ -433,27 +476,36 @@ final class DownloadStore: ObservableObject {
         manifestWriter.write(currentManifest, revision: manifestRevision, to: manifestURL)
     }
 
-    /// Saves the manifest shortly, off the main thread: for the per-song
+    /// Saves the manifest soon, off the main thread: for the per-song
     /// changes a running download makes, several a second while songs land.
-    /// A burst shares one write, which records whatever has changed by the
-    /// time it runs. Should the process die first, nothing is lost that the
-    /// batch's resume doesn't re-fetch.
+    /// Everything that changes within ``manifestSaveDelay`` shares one write,
+    /// which records whatever has changed by the time it runs; the writer only
+    /// ever writes the newest snapshot, so a big manifest that takes longer
+    /// than that to write can't make saves pile up behind it. Should the
+    /// process die first, nothing is lost that the batch's resume doesn't
+    /// re-fetch — and when iOS woke the app to deliver downloads,
+    /// ``backgroundEventsDidFinish()`` saves at once, before the app can be
+    /// suspended again.
     func persistSoon() {
         guard !isManifestWriteScheduled else { return }
         isManifestWriteScheduled = true
+        let delay = manifestSaveDelay
         Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await Task.sleep(for: delay)
             guard let self else { return }
             isManifestWriteScheduled = false
             manifestRevision += 1
-            let manifest = currentManifest
-            let revision = manifestRevision
-            let writer = manifestWriter
-            let url = manifestURL
-            Task.detached(priority: .utility) {
-                writer.write(manifest, revision: revision, to: url)
-            }
+            manifestWriter.writeSoon(currentManifest, revision: manifestRevision, to: manifestURL)
         }
+    }
+
+    /// What the session calls once the system has delivered every event it
+    /// held — on iOS, just before the system may suspend the app it woke to
+    /// deliver them. The songs filed meanwhile were only scheduled to be saved,
+    /// and a suspended app can be ended without another chance, so they are
+    /// saved now.
+    func backgroundEventsDidFinish() {
+        persist()
     }
 
     private var currentManifest: Manifest {

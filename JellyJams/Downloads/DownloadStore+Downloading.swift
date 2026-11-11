@@ -24,11 +24,12 @@ extension DownloadStore {
         let artistKeys: Set<String>
     }
 
-    /// How many songs one batch transfers at a time. A background session
-    /// (iOS) is handed every song at once: the system schedules them, and they
-    /// keep going while the app is suspended — when it can't start new ones.
-    /// A foreground session queues whatever exceeds its connection limit, and
-    /// a queued transfer can time out waiting, so it runs a few at a time.
+    /// How many transfers one batch runs at a time. A background session
+    /// (iOS) is handed every song and cover at once: the system schedules
+    /// them, and they keep going while the app is suspended — when it can't
+    /// start new ones. A foreground session queues whatever exceeds its
+    /// connection limit, and a queued transfer can time out waiting, so it
+    /// runs a few at a time.
     private var transferConcurrency: Int {
         downloadSession.isBackground ? .max : 4
     }
@@ -78,13 +79,19 @@ extension DownloadStore {
             let order = reserveOrders(count: 1)
             let song = TrackDownload(track: item, source: id, albumSongCount: nil, artistKeys: Self.artistKeys(of: item))
             batchTasks[id] = Task {
-                await downloadOne(song, order: order, run: run, via: client)
+                await transfer([song], firstOrder: order, run: run, via: client)
                 finishBatch(run)
             }
         case .musicArtist:
             let run = startBatch(id)
             batchTasks[id] = Task {
                 do {
+                    // The artist's own picture, saved under the artist's id —
+                    // one request, so their rows never need the server for it
+                    // and an album cover stays what an artist *without* a
+                    // picture falls back to. Fetched alongside the songs, like
+                    // every transfer a batch makes.
+                    async let picture: Void = downloadArtistArtwork(for: item, via: client)
                     let albums = try await client.albums(forArtistId: id)
                     guard !albums.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
                     // Every album's songs are listed first and then downloaded
@@ -96,12 +103,7 @@ extension DownloadStore {
                         songs += await collectionDownloads(album, via: client) ?? []
                     }
                     await downloadTracks(songs, run: run, via: client)
-                    // The artist's own picture, saved under the artist's id —
-                    // one request, so their rows never need the server for it
-                    // and an album cover stays what an artist *without* a
-                    // picture falls back to.
-                    try Task.checkCancellation()
-                    await downloadArtistArtwork(for: item, via: client)
+                    await picture
                 } catch {
                     if !error.isCancellation {
                         errorMessage = "Couldn’t download “\(item.displayName)”. \(error.userFacingMessage)"
@@ -113,9 +115,18 @@ extension DownloadStore {
             let run = startBatch(id)
             batchTasks[id] = Task {
                 do {
+                    // A re-download from the offline detail carries a stand-in
+                    // item with no image tags; keep the cover that is already
+                    // saved rather than dropping it.
+                    let coverTag = item.primaryImageTag ?? playlists[id]?.coverTag
+                    // The playlist's own cover, saved under the playlist id so
+                    // the offline header never needs the server — fetched
+                    // alongside the songs, like every transfer a batch makes.
+                    async let cover: Void = downloadArtwork(ownerID: id, imageTag: coverTag, holderID: id, via: client)
                     let tracks = try await client.tracks(for: item)
                     guard !tracks.isEmpty else { throw JellyfinError.emptyCollection(item.displayName) }
                     let trackIDs = try await downloadPlaylistTracks(tracks, source: id, run: run, via: client)
+                    await cover
                     // A removal while the tracks were landing wins over the
                     // membership: saving the record now would resurrect the
                     // playlist the user just deleted.
@@ -124,21 +135,10 @@ extension DownloadStore {
                         id: id,
                         title: item.displayName,
                         trackIDs: trackIDs,
-                        // A re-download from the offline detail carries a
-                        // stand-in item with no image tags; keep the cover that
-                        // is already saved rather than dropping it.
-                        coverTag: item.primaryImageTag ?? playlists[id]?.coverTag,
+                        coverTag: coverTag,
                         // Counted as the membership is stored, deduplicated, so
                         // "n of m" always compares like with like.
                         totalSongs: trackIDs.count
-                    )
-                    // The playlist's own cover, saved under the playlist id so
-                    // the offline header never needs the server.
-                    await downloadArtwork(
-                        ownerID: id,
-                        imageTag: item.primaryImageTag ?? playlists[id]?.coverTag,
-                        holderID: id,
-                        via: client
                     )
                     persist()
                 } catch {
@@ -243,6 +243,10 @@ extension DownloadStore {
         // Records a previous launch left for this batch: its own cleanup
         // would have swept them, and a retired run no longer cleans up.
         dropPendingTransfers(forBatch: id)
+        // Likewise its claim on the covers it fetched ahead of its songs: a
+        // cover none of them landed to claim goes with the batch.
+        unreferenceArtwork(holderID: Self.batchHolder(id))
+        deleteUnreferenced()
         persist()
     }
 
@@ -306,26 +310,66 @@ extension DownloadStore {
         }
     }
 
-    /// Downloads `songs` side by side, ``transferConcurrency`` at a time, each
-    /// saved under the order it holds in the list whatever order the
-    /// transfers finish in. A song listed twice is fetched once.
+    /// Downloads `songs` side by side, each saved under the order it holds in
+    /// the list whatever order the transfers finish in. A song listed twice is
+    /// fetched once.
     private func downloadTracks(_ songs: [TrackDownload], run: BatchRun, via client: JellyfinService) async {
         var seen = Set<String>()
         let unique = songs.filter { song in song.track.id.map { seen.insert($0).inserted } ?? true }
         guard !unique.isEmpty else { return }
         updateBatch(run) { $0.total += unique.count }
-        let firstOrder = reserveOrders(count: unique.count)
+        await transfer(unique, firstOrder: reserveOrders(count: unique.count), run: run, via: client)
+    }
+
+    /// One transfer a batch makes: a cover its songs share, or a song.
+    private enum BatchTransfer: Sendable {
+        case cover(owner: String, tag: String)
+        case song(TrackDownload, order: Int)
+    }
+
+    /// Hands every transfer `songs` need to the session together,
+    /// ``transferConcurrency`` at a time: first the covers of the songs still
+    /// to fetch, one per album, claimed for the batch (``batchHolder(_:)``)
+    /// until its songs land and claim them; then the songs, numbered from
+    /// `firstOrder`.
+    ///
+    /// No transfer waits for another to finish before it is started. On iOS a
+    /// transfer started while the app is in the background is left to the
+    /// system's discretion — it can be held back for hours, until Wi-Fi and
+    /// power — and a song only counts as done once its cover is saved, so a
+    /// cover requested only after its song had landed could stall the batch
+    /// long after the audio was on disk.
+    private func transfer(_ songs: [TrackDownload], firstOrder: Int, run: BatchRun, via client: JellyfinService) async {
+        let holder = Self.batchHolder(run.id)
+        var covers = Set<String>()
+        var transfers: [BatchTransfer] = []
+        for song in songs {
+            // A song already on disk only gains a reference, and its cover's.
+            guard let id = song.track.id, entries[id] == nil,
+                  let pair = Self.artworkPair(for: song.track),
+                  covers.insert(Self.artworkKey(ownerID: pair.owner, tag: pair.tag)).inserted
+            else { continue }
+            transfers.append(.cover(owner: pair.owner, tag: pair.tag))
+        }
+        for (offset, song) in songs.enumerated() {
+            transfers.append(.song(song, order: firstOrder + offset))
+        }
         let limit = transferConcurrency
         await withTaskGroup(of: Void.self) { group in
             var running = 0
-            for (offset, song) in unique.enumerated() {
+            for transfer in transfers {
                 guard !Task.isCancelled else { break }
                 if running >= limit {
                     await group.next()
                     running -= 1
                 }
                 group.addTask {
-                    await self.downloadOne(song, order: firstOrder + offset, run: run, via: client)
+                    switch transfer {
+                    case let .cover(owner, tag):
+                        await self.downloadArtwork(ownerID: owner, imageTag: tag, holderID: holder, via: client)
+                    case let .song(song, order):
+                        await self.downloadOne(song, order: order, run: run, via: client)
+                    }
                 }
                 running += 1
             }
@@ -431,9 +475,10 @@ extension DownloadStore {
             return
         }
         // Another batch is already fetching this song — an album and a
-        // playlist sharing it, started together: wait for that transfer
-        // rather than fetch and file a second copy over the first.
-        let transferKey = "audio|\(id)"
+        // playlist sharing it, started together, or the system finishing what
+        // an earlier process started: wait for that transfer rather than fetch
+        // and file a second copy over the first.
+        let transferKey = Self.audioTransferKey(id)
         await waitForTransfer(transferKey)
         guard !Task.isCancelled else { return }
         // Already saved: just gain the new reference, no second copy.
@@ -443,7 +488,6 @@ extension DownloadStore {
         }
         beginTransfer(transferKey)
         defer { endTransfer(transferKey) }
-        var pendingKey: String?
         do {
             let remote = try client.streamURL(itemId: id, mediaSourceId: track.mediaSourceID)
             // `AVURLAsset` leans on the file extension to pick a parser, so
@@ -452,10 +496,9 @@ extension DownloadStore {
             let filename = Self.filename(trackID: id, container: track.container ?? track.mediaSources?.first?.container)
             // Recorded before the transfer starts: if the process dies
             // mid-flight, the system finishes it anyway, and this record is
-            // what lets the next launch file the delivered file.
-            let key = Self.pendingKey(for: remote)
-            pendingKey = key
-            pendingTransfers[key] = .audio(
+            // what lets the next launch file the delivered file. The task
+            // carries the key the record is filed under as its description.
+            pendingTransfers[transferKey] = .audio(
                 track: track,
                 filename: filename,
                 source: song.source,
@@ -464,8 +507,8 @@ extension DownloadStore {
                 artistKeys: song.artistKeys
             )
             persistSoon()
-            let (tempFile, response) = try await downloadSession.download(from: remote)
-            pendingTransfers[key] = nil
+            let (tempFile, response) = try await downloadSession.download(from: remote, description: transferKey)
+            pendingTransfers[transferKey] = nil
             // The transfer can finish just before a removal cancels it; the
             // removal wins, or the file would resurrect what was just deleted.
             guard !Task.isCancelled else {
@@ -509,7 +552,7 @@ extension DownloadStore {
             persistSoon()
             updateBatch(run) { $0.completed += 1 }
         } catch {
-            if let pendingKey { pendingTransfers[pendingKey] = nil }
+            pendingTransfers[transferKey] = nil
             if !error.isCancellation {
                 reportDownloadFailure(track, error)
             }
@@ -540,6 +583,9 @@ extension DownloadStore {
     /// re-checks what is saved afterwards: the transfer it waited on can have
     /// failed, or been cancelled with its batch.
     func waitForTransfer(_ key: String) async {
+        // Until the store knows what the system is still fetching for an
+        // earlier process, it can't tell what is already on its way.
+        await reconnection?.value
         while transfersInFlight[key] != nil {
             await withCheckedContinuation { (waiter: CheckedContinuation<Void, Never>) in
                 transfersInFlight[key, default: []].append(waiter)
@@ -561,13 +607,78 @@ extension DownloadStore {
 
     // MARK: - Orphaned transfers
 
-    /// The key a transfer is recorded under: a hash of its request URL, which
-    /// is what the system echoes back with a completion it kept across a
-    /// process death. Hashed because stream URLs carry the access token, and
-    /// the manifest must not.
-    static func pendingKey(for url: URL) -> String {
+    /// The key a song's transfer goes by: what keeps it to one fetch at a time
+    /// (``waitForTransfer(_:)``), what its record is filed under, and the
+    /// description its task carries.
+    static func audioTransferKey(_ trackID: String) -> String {
+        "audio|\(trackID)"
+    }
+
+    /// The key a cover's transfer goes by; see ``audioTransferKey(_:)``.
+    static func artworkTransferKey(ownerID: String?, tag: String) -> String {
+        "artwork|\(artworkKey(ownerID: ownerID, tag: tag))"
+    }
+
+    /// The key of the transfer `record` stands for.
+    static func transferKey(for record: PendingTransfer) -> String? {
+        switch record {
+        case let .audio(track, _, _, _, _, _):
+            track.id.map { audioTransferKey($0) }
+        case let .artwork(ownerID, imageTag, _, _):
+            artworkTransferKey(ownerID: ownerID, tag: imageTag)
+        }
+    }
+
+    /// The key builds from before transfers carried descriptions filed records
+    /// under: a hash of the request URL, the one thing the system echoed back
+    /// that identified a transfer — hashed because stream URLs carry the
+    /// access token, and the manifest must not. Still looked up for the
+    /// deliveries of transfers such a build started.
+    nonisolated static func legacyRecordKey(for url: URL) -> String {
         let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The key of the record a transfer the system reported on is filed under,
+    /// when there is one: the description the transfer was started with — or,
+    /// for one a build from before descriptions started, the hash of its
+    /// request URL that build filed records by.
+    func recordKey(description: String?, requestURL: URL?) -> String? {
+        let key = description ?? requestURL.map { Self.legacyRecordKey(for: $0) }
+        guard let key, pendingTransfers[key] != nil else { return nil }
+        return key
+    }
+
+    /// Holds every transfer the system is still running for an earlier
+    /// process whose record survives, under the key of what it fetches, so a
+    /// fetch of the same song or cover waits for its delivery instead of
+    /// downloading it again. The delivery — ``adoptOrphanedTransfer(_:)`` —
+    /// releases the hold, as does forgetting the record. Internal so tests can
+    /// stand in for the system's list; in production it runs once, at launch.
+    func holdTransfersRunningElsewhere(_ running: [DownloadSession.RunningTransfer]) {
+        for transfer in running {
+            guard let key = recordKey(description: transfer.description, requestURL: transfer.requestURL),
+                  let record = pendingTransfers[key],
+                  let transferKey = Self.transferKey(for: record),
+                  transfersInFlight[transferKey] == nil
+            else { continue }
+            beginTransfer(transferKey)
+            transfersRunningElsewhere.insert(transferKey)
+        }
+    }
+
+    /// Forgets the record filed under `key`. When that transfer is one the
+    /// system was running for an earlier process, the fetches waiting on it
+    /// are released — they re-check what is saved, and fetch the file
+    /// themselves if it never landed — and `true` is returned.
+    @discardableResult
+    func dropPendingTransfer(_ key: String) -> Bool {
+        guard let record = pendingTransfers.removeValue(forKey: key),
+              let transferKey = Self.transferKey(for: record),
+              transfersRunningElsewhere.remove(transferKey) != nil
+        else { return false }
+        endTransfer(transferKey)
+        return true
     }
 
     /// A completion the system kept across a process death: iOS's background
@@ -575,18 +686,28 @@ extension DownloadStore {
     /// them when the store recreates its session at the next launch, by which
     /// point no caller is waiting. The pending record says what the file was
     /// for, and it is filed exactly the way the transfer would have filed it.
+    /// A relaunch can deliver hundreds at once, so each is saved with the
+    /// next scheduled write rather than with a write of its own — and, when
+    /// the system woke the app to deliver them, before it can be suspended
+    /// again (``backgroundEventsDidFinish()``).
     /// Internal rather than private so tests can drive the delivery directly —
     /// in production the only caller is the session's orphaned-transfer
     /// handler, wired in `init`.
-    func adoptOrphanedTransfer(requestURL: URL?, file: URL?, statusCode: Int?) {
-        guard let requestURL, let pending = pendingTransfers[Self.pendingKey(for: requestURL)] else {
-            if let file { try? FileManager.default.removeItem(at: file) }
+    func adoptOrphanedTransfer(_ delivery: DownloadSession.OrphanedTransfer) {
+        guard let key = recordKey(description: delivery.description, requestURL: delivery.requestURL),
+              let pending = pendingTransfers[key]
+        else {
+            if let file = delivery.file { try? FileManager.default.removeItem(at: file) }
             return
         }
-        pendingTransfers[Self.pendingKey(for: requestURL)] = nil
-        guard let file, let statusCode, (200..<300).contains(statusCode) else {
-            if let file { try? FileManager.default.removeItem(at: file) }
-            persist()
+        // Forgotten once the delivery is filed, which releases a fetch waiting
+        // on the transfer to find the file — or, when it failed, to fetch it.
+        defer {
+            dropPendingTransfer(key)
+            persistSoon()
+        }
+        guard let file = delivery.file, let statusCode = delivery.statusCode, (200..<300).contains(statusCode) else {
+            if let file = delivery.file { try? FileManager.default.removeItem(at: file) }
             return
         }
         switch pending {
@@ -645,7 +766,6 @@ extension DownloadStore {
                 artworkEntries[entry.key] = entry
             }
         }
-        persist()
     }
 
     // MARK: - Removal
@@ -729,6 +849,9 @@ extension DownloadStore {
         batches.removeAll { $0.id == run.id }
         batchTasks[run.id] = nil
         activeBatchItems[run.id] = nil
+        // Every song that landed holds its own cover now; the batch's claim on
+        // the covers it fetched ahead of them ends with it.
+        unreferenceArtwork(holderID: Self.batchHolder(run.id))
         // Transfers recorded for this batch are done with it: whatever is
         // still listed belonged to a task that failed or was cancelled before
         // it could clear its own record, or to a previous launch's run.
@@ -737,11 +860,36 @@ extension DownloadStore {
         persist()
     }
 
+    /// What a running batch claims the covers it fetches ahead of its songs
+    /// under, so no sweep reclaims one before a song lands to claim it
+    /// itself. Not an item id, so it can't be mistaken for a song, playlist
+    /// or artist holding artwork; released when the batch finishes or is
+    /// cancelled.
+    static func batchHolder(_ batchID: String) -> String {
+        "batch:\(batchID)"
+    }
+
+    /// Forgets the records of the transfers batch `id` started — its songs,
+    /// and the covers it fetched ahead of them. One of those the system is
+    /// still running for an earlier process is cancelled too: whatever it
+    /// delivered would only be discarded.
     private func dropPendingTransfers(forBatch id: String) {
-        for (key, transfer) in pendingTransfers {
-            if case let .audio(_, _, _, batchID, _, _) = transfer, batchID == id {
-                pendingTransfers[key] = nil
-            }
+        var stillRunning: Set<String> = []
+        for (key, transfer) in pendingTransfers where Self.isTransfer(transfer, ofBatch: id) {
+            if dropPendingTransfer(key) { stillRunning.insert(key) }
+        }
+        guard !stillRunning.isEmpty else { return }
+        let keys = stillRunning
+        downloadSession.cancelTransfersStartedElsewhere { transfer in
+            let key = transfer.description ?? transfer.requestURL.map { Self.legacyRecordKey(for: $0) }
+            return key.map(keys.contains) ?? false
+        }
+    }
+
+    private static func isTransfer(_ transfer: PendingTransfer, ofBatch id: String) -> Bool {
+        switch transfer {
+        case let .audio(_, _, _, batchID, _, _): batchID == id
+        case let .artwork(_, _, _, holderID): holderID == batchHolder(id)
         }
     }
 

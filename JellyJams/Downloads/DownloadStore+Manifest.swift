@@ -8,24 +8,76 @@ private let downloadLog = Logger(
     category: "Downloads"
 )
 
-/// Writes manifest snapshots to disk one at a time, and never lets an older
-/// snapshot land over a newer one: each carries the revision it was taken at,
-/// and a write whose revision isn't newer than the last one written is
-/// dropped. That is what lets ``DownloadStore/persistSoon()`` write off the
-/// main thread while ``DownloadStore/persist()`` still leaves the latest state
-/// on disk the moment it returns.
+/// Writes manifest snapshots to disk, and never lets an older snapshot land
+/// over a newer one: each carries the revision it was taken at, and a write
+/// whose revision isn't newer than the last one written is dropped.
+///
+/// ``write(_:revision:to:)`` writes on the caller's thread — what
+/// ``DownloadStore/persist()`` needs to leave the latest state on disk the
+/// moment it returns. ``writeSoon(_:revision:to:)`` writes on the writer's
+/// own queue, and only ever the newest snapshot it has been handed: one
+/// handed over while a write is running replaces any still waiting rather
+/// than queueing behind it, so however long a big manifest takes to write,
+/// saves can't pile up — each holding a copy of the manifest.
 final class ManifestWriter: Sendable {
+    private struct Pending {
+        var snapshot: (manifest: DownloadStore.Manifest, revision: Int, url: URL)?
+        var isWriting = false
+    }
+
     private let lastWrittenRevision = Mutex(0)
+    private let pending = Mutex(Pending())
+    private let queue = DispatchQueue(label: "net.aseriesoftubes.JellyJams.manifest", qos: .utility)
 
     func write(_ manifest: DownloadStore.Manifest, revision: Int, to url: URL) {
+        // Encoded outside the lock, so a write from the main thread waits on
+        // another's disk access at most, never on its encoding.
+        guard revision > lastWrittenRevision.withLock({ $0 }) else { return }
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(manifest)
+        } catch {
+            downloadLog.error("Download manifest could not be encoded: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         lastWrittenRevision.withLock { lastWritten in
             guard revision > lastWritten else { return }
             do {
-                try JSONEncoder().encode(manifest).write(to: url, options: .atomic)
+                try data.write(to: url, options: .atomic)
                 lastWritten = revision
             } catch {
                 downloadLog.error("Download manifest could not be saved: \(error.localizedDescription, privacy: .public)")
             }
+        }
+    }
+
+    func writeSoon(_ manifest: DownloadStore.Manifest, revision: Int, to url: URL) {
+        let startsWriting = pending.withLock { pending in
+            pending.snapshot = (manifest, revision, url)
+            guard !pending.isWriting else { return false }
+            pending.isWriting = true
+            return true
+        }
+        guard startsWriting else { return }
+        queue.async { self.writePending() }
+    }
+
+    /// Writes the waiting snapshot, then whichever replaced it in the
+    /// meantime, until none is waiting.
+    private func writePending() {
+        while let next = takePending() {
+            write(next.manifest, revision: next.revision, to: next.url)
+        }
+    }
+
+    private func takePending() -> (manifest: DownloadStore.Manifest, revision: Int, url: URL)? {
+        pending.withLock { pending in
+            guard let snapshot = pending.snapshot else {
+                pending.isWriting = false
+                return nil
+            }
+            pending.snapshot = nil
+            return snapshot
         }
     }
 }

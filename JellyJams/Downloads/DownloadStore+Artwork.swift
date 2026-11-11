@@ -20,7 +20,7 @@ extension DownloadStore {
         via client: JellyfinService
     ) async {
         guard let imageTag, !imageTag.isEmpty else { return }
-        let transferKey = "artwork|\(Self.artworkKey(ownerID: ownerID, tag: imageTag))"
+        let transferKey = Self.artworkTransferKey(ownerID: ownerID, tag: imageTag)
         await waitForTransfer(transferKey)
         guard !Task.isCancelled else { return }
 
@@ -47,15 +47,15 @@ extension DownloadStore {
         // two items sharing an image tag can't overwrite each other.
         let stem = ownerID.map { "\($0)-\(imageTag)" } ?? imageTag
         let filename = "\(stem).jpg"
-        // Recorded like an audio transfer: a cover the system finishes across
-        // a process death is filed by the same adoption path.
-        let key = Self.pendingKey(for: artworkUrl)
-        pendingTransfers[key] = .artwork(ownerID: ownerID, imageTag: imageTag, filename: filename, holderID: holderID)
+        // Recorded like an audio transfer, under the key its task carries as
+        // its description: a cover the system finishes across a process death
+        // is filed by the same adoption path.
+        pendingTransfers[transferKey] = .artwork(ownerID: ownerID, imageTag: imageTag, filename: filename, holderID: holderID)
         persistSoon()
 
         do {
-            let (tempFile, response) = try await downloadSession.download(from: artworkUrl)
-            pendingTransfers[key] = nil
+            let (tempFile, response) = try await downloadSession.download(from: artworkUrl, description: transferKey)
+            pendingTransfers[transferKey] = nil
             // A removal while the cover was in flight wins over the file.
             guard !Task.isCancelled else {
                 try? FileManager.default.removeItem(at: tempFile)
@@ -78,7 +78,7 @@ extension DownloadStore {
             artworkEntries[entry.key] = entry
             persistSoon()
         } catch {
-            pendingTransfers[key] = nil
+            pendingTransfers[transferKey] = nil
             // Artwork is optional; a missing cover is a placeholder, not an error.
         }
     }
@@ -168,11 +168,13 @@ extension DownloadStore {
     /// A leftover is an entry claimed by its own owner — the shape an artist's
     /// picture is saved in — whose owner is nothing that is still here: not a
     /// song on disk, not a saved playlist, not an artist the downloaded songs
-    /// still surface. That last check is the one that makes this safe: album
-    /// covers are claimed by their *tracks* rather than by themselves, a song's
-    /// own embedded art and a playlist's cover are self-claimed too but by ids
-    /// that are still live, so an artist's id with no group behind it is the
-    /// only thing left standing.
+    /// still surface, and not a download still running, whose cover or picture
+    /// arrives before the record or songs that keep it. The artist check is
+    /// the one that makes this safe: album covers are claimed by their
+    /// *tracks* rather than by themselves, a song's own embedded art and a
+    /// playlist's cover are self-claimed too but by ids that are still live,
+    /// so an artist's id with no group behind it is the only thing left
+    /// standing.
     private func reclaimOrphanedArtistPictures() {
         let artistIDs = Set(downloadedArtists().map(\.id))
         var reclaimed = false
@@ -181,7 +183,8 @@ extension DownloadStore {
                   entry.requiredBy == [owner],
                   entries[owner] == nil,
                   playlists[owner] == nil,
-                  !artistIDs.contains(owner)
+                  !artistIDs.contains(owner),
+                  !batches.contains(where: { $0.id == owner })
             else { continue }
             deleteArtworkFile(entry.filename)
             artworkEntries[key] = nil
