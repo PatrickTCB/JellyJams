@@ -48,29 +48,23 @@ extension View {
     /// path disagrees with what it is showing resolves later pushes against the
     /// wrong screen.
     ///
-    /// The `navigator` is re-injected onto each destination because a
-    /// value-based destination is hosted by the stack rather than built inside
-    /// the content, so it does not inherit the `environmentObject` placed on the
-    /// stack's root. Passing it here keeps ``SimilarItemsSection`` and
-    /// ``GenreChips`` — which push through it — from crashing when they render
-    /// on a pushed album, playlist, artist, or genre screen.
-    ///
-    /// Those two push through ``LibraryNavigator`` rather than a
-    /// `NavigationLink`: both sit inside a single `List` row on the album
-    /// screen (``TrackListDetail``), and a `List` turns any row that
-    /// contains a `NavigationLink` into one tap target — so a whole grid or flow
-    /// of them collapses into a single button that opens whichever link is last
-    /// (and, on iOS, each gets a disclosure chevron). A plain `Button` that
-    /// appends to the path gets none of that treatment.
-    func libraryNavigationDestinations(navigator: LibraryNavigator) -> some View {
+    /// The destinations reach the navigator through the environment the stack
+    /// was given. ``SimilarItemsSection`` and ``GenreChips`` push through it
+    /// rather than through a `NavigationLink`: both sit inside a single `List`
+    /// row on the album screen (``TrackListDetail``), and a `List` turns any
+    /// row that contains a `NavigationLink` into one tap target — so a whole
+    /// grid or flow of them collapses into a single button that opens
+    /// whichever link is last (and, on iOS, each gets a disclosure chevron). A
+    /// plain `Button` that appends to the path gets none of that treatment.
+    func libraryNavigationDestinations() -> some View {
         navigationDestination(for: BaseItemDto.self) {
-            ItemDetailRouter(item: $0).environmentObject(navigator)
+            ItemDetailRouter(item: $0)
         }
         .navigationDestination(for: GenreRef.self) {
-            GenreResultsView(genre: $0).environmentObject(navigator)
+            GenreResultsView(genre: $0)
         }
         .navigationDestination(for: LibrarySection.self) {
-            SectionRootView(section: $0).environmentObject(navigator)
+            SectionRootView(section: $0)
         }
         .navigationDestination(for: DownloadedGroupRef.self) { ref in
             DownloadedGroupDestination(ref: ref)
