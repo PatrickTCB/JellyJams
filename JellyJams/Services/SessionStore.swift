@@ -50,11 +50,21 @@ final class SessionStore: ObservableObject {
     var library: LibraryRepository { LibraryRepository(client: client) }
 
     // MARK: - Online status
-    /// checks to see if the configured Jellyfin server is even online
-    /// many users will only be able to access their jellyfin server when at home
-    /// on their LAN.
+
+    /// Identifies the newest reachability check. Checks overlap whenever the
+    /// network changes mid-ping, and a ping sent on the network the device
+    /// just left can time out *after* the new network's ping succeeded.
+    private var latestReachabilityCheck = UUID()
+
+    /// Pings the signed-in server. Many servers are only reachable on the
+    /// home network, so this answers "online" for the server, not the device.
+    /// Only the newest check's answer is kept.
     func checkServerReachability() async {
-        serverReachable = await client?.ping() ?? false
+        let check = UUID()
+        latestReachabilityCheck = check
+        let reachable = await client?.ping() ?? false
+        guard check == latestReachabilityCheck else { return }
+        serverReachable = reachable
     }
     
     // MARK: - Restore
