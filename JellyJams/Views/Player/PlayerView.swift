@@ -152,19 +152,16 @@ struct PlayerView: View {
             AirPlayPicker()
             #endif
             
-            // The current track's lyrics, when the server has them — the
-            // music.microphone the queue's listening neighbour gets. Only the
-            // now playing screen offers lyrics for the track it holds. The
-            // button stays visible, but greyed out, for tracks the server
-            // has no lyrics for.
-            if let currentItem = player.currentItem {
-                Button { isPresentingLyrics = true } label: {
-                    Image(systemName: "music.microphone")
-                        .foregroundStyle(currentItem.supportsLyrics ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                }
-                .buttonStyle(.plain)
-                .disabled(!currentItem.supportsLyrics)
+            // The current track's lyrics. Always in the row, so the controls
+            // don't shift as tracks change, and disabled when there are none
+            // to show: nothing playing, or a track the server has no lyrics
+            // for. Plain like the queue's button, which also raises a sheet —
+            // the tint in this row marks the modes that are on.
+            Button { isPresentingLyrics = true } label: {
+                Image(systemName: "music.microphone")
             }
+            .buttonStyle(.plain)
+            .disabled(!(player.currentItem?.supportsLyrics ?? false))
 
             Button { player.toggleShuffle() } label: {
                 Image(systemName: "shuffle")
