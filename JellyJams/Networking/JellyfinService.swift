@@ -114,11 +114,16 @@ final class JellyfinService: Sendable {
         try await apiClient.send(Paths.reportSessionEnded)
     }
 
+    /// The item with `id`, or `nil` when the server no longer has it — which
+    /// it answers with a 404, the way ``lyrics(for:)`` reports no lyrics. Any
+    /// other failure throws.
     func item(byId id: String) async throws -> BaseItemDto? {
         let userId = try requireUserId()
-        let request = Paths.getItem(itemID: id, userID: userId)
-        let result = try await apiClient.send(request).value
-        return result
+        do {
+            return try await apiClient.send(Paths.getItem(itemID: id, userID: userId)).value
+        } catch APIError.unacceptableStatusCode(404) {
+            return nil
+        }
     }
 
     // MARK: - Library
