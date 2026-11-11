@@ -46,6 +46,11 @@ struct MainShellView: View {
             .onChange(of: preferences.isMixtapesActive) { _, active in
                 if !active, selection == .mixtapes { selection = .albums }
             }
+            #if os(iOS)
+            // Asked here, once someone is signed in: Siri permission is only
+            // worth granting when there is a library for Siri to play from.
+            .task { MediaIntentHandler.requestAuthorizationIfNeeded() }
+            #endif
     }
 
     /// iOS reaches settings through a sheet rather than a scene. It is hosted
@@ -126,7 +131,7 @@ struct MainShellView: View {
             } label: {
                 downloadsLabel
             }
-            .badge(downloads.batches.isEmpty ? 0 : downloads.entries.count)
+            .badge(downloads.remainingDownloadCount)
         }
         .nowPlayingTabAccessory()
     }
@@ -156,7 +161,7 @@ struct MainShellView: View {
             } label: {
                 downloadsLabel
             }
-            .badge(downloads.batches.isEmpty ? 0 : downloads.entries.count)
+            .badge(downloads.remainingDownloadCount)
             Tab(LibrarySection.search.title, systemImage: LibrarySection.search.systemImage, value: LibrarySection.search) {
                 sectionTab(.search)
             }
