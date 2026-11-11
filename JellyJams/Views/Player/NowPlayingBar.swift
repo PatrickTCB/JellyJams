@@ -48,7 +48,7 @@ struct NowPlayingBar: View {
                                 .frame(width: 64, height: 64)
                             #else
                             ArtworkImage(url: session.library.artworkURL(for: item, size: 96), localURL: localArtworkURL)
-                                .frame(width: isInline ? 28 : 40, height: isInline ? 44 : 44)
+                                .frame(width: isInline ? 28 : 40, height: isInline ? 28 : 44)
                             #endif
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.displayName).font(.subheadline.weight(.medium)).lineLimit(1)
