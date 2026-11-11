@@ -1,4 +1,5 @@
 import Foundation
+import Get
 import JellyfinAPI
 
 /// Immutable authenticated session details.
@@ -266,12 +267,16 @@ final class JellyfinService: Sendable {
 
     // MARK: - Lyrics
 
-    /// The lyrics for one item (`GET /Audio/{itemId}/Lyrics`), when the server
-    /// has any — `nil` when the item carries no lyrics the server could find.
+    /// The lyrics for one item (`GET /Audio/{itemId}/Lyrics`), or `nil` when
+    /// the server has none for it — which it answers with a 404 rather than an
+    /// empty body. Any other failure throws.
     func lyrics(for item: BaseItemDto) async throws -> LyricDto? {
         guard let itemId = item.id else { throw JellyfinError.missingItemIdentifier }
-        let request = Paths.getLyrics(itemID: itemId)
-        return try await apiClient.send(request).value
+        do {
+            return try await apiClient.send(Paths.getLyrics(itemID: itemId)).value
+        } catch APIError.unacceptableStatusCode(404) {
+            return nil
+        }
     }
 
     func getPlaylistItems(playlistId: String?) async throws -> BaseItemDtoQueryResult {
