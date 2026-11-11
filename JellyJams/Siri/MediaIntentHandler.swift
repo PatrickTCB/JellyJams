@@ -212,6 +212,21 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
     }
 }
 
+// MARK: - Authorization
+
+extension MediaIntentHandler {
+    /// Asks for Siri permission the first time it is needed. Classic Siri
+    /// routes every request through this handler, and SiriKit won't use the
+    /// app at all until the person has allowed it — so without the prompt,
+    /// "Play Night Is Calling in Jelly Jams" quietly goes elsewhere on devices
+    /// without Apple Intelligence. A no-op once the person has answered.
+    @MainActor
+    static func requestAuthorizationIfNeeded() {
+        guard INPreferences.siriAuthorizationStatus() == .notDetermined else { return }
+        INPreferences.requestSiriAuthorization { _ in }
+    }
+}
+
 // MARK: - Conversions
 
 private extension AudioEntity {

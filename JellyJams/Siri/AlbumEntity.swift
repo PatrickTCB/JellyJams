@@ -20,9 +20,7 @@ struct AlbumEntity {
     var artistName: String { item?.subtitleAlbumArtist ?? "Unknown Artist" }
     @ComputedProperty
     var artists: [ArtistEntity] {
-        (item?.albumArtists ?? []).compactMap { pair in
-            pair.name.map(ArtistEntity.init(name:))
-        }
+        (item?.artistNavigationItems ?? []).map { ArtistEntity(item: $0, artworkURL: nil) }
     }
     @ComputedProperty
     var songs: [SongEntity] { [] }

@@ -14,8 +14,6 @@ struct ArtistEntity {
 
     // MARK: Schema properties
 
-    /// The artist's name — the item's name when backed by a server item, and
-    /// otherwise the id, which for decoration-only artists is the name.
     @ComputedProperty
     var name: String { item?.displayName ?? id }
     @ComputedProperty
@@ -26,18 +24,12 @@ struct ArtistEntity {
     // MARK: Entity properties
 
     let id: String
-    /// The server item this entity stands in for.
+    /// The server item this entity stands in for. Artists attached to song
+    /// and album entities carry a minimal one — id and name — so a Shortcut
+    /// that passes one on to "Play Artist" resolves it like any other.
     var item: BaseItemDto?
     /// Artwork for Siri's result cards.
     var artworkURL: URL?
-
-    /// A lightweight artist for decoration inside song and album entities,
-    /// where only the name is known. The name doubles as the id.
-    init(name: String) {
-        id = name
-        item = nil
-        artworkURL = nil
-    }
 
     init(item: BaseItemDto, artworkURL: URL?) {
         id = item.id ?? item.displayName

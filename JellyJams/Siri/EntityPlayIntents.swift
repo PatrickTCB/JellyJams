@@ -9,10 +9,12 @@ import Foundation
 /// parameters — ``PlayAudioIntent``'s `audioEntity` is a `@UnionValue`, so a
 /// spoken span cannot be bound to it inside a phrase. These intents pair
 /// each entity kind with qualified phrases ("Play my playlist …", "Play
-/// album …"), and ``PlaySongIntent``'s unqualified phrase covers bare
-/// requests like "Play Whiplash by Architects in Jelly Jams". Siri resolves
-/// the spoken span through each entity's string query and the intents funnel
-/// into the same pipeline as ``PlayAudioIntent`` via ``SiriPlayback``.
+/// album …"). A phrase's placeholder only matches the values each entity's
+/// `suggestedEntities()` offered when the system last asked — refreshed by
+/// `updateAppShortcutParameters()` at sign-in — not open-ended text; bare
+/// requests for anything else reach classic Siri's ``MediaIntentHandler`` or
+/// the audio schema's ``PlayAudioIntent``. All of them funnel into the same
+/// pipeline via ``SiriPlayback``.
 
 /// Plays a single song named in the request, e.g. "Play Whiplash by
 /// Architects in Jelly Jams".

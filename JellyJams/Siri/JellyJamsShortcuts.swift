@@ -22,7 +22,10 @@ import AppIntents
 ///
 /// The ``PlaySongIntent`` family has concrete `AppEntity` parameters, which
 /// lets the phrases carry a spoken placeholder ("Play my playlist Top 40 in
-/// Jelly Jams") that Siri resolves through each entity's string query.
+/// Jelly Jams"). A placeholder matches only the values the entity's
+/// `suggestedEntities()` offered when the system last fetched them, so
+/// ``AppServices`` calls `updateAppShortcutParameters()` whenever someone
+/// signs in.
 ///
 /// The application name token is spelled explicitly
 /// (`AppShortcutPhraseToken.applicationName`) because the `\.applicationName`

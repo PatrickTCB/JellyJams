@@ -27,7 +27,9 @@ struct SongEntity {
     @ComputedProperty
     var album: AlbumEntity? { nil }
     @ComputedProperty
-    var artists: [ArtistEntity] { (item?.artists ?? []).map(ArtistEntity.init(name:)) }
+    var artists: [ArtistEntity] {
+        (item?.artistNavigationItems ?? []).map { ArtistEntity(item: $0, artworkURL: nil) }
+    }
     @ComputedProperty
     var composers: [ArtistEntity] { [] }
     @ComputedProperty
