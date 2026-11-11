@@ -25,12 +25,13 @@ final class LibraryNavigator: ObservableObject {
 ///
 /// Detail navigation across the app is value-based (`NavigationLink(value:)`)
 /// and resolves through the single destinations registered here, so the whole
-/// app pushes onto this one ``LibraryNavigator/path``. That also lets those
-/// destinations hand the navigator to each screen they build — see
-/// ``View/libraryNavigationDestinations(navigator:)``, which is what keeps the
-/// `Button`-driven ``SimilarItemsSection`` and ``GenreChips`` supplied on a
-/// pushed screen. An `environmentObject` chained onto a `NavigationStack`, or
-/// onto its root, does not reach the views it pushes.
+/// app pushes onto this one ``LibraryNavigator/path``.
+///
+/// The navigator is injected on the `NavigationStack` itself, not on its
+/// root: environment set inside the stack stays with the root view, while
+/// environment set on the stack reaches every screen it pushes — which is what
+/// lets ``SimilarItemsSection``, ``GenreChips`` and the row menus push from a
+/// pushed screen too.
 struct LibraryNavigationStack<Root: View>: View {
     @ViewBuilder var root: () -> Root
     @StateObject private var navigator = LibraryNavigator()
@@ -38,11 +39,11 @@ struct LibraryNavigationStack<Root: View>: View {
     var body: some View {
         NavigationStack(path: $navigator.path) {
             root()
-                .environmentObject(navigator)
-                .libraryNavigationDestinations(navigator: navigator)
+                .libraryNavigationDestinations()
                 #if os(iOS)
                 .nowPlayingTabContentDock()
                 #endif
         }
+        .environmentObject(navigator)
     }
 }
