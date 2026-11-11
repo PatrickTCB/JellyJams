@@ -131,6 +131,12 @@ final class PlayerController: ObservableObject {
     /// lock screen heart — can flip the current track's favourite state exactly
     /// like an in-app tap does.
     private var favourites: FavouriteStore?
+    private var favouritesObservation: AnyCancellable?
+    /// The player's last observed time-control status. A change — starting,
+    /// pausing, stalling to buffer, recovering — is one of the moments the
+    /// lock screen's elapsed time is re-sent, since the system extrapolates
+    /// it from the last update.
+    private var lastTimeControlStatus: AVPlayer.TimeControlStatus = .paused
     /// Replaced whenever the queue is swapped wholesale or deliberately cut
     /// short, so an extension fetched for an older queue can never land in
     /// the new one — the same guard ``BanStore`` keeps over its ban lists.
@@ -220,7 +226,9 @@ final class PlayerController: ObservableObject {
             next: { [weak self] in self?.next() },
             previous: { [weak self] in self?.previous() },
             seek: { [weak self] time in self?.seek(to: time) },
-            like: { [weak self] in self?.toggleFavourite() }
+            like: { [weak self] in self?.toggleFavourite() },
+            shuffle: { [weak self] enabled in self?.setShuffle(enabled) },
+            repeatMode: { [weak self] mode in self?.repeatMode = mode }
         ))
     }
 
@@ -265,6 +273,16 @@ final class PlayerController: ObservableObject {
 
     func configure(favourites: FavouriteStore?) {
         self.favourites = favourites
+        // The lock screen heart follows a favourite changed anywhere in the
+        // app while the track plays. The check hops through a `Task` because
+        // `objectWillChange` fires before the change lands.
+        favouritesObservation = favourites?.objectWillChange
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.currentItem != nil else { return }
+                    NowPlayingCenter.shared.updateFavourite(self.isCurrentItemFavourite)
+                }
+            }
     }
 
     // MARK: - State Persistence
@@ -324,18 +342,27 @@ final class PlayerController: ObservableObject {
     }
 
     private func rehydrateQueue(from state: PlaybackState, client: JellyfinService) async {
-        var resolvedItems: [BaseItemDto] = []
-        for entry in state.queue {
-            guard !entry.itemId.isEmpty else { continue }
-            do {
-                if let item = try await client.item(byId: entry.itemId) {
-                    resolvedItems.append(item)
-                }
-            } catch {
-                playbackLogger.debug("Could not restore item \(entry.itemId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        let savedIDs = state.queue.map(\.itemId)
+        var seen = Set<String>()
+        let uniqueIDs = savedIDs.filter { !$0.isEmpty && seen.insert($0).inserted }
+        var itemsByID: [String: BaseItemDto] = [:]
+        do {
+            // One batched lookup rather than a request per track. An id the
+            // server no longer knows is simply absent from the answer.
+            for item in try await client.tracks(byIds: uniqueIDs) {
+                if let id = item.id { itemsByID[id] = item }
+            }
+        } catch {
+            // No server: whatever was downloaded can still be restored, from
+            // the snapshot saved with its file.
+            playbackLogger.debug("Could not fetch the saved queue: \(error.localizedDescription, privacy: .public)")
+            for id in uniqueIDs {
+                if let track = downloads?.downloadedTrack(id: id) { itemsByID[id] = track }
             }
         }
-        guard !resolvedItems.isEmpty else {
+
+        let restored = Self.restoredQueue(savedIDs, currentIndex: state.currentIndex, resolving: itemsByID)
+        guard !restored.items.isEmpty else {
             UserDefaults.standard.removeObject(forKey: playbackStateKey)
             return
         }
@@ -348,7 +375,7 @@ final class PlayerController: ObservableObject {
             return
         }
 
-        let entries = resolvedItems.map(QueueEntry.init)
+        let entries = restored.items.map(QueueEntry.init)
         // A restored queue is a fresh queue: any extension in flight when
         // the app went away belongs to a listen that no longer exists.
         queueGeneration = UUID()
@@ -357,16 +384,49 @@ final class PlayerController: ObservableObject {
         repeatMode = state.repeatMode
         playSessionId = state.playSessionId
 
-        if let index = state.currentIndex, queue.indices.contains(index) {
+        if let index = restored.currentIndex {
+            // The saved position belongs to the saved track; a stand-in
+            // starts from the top.
+            let resumeTime = restored.resumesSavedTrack ? state.currentTime : 0
             currentIndex = index
-            clock.currentTime = state.currentTime
+            clock.currentTime = resumeTime
             startPlayback(at: index, reportingPreviousItem: false, resuming: false)
-            if state.currentTime > 0 {
-                seek(to: state.currentTime)
+            if resumeTime > 0 {
+                seek(to: resumeTime)
             }
         }
 
         UserDefaults.standard.removeObject(forKey: playbackStateKey)
+    }
+
+    /// What a saved queue restores to: the saved tracks the lookup could
+    /// resolve, in their saved order, and where in that list to resume.
+    ///
+    /// The saved index points into the *saved* list, so it is mapped onto the
+    /// restored one — applied as-is after earlier tracks dropped out, it
+    /// resumed a different song. When the saved track itself is gone, the
+    /// next surviving track stands in (the last one, if none follow), and
+    /// `resumesSavedTrack` is false so it starts from the top.
+    nonisolated static func restoredQueue(
+        _ savedIDs: [String],
+        currentIndex: Int?,
+        resolving itemsByID: [String: BaseItemDto]
+    ) -> (items: [BaseItemDto], currentIndex: Int?, resumesSavedTrack: Bool) {
+        var items: [BaseItemDto] = []
+        var restoredIndex: Int?
+        var resumesSavedTrack = false
+        for (position, id) in savedIDs.enumerated() {
+            guard let item = itemsByID[id] else { continue }
+            if let currentIndex, restoredIndex == nil, position >= currentIndex {
+                restoredIndex = items.count
+                resumesSavedTrack = position == currentIndex
+            }
+            items.append(item)
+        }
+        if currentIndex != nil, restoredIndex == nil, !items.isEmpty {
+            restoredIndex = items.count - 1
+        }
+        return (items, restoredIndex, resumesSavedTrack)
     }
 
     /// Tears down the observers that keep the `AVPlayer` (and this controller)
@@ -436,6 +496,8 @@ final class PlayerController: ObservableObject {
                 originalQueue?.append(contentsOf: entries)
             }
         }
+        // A track now follows the current one, so the system's Next comes alive.
+        updateNowPlaying()
         maybeExtendQueue()
     }
 
@@ -449,6 +511,7 @@ final class PlayerController: ObservableObject {
             if isShuffled {
                 originalQueue?.append(contentsOf: entries)
             }
+            updateNowPlaying()
         }
     }
 
@@ -486,7 +549,7 @@ final class PlayerController: ObservableObject {
                 if let mode = resolved.repeatMode { repeatMode = mode }
                 play(resolved.tracks, shuffled: resolved.shuffled)
             } catch {
-                playbackLogger.error("Could not start default playback from the play command: \\(error.localizedDescription, privacy: .public)")
+                playbackLogger.error("Could not start default playback from the play command: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -661,6 +724,7 @@ final class PlayerController: ObservableObject {
             let target = min(oldCurrentIndex - removedBefore, queue.count - 1)
             startPlayback(at: target, reportingPreviousItem: false, resuming: isPlaying)
         }
+        updateNowPlaying()
         // Removing upcoming tracks can leave the listener short again —
         // Infinite Queue tops back up if it is on.
         maybeExtendQueue()
@@ -672,6 +736,7 @@ final class PlayerController: ObservableObject {
         if let currentEntryID {
             currentIndex = queue.firstIndex(where: { $0.id == currentEntryID })
         }
+        updateNowPlaying()
         // A move can pull tracks out from ahead of the listener — the same
         // shortage a removal causes.
         maybeExtendQueue()
@@ -736,21 +801,29 @@ final class PlayerController: ObservableObject {
         isExtendingQueue = true
         playbackLogger.debug("Infinite Queue extending (\(plan == .general ? "alchemy" : "next album"), \(existingIDs.count) sources)")
         Task {
-            defer { isExtendingQueue = false }
+            let tracks: [BaseItemDto]?
             do {
-                let tracks = try await extender.tracks(for: plan, existingQueueIDs: existingIDs, client: client)
-                guard generation == queueGeneration else {
-                    playbackLogger.debug("Discarded an Infinite Queue extension for a queue that has gone")
-                    return
-                }
-                let queued = Set(queue.compactMap(\.item.id))
-                let fresh = tracks.filter { !queued.contains($0.id ?? "") }
-                guard !fresh.isEmpty else { return }
-                playbackLogger.info("Infinite Queue appended \(fresh.count) tracks")
-                addToQueue(fresh)
+                tracks = try await extender.tracks(for: plan, existingQueueIDs: existingIDs, client: client)
             } catch {
                 playbackLogger.error("Infinite Queue could not extend the queue: \(error.localizedDescription, privacy: .public)")
+                tracks = nil
             }
+            isExtendingQueue = false
+            guard generation == queueGeneration else {
+                // The queue this was fetched for is gone, and the one that
+                // replaced it was turned away while this request was in
+                // flight — so it gets its own check now. Without it, a short
+                // new queue was never extended at all.
+                playbackLogger.debug("Discarded an Infinite Queue extension for a queue that has gone")
+                maybeExtendQueue()
+                return
+            }
+            guard let tracks else { return }
+            let queued = Set(queue.compactMap(\.item.id))
+            let fresh = tracks.filter { !queued.contains($0.id ?? "") }
+            guard !fresh.isEmpty else { return }
+            playbackLogger.info("Infinite Queue appended \(fresh.count) tracks")
+            addToQueue(fresh)
         }
     }
 
@@ -840,9 +913,16 @@ final class PlayerController: ObservableObject {
     private func handleTrackEnd() {
         if repeatMode == .repeatOne {
             playbackLogger.debug("Track ended with Repeat One; replaying from the start")
+            // Each pass is a play of its own: the one that just ended is
+            // reported stopped and the replay starts a fresh play session.
+            // Without the stop, the server saw one play with a start for
+            // every loop and never counted any of them.
+            reportStopped()
+            playSessionId = UUID().uuidString
             seek(to: 0)
             startPlayer()
             isPlaying = true
+            updateNowPlaying()
             reportStart()
         } else {
             playbackLogger.debug("Track ended; advancing the queue")
@@ -856,9 +936,14 @@ final class PlayerController: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.clock.currentTime = time.seconds.isFinite ? time.seconds : 0
+                // The lock screen works out the time between updates itself,
+                // so it is only told again when something it can't
+                // extrapolate changes: the length, or the transport state.
+                var nowPlayingChanged = false
                 if let itemDuration = self.player.currentItem?.duration.seconds,
-                   itemDuration.isFinite, itemDuration > 0 {
+                   itemDuration.isFinite, itemDuration > 0, itemDuration != self.clock.duration {
                     self.clock.duration = itemDuration
+                    nowPlayingChanged = true
                 }
                 // `.waitingToPlayAtSpecifiedRate` means buffering or stalling,
                 // which is still "playing" to the user and to the transport.
@@ -868,11 +953,20 @@ final class PlayerController: ObservableObject {
                 // on every assignment, and this runs twice a second — a blind
                 // write here would re-render every view observing the player,
                 // which is the whole reason the clock lives in its own object.
-                let playing = self.player.timeControlStatus != .paused
+                let status = self.player.timeControlStatus
+                let playing = status != .paused
                 if self.isPlaying != playing {
                     self.isPlaying = playing
                 }
-                self.updateNowPlaying()
+                if status != self.lastTimeControlStatus {
+                    // Includes a stall and its recovery, which leave
+                    // `isPlaying` alone but drift the extrapolated time.
+                    self.lastTimeControlStatus = status
+                    nowPlayingChanged = true
+                }
+                if nowPlayingChanged {
+                    self.updateNowPlaying()
+                }
                 self.reportProgress(force: false)
             }
         }
@@ -1203,7 +1297,9 @@ final class PlayerController: ObservableObject {
             localArtworkURL: currentItem.flatMap { downloads?.localArtworkURL(for: $0) },
             canGoNext: canGoNext,
             canGoPrevious: canGoPrevious,
-            isFavourite: isCurrentItemFavourite
+            isFavourite: isCurrentItemFavourite,
+            isShuffled: isShuffled,
+            repeatMode: repeatMode
         )
     }
 
