@@ -628,6 +628,32 @@ final class JellyfinServiceTests: XCTestCase {
         } catch {}
     }
 
+    // MARK: - Item lookup
+
+    /// The bug this guards: a deleted item answered 404 and the lookup threw,
+    /// so every "missing item" fallback — default playback falling back to the
+    /// favourites shuffle, Siri's "no longer available" — was unreachable.
+    func testItemLookupIsNilWhenTheServerNoLongerHasTheItem() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 404), Data())
+        }
+
+        let item = try await makeClient().item(byId: "deleted-id")
+
+        XCTAssertNil(item)
+    }
+
+    func testItemLookupFailuresOtherThanNotFoundStillThrow() async {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 500), Data())
+        }
+
+        do {
+            _ = try await makeClient().item(byId: "song-id")
+            XCTFail("Expected a server error to be reported")
+        } catch {}
+    }
+
     // MARK: - Playlist reordering
 
     func testMoveItemInPlaylistPostsASingleMoveRequest() async throws {

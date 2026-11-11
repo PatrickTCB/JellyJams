@@ -815,6 +815,82 @@ final class PlayerQueueTests: XCTestCase {
         XCTAssertFalse(player.isPlaying)
         XCTAssertEqual(recorder.count(forPath: "/extend-queue"), 1, "The request was made; its answer was dropped")
     }
+
+    /// The bug this guards: a new queue started while an extension was in
+    /// flight was turned away by the one-request-at-a-time check, and when the
+    /// stale answer was dropped nothing checked again — so a short new queue
+    /// never grew, and playback simply stopped at its end.
+    func testANewQueueStartedMidExtensionStillGetsExtended() async throws {
+        let recorder = RequestRecorder()
+        stubExtension(newTrackIDs: ["x1", "x2"], recorder: recorder, backendDelay: 0.3)
+        let player = makeInfinitePlayer(
+            preferences: makePreferences(infiniteQueueEnabled: true),
+            extender: makeExtender()
+        )
+
+        player.play((1 ... 4).map { TestFixtures.item(id: "s\($0)") }, startAt: 2)
+        try await Task.sleep(for: .milliseconds(50))
+        player.play([TestFixtures.item(id: "n1")])
+
+        try await waitForQueueCount(player, 3)
+        XCTAssertEqual(ids(player), ["n1", "x1", "x2"])
+        XCTAssertEqual(recorder.count(forPath: "/extend-queue"), 2, "The new queue asked for its own extension")
+    }
+
+    // MARK: - Restoring a saved queue
+
+    private func lookup(_ ids: [String]) -> [String: BaseItemDto] {
+        Dictionary(uniqueKeysWithValues: ids.map { ($0, TestFixtures.item(id: $0)) })
+    }
+
+    /// The bug this guards: tracks that no longer resolved dropped out of the
+    /// restored queue, and the saved index — still counting them — resumed a
+    /// different song at the saved song's position.
+    func testARestoredQueueResumesTheSavedTrackWhenEarlierTracksAreGone() {
+        let restored = PlayerController.restoredQueue(
+            ["a", "b", "c", "d"],
+            currentIndex: 2,
+            resolving: lookup(["a", "c", "d"])
+        )
+
+        XCTAssertEqual(restored.items.compactMap(\.id), ["a", "c", "d"])
+        XCTAssertEqual(restored.currentIndex, 1)
+        XCTAssertTrue(restored.resumesSavedTrack)
+    }
+
+    func testWhenTheSavedTrackIsGoneTheNextOneStandsInFromTheTop() {
+        let restored = PlayerController.restoredQueue(
+            ["a", "b", "c", "d"],
+            currentIndex: 2,
+            resolving: lookup(["a", "b", "d"])
+        )
+
+        XCTAssertEqual(restored.currentIndex.map { restored.items[$0].id }, "d")
+        XCTAssertFalse(restored.resumesSavedTrack, "The saved position belongs to the missing track")
+    }
+
+    func testWhenNothingFollowsAMissingSavedTrackTheLastOneStandsIn() {
+        let restored = PlayerController.restoredQueue(
+            ["a", "b", "c"],
+            currentIndex: 2,
+            resolving: lookup(["a", "b"])
+        )
+
+        XCTAssertEqual(restored.currentIndex.map { restored.items[$0].id }, "b")
+        XCTAssertFalse(restored.resumesSavedTrack)
+    }
+
+    func testARestoredQueueKeepsASongQueuedTwice() {
+        let restored = PlayerController.restoredQueue(
+            ["a", "b", "a"],
+            currentIndex: 2,
+            resolving: lookup(["a", "b"])
+        )
+
+        XCTAssertEqual(restored.items.compactMap(\.id), ["a", "b", "a"])
+        XCTAssertEqual(restored.currentIndex, 2)
+        XCTAssertTrue(restored.resumesSavedTrack)
+    }
 }
 
 /// Mapping of `AVFoundation` / HTTP failures onto the message shown in the

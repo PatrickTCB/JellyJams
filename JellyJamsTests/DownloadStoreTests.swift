@@ -1577,6 +1577,202 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(store.downloadedAlbums().first { $0.id == "album" }?.downloadedSongs, 2)
     }
 
+    // MARK: - Side-by-side downloads
+
+    /// Wraps the installed handler so it notes when each request starts.
+    /// Nonisolated, like the handlers it wraps: the loader calls it off the
+    /// main thread.
+    nonisolated private static func recordingStarts(
+        in log: RequestStartLog,
+        of handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
+        { request in
+            log.record(request)
+            return try handler(request)
+        }
+    }
+
+    /// A batch hands its songs to the session together rather than one after
+    /// another. On iOS a suspended app can't start the next transfer, so a
+    /// batch fed one song at a time stalled as soon as the app left the
+    /// screen.
+    func testABatchDownloadsItsSongsSideBySide() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+                trackInAlbum("t3", albumID: "album", album: "Album"),
+            ],
+        ])
+        let log = RequestStartLog()
+        URLProtocolStub.handler = Self.recordingStarts(in: log, of: try XCTUnwrap(URLProtocolStub.handler))
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/stream") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "album", artist: "Artist"))
+        try await waitForBatch(store, id: "album")
+
+        let starts = log.starts { $0.hasSuffix("/stream") }
+        XCTAssertEqual(starts.count, 3)
+        let spread = (starts.max() ?? .distantPast).timeIntervalSince(starts.min() ?? .distantPast)
+        XCTAssertLessThan(spread, 0.25, "Every transfer started before the first one finished")
+        XCTAssertEqual(store.entries.count, 3)
+    }
+
+    /// Songs that finish out of order still list in the order the server sent
+    /// them: a batch reserves its songs' download orders before any transfer
+    /// starts.
+    func testSongsThatFinishOutOfOrderKeepTheServersOrder() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.contains("/t1/") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        let album = albumStub(id: "album", artist: "Artist")
+
+        store.download(album)
+        try await waitForBatch(store, id: "album")
+
+        XCTAssertEqual(store.tracks(for: album).map(\.id), ["t1", "t2"])
+    }
+
+    /// The bug this guards: an album and a playlist sharing a song, started
+    /// together, both fetched it — and whichever landed second deleted the
+    /// first one's file and dropped its reference. The second now waits for
+    /// the first's transfer and only adds its reference.
+    func testOverlappingDownloadsStartedTogetherFetchASharedSongOnce() async throws {
+        stubCollections([
+            "album": [trackInAlbum("t1", albumID: "album", album: "Album"), TrackStub(id: "t2")],
+            "playlist": [trackInAlbum("t1", albumID: "album", album: "Album")],
+        ])
+        let log = RequestStartLog()
+        URLProtocolStub.handler = Self.recordingStarts(in: log, of: try XCTUnwrap(URLProtocolStub.handler))
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/t1/stream") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "album", artist: "Artist"))
+        store.download(BaseItemDto(id: "playlist", name: "playlist", type: .playlist))
+        try await waitForBatch(store, id: "album")
+        try await waitForBatch(store, id: "playlist")
+
+        XCTAssertEqual(store.entries["t1"]?.sources, ["album", "playlist"])
+        XCTAssertEqual(store.entries["t2"]?.sources, ["album"])
+        XCTAssertNotNil(store.localURL(forItemId: "t1"))
+        XCTAssertEqual(log.starts { $0.hasSuffix("/t1/stream") }.count, 1, "The shared song was fetched once")
+        XCTAssertFalse(store.batches.contains { $0.failed > 0 })
+        XCTAssertNil(store.errorMessage)
+    }
+
+    /// The bug this guards: removing a download and starting it again right
+    /// away left the cancelled run unwinding underneath the new one, and when
+    /// it finished it removed the new run's progress row and task — so the
+    /// download looked done, and could be started a third time, mid-transfer.
+    func testACancelledRunCannotFinishTheRunThatReplacedIt() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/t2/stream") == true ? 0.5 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+        let album = albumStub(id: "album", artist: "Artist")
+
+        store.download(album)
+        for _ in 0 ..< 200 {
+            if store.entries["t1"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        store.remove(album)
+        store.download(album)
+
+        // Long enough for the cancelled run to unwind, and well short of the
+        // new run's slow song landing.
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(store.isBusy(album), "The new run is still downloading")
+
+        try await waitForBatch(store, id: "album")
+        XCTAssertNotNil(store.entries["t1"])
+        XCTAssertNotNil(store.entries["t2"])
+        XCTAssertNil(store.errorMessage)
+    }
+
+    /// The Downloads tab's badge counts what is still to come, not every song
+    /// already on disk.
+    func testTheRemainingCountIsTheSongsStillToCome() async throws {
+        stubCollections([
+            "album": [
+                trackInAlbum("t1", albumID: "album", album: "Album"),
+                trackInAlbum("t2", albumID: "album", album: "Album"),
+            ],
+        ])
+        URLProtocolStub.responseDelay = { request in
+            request.url?.path.hasSuffix("/t2/stream") == true ? 0.3 : 0
+        }
+        let store = try makeStore()
+        store.configure(client: TestFixtures.stubbedClient())
+
+        store.download(albumStub(id: "album", artist: "Artist"))
+        for _ in 0 ..< 200 {
+            if store.entries["t1"] != nil { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+
+        XCTAssertEqual(store.remainingDownloadCount, 1, "Only the song still in flight")
+        try await waitForBatch(store, id: "album")
+        XCTAssertEqual(store.remainingDownloadCount, 0)
+    }
+
+    /// Downloads can be fetched again whenever they're wanted, so they stay
+    /// out of device backups, where gigabytes of music would eat the user's
+    /// quota.
+    func testTheDownloadsFolderIsExcludedFromBackups() throws {
+        let directory = newTestDirectory()
+        _ = DownloadStore(directory: directory, session: try stubbedSession())
+
+        let values = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
+    }
+
+    /// The frequent saves run off the main thread, so one can finish after a
+    /// newer save: the writer drops a snapshot older than the one it already
+    /// wrote rather than putting stale state back on disk.
+    func testAStaleManifestSnapshotCannotOverwriteANewerOne() throws {
+        let directory = newTestDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appending(path: "manifest.json")
+        let newer = DownloadStore.Manifest(
+            tracks: [:],
+            playlists: ["p": DownloadStore.PlaylistRecord(id: "p", title: "Newer", trackIDs: [])],
+            artwork: [:],
+            pendingTransfers: [:],
+            activeBatches: [:]
+        )
+        let older = DownloadStore.Manifest(tracks: [:], playlists: [:], artwork: [:], pendingTransfers: [:], activeBatches: [:])
+        let writer = ManifestWriter()
+
+        writer.write(newer, revision: 2, to: url)
+        writer.write(older, revision: 1, to: url)
+
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("Newer"), "The newer snapshot stays on disk")
+    }
+
     // MARK: - Download progress
 
     /// The bar's counts: present from the moment a download starts, and gone
@@ -2060,6 +2256,26 @@ final class DownloadStoreTests: XCTestCase {
             "A transfer finished after a death wakes the app to adopt it"
         )
         XCTAssertFalse(session.configuration.isDiscretionary, "Downloads proceed right away")
+        XCTAssertTrue(session.isBackground, "It is handed every song of a batch at once")
     }
     #endif
+}
+
+/// When each request started, by path — recorded off the main thread, where
+/// the URL loading system calls the stub's handler.
+private final class RequestStartLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [(path: String, at: Date)] = []
+
+    func record(_ request: URLRequest) {
+        lock.lock()
+        entries.append((request.url?.path ?? "", Date()))
+        lock.unlock()
+    }
+
+    func starts(where matches: (String) -> Bool) -> [Date] {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.filter { matches($0.path) }.map(\.at)
+    }
 }

@@ -131,4 +131,27 @@ final class DefaultPlaybackResolverTests: XCTestCase {
         XCTAssertFalse(resolved.shuffled, "An emptied-out setting should fall back exactly like a missing one")
         XCTAssertNil(resolved.repeatMode)
     }
+
+    /// The server answers a deleted item with a 404. That must read as "the
+    /// item has vanished" and fall back like a missing setting — not fail the
+    /// whole play request, which left the play button doing nothing.
+    func testResolveFallsBackWhenTheSavedItemWasDeletedFromTheServer() async throws {
+        URLProtocolStub.handler = { request in
+            if request.url?.path == "/jellyfin/Items/deleted-id" {
+                return (try emptyResponse(for: request, statusCode: 404), Data())
+            }
+            let isFavourites = request.url?.absoluteString.contains("IsFavorite") == true
+            let payload = isFavourites ? itemsPayload([(id: "fallback-fav", type: "Audio")]) : emptyItemsPayload
+            return (try emptyResponse(for: request, statusCode: 200), payload)
+        }
+
+        let resolved = try await DefaultPlaybackResolver.resolve(
+            setting: setting(kind: .album, itemId: "deleted-id", shuffle: true, repeatMode: .repeatAll),
+            client: TestFixtures.stubbedClient()
+        )
+
+        XCTAssertEqual(resolved.tracks.compactMap(\.id), ["fallback-fav"])
+        XCTAssertFalse(resolved.shuffled)
+        XCTAssertNil(resolved.repeatMode)
+    }
 }

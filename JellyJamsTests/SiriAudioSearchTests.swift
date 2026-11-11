@@ -156,4 +156,41 @@ final class SiriAudioSearchTests: XCTestCase {
         XCTAssertEqual(summarize(results), ["song:title-only-match"])
     }
 }
+
+/// The artists a song or album entity carries are entities Shortcuts can pass
+/// on — to "Play Artist", say — so they must name real library artists.
+final class SiriEntityArtistTests: XCTestCase {
+    /// The bug this guards: these artists were built from names alone, with
+    /// the name doubling as the id, so passing one on resolved nothing.
+    func testASongsArtistsCarryTheirServerIds() {
+        let song = SongEntity(
+            item: BaseItemDto(
+                artistItems: [NameIDPair(id: "artist-1", name: "Architects")],
+                artists: ["Architects"],
+                id: "song-1",
+                name: "Whiplash",
+                type: .audio
+            ),
+            artworkURL: nil
+        )
+
+        XCTAssertEqual(song.artists.map(\.id), ["artist-1"])
+        XCTAssertEqual(song.artists.map(\.name), ["Architects"])
+    }
+
+    func testAnAlbumsArtistsCarryTheirServerIds() {
+        let album = AlbumEntity(
+            item: BaseItemDto(
+                albumArtist: "Architects",
+                albumArtists: [NameIDPair(id: "artist-1", name: "Architects")],
+                id: "album-1",
+                name: "Lost Forever // Lost Together",
+                type: .musicAlbum
+            ),
+            artworkURL: nil
+        )
+
+        XCTAssertEqual(album.artists.map(\.id), ["artist-1"])
+    }
+}
 #endif

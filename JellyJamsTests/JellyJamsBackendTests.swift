@@ -176,10 +176,11 @@ final class JellyJamsBackendTests: XCTestCase {
 
     /// `DELETE /delete-me` rides with the same four credentials the
     /// registration carries — the backend checks them against the Jellyfin
-    /// server before deleting anything — and answers the registration's own
-    /// shape with `Saved: false`: the account is off the books. A drift here
-    /// is a 422 nobody sees until Sign Out quietly stops working.
-    func testSignOutDeletesWithTheCredentialsAsQueryParameters() async throws {
+    /// server before deleting anything — in the same form body, so the token
+    /// never lands in a URL. It answers the registration's own shape with
+    /// `Saved: false`: the account is off the books. A drift here is a 422
+    /// nobody sees until Sign Out quietly stops working.
+    func testSignOutDeletesWithTheCredentialsAsAFormBody() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
@@ -197,10 +198,12 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "DELETE")
         XCTAssertEqual(request.path, "/delete-me")
-        XCTAssertEqual(request.value(for: "userName"), "pat")
-        XCTAssertEqual(request.value(for: "userID"), "user-id")
-        XCTAssertEqual(request.value(for: "userToken"), "access-token")
-        XCTAssertEqual(request.value(for: "jellyfinHost"), "http://192.168.0.10:8096")
+        XCTAssertNil(request.url?.query, "The credentials must not ride the URL")
+        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
+        XCTAssertEqual(request.formValue(for: "userName"), "pat")
+        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.formValue(for: "userToken"), "access-token")
+        XCTAssertEqual(request.formValue(for: "jellyfinHost"), "http://192.168.0.10:8096")
     }
 
     /// Credentials the backend cannot validate answer 401 with its own words,
