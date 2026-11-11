@@ -35,8 +35,13 @@ struct JellyJamsBackendSettingsView: View {
     /// Owns the sheet's push stack so the bans screen can open banned
     /// artists, albums and the albums behind banned songs — the same
     /// value-based routing the library columns run, hosted here (see
-    /// ``libraryNavigationDestinations(navigator:)``).
+    /// ``libraryNavigationDestinations()``).
     @StateObject private var navigator = LibraryNavigator()
+    /// The address being typed, while it differs from the saved one; `nil`
+    /// shows the saved address. Edits stay here until Save registers them:
+    /// the saved address is the one bans and Infinite Queue talk to, so it
+    /// must never be a half-typed host.
+    @State private var addressDraft: String?
     @State private var saveStatus: SaveStatus?
     /// Whether the Sign Out confirmation is up. The button itself only asks;
     /// the alert's destructive action is what runs ``signOut()`` — leaving
@@ -93,12 +98,12 @@ struct JellyJamsBackendSettingsView: View {
                     Text("The app forgets this backend — its address, your registration, limits, and Server Playlist membership. The account on the backend is left standing, with everything it holds. Your Jellyfin sign-in is untouched either way.")
                 }
             }
-            .environmentObject(navigator)
-            .libraryNavigationDestinations(navigator: navigator)
+            .libraryNavigationDestinations()
             .navigationDestination(for: BansScreen.self) { _ in
-                BannedItemsView().environmentObject(navigator)
+                BannedItemsView()
             }
         }
+        .environmentObject(navigator)
         .frame(minWidth: 380, minHeight: 420)
         .task { await refresh() }
     }
@@ -109,7 +114,7 @@ struct JellyJamsBackendSettingsView: View {
         Section {
             TextField(
                 "Server address",
-                text: $preferences.jellyJamsBackendAddress,
+                text: addressField,
                 prompt: Text("https://jellyjams.example.net")
             )
             #if os(iOS)
@@ -151,8 +156,18 @@ struct JellyJamsBackendSettingsView: View {
         }
     }
 
+    /// What the address field shows: the draft while there is one, the saved
+    /// address otherwise.
+    private var typedAddress: String {
+        addressDraft ?? preferences.jellyJamsBackendAddress
+    }
+
+    private var addressField: Binding<String> {
+        Binding(get: { typedAddress }, set: { addressDraft = $0 })
+    }
+
     private var canSave: Bool {
-        let address = preferences.jellyJamsBackendAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = typedAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         return session.isSignedIn && !address.isEmpty && !isBusy
     }
 
@@ -165,7 +180,7 @@ struct JellyJamsBackendSettingsView: View {
     /// that path says so in its own words when the more turns out not to
     /// be there.
     private var canSignOut: Bool {
-        let address = preferences.jellyJamsBackendAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = typedAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         return !isBusy && (preferences.isMixtapesActive || !address.isEmpty)
     }
 
@@ -213,17 +228,20 @@ struct JellyJamsBackendSettingsView: View {
         return nil
     }
 
-    /// The whole save: normalise the address, register with it, and record
-    /// what the backend says. On failure the typed address stays put — the
-    /// user should be able to fix a typo rather than retype a whole host.
-    /// On success the sheet refreshes: a save that worked is proof the
-    /// backend answers, and the fresh registration may have just unlocked
-    /// the features below it.
+    /// The whole save: normalise the typed address, register with it, and
+    /// record what the backend says — which is the moment the address
+    /// becomes the saved one. On failure the typed address stays put — the
+    /// user should be able to fix a typo rather than retype a whole host —
+    /// and the saved one keeps serving bans and Infinite Queue. On success
+    /// the sheet refreshes: a save that worked is proof the backend answers,
+    /// and the fresh registration may have just unlocked the features below
+    /// it.
     private func save() {
         saveStatus = .saving
+        let address = typedAddress
         Task {
             do {
-                let baseURL = try JellyJamsBackend.normalizeAddress(preferences.jellyJamsBackendAddress)
+                let baseURL = try JellyJamsBackend.normalizeAddress(address)
                 let backend = JellyJamsBackend(baseURL: baseURL, deviceInfo: session.deviceInfo)
                 let registration = try await backend.register(try currentJellyfinAccount())
                 preferences.recordRegistration(
@@ -231,6 +249,8 @@ struct JellyJamsBackendSettingsView: View {
                     suffix: registration.playlistSuffix,
                     playlist: registration.serverPlaylist
                 )
+                // The field now shows the saved, normalised address.
+                addressDraft = nil
                 saveStatus = .registered(suffix: registration.playlistSuffix)
                 await refresh()
             } catch {
@@ -254,6 +274,7 @@ struct JellyJamsBackendSettingsView: View {
     private func signOut() {
         guard alsoDeletesAccount else {
             preferences.forgetBackend()
+            addressDraft = nil
             saveStatus = .signedOut
             Task { await refresh() }
             return
@@ -265,6 +286,7 @@ struct JellyJamsBackendSettingsView: View {
                 let backend = JellyJamsBackend(baseURL: baseURL, deviceInfo: session.deviceInfo)
                 _ = try await backend.deleteAccount(try currentJellyfinAccount())
                 preferences.forgetBackend()
+                addressDraft = nil
                 saveStatus = .accountDeleted
                 await refresh()
             } catch {
