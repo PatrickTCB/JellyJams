@@ -245,10 +245,10 @@ struct DownloadsView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
-                    .disabled(session.client == nil || downloads.isSyncingArtistArtwork)
-                    .help(session.client == nil
-                        ? "Sign in to refresh downloaded artist artwork"
-                        : "Refresh downloaded artist artwork")
+                    .disabled(!session.serverReachable || downloads.isSyncingArtistArtwork)
+                    .help(session.serverReachable
+                        ? "Refresh downloaded artist artwork"
+                        : "Connect to your server to refresh downloaded artist artwork")
                 }
                 ToolbarItem(placement: .automatic) {
                     SortMenu(sortBy: $artistSort, sortOrder: $artistSortOrder, options: artistSortOptions)
@@ -544,8 +544,9 @@ struct DownloadedGroupCell: View {
 /// every one is answered from the manifest: Play and Shuffle start the group's
 /// songs on disk with playback resolving each to its saved file, Play Next
 /// and Add to Queue enqueue them the same way. An album that isn't complete
-/// also gets a fill-in action: the one deliberate, signed-in exception,
-/// mirroring the offline playlist detail's refresh button. And removing
+/// also gets a fill-in action while the server is reachable: the one
+/// deliberate, online exception, mirroring the offline playlist detail's
+/// refresh button. And removing
 /// deletes the group's songs from disk — whatever else required them keeps
 /// what it still has, a playlist keeping its membership and warning it is
 /// incomplete until refreshed — so the action is offered on every group,
@@ -565,7 +566,7 @@ private struct DownloadedGroupContextMenu: ViewModifier {
             Button { player.playNext(tracks) } label: { Label("Play Next", systemImage: "text.insert") }
             Button { player.addToQueue(tracks) } label: { Label("Add to Queue", systemImage: "text.append") }
 
-            if group.kind == .album, !group.isFullyDownloaded, session.client != nil {
+            if group.kind == .album, !group.isFullyDownloaded, session.serverReachable {
                 Divider()
                 // Songs already on disk just gain the album's reference,
                 // so downloading the album fetches exactly what is missing.
