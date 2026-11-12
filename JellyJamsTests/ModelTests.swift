@@ -117,7 +117,8 @@ final class ItemPresentationTests: XCTestCase {
     }
 
     /// The server flags the items it has lyrics for; the now playing screen's
-    /// lyrics button is enabled only for those.
+    /// lyrics button and a song's "View Lyrics" menu item are enabled only
+    /// for those.
     func testSupportsLyricsReadsTheServerFlag() {
         XCTAssertTrue(BaseItemDto(hasLyrics: true, id: "t").supportsLyrics)
         XCTAssertFalse(BaseItemDto(hasLyrics: false, id: "t").supportsLyrics)

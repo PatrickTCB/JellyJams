@@ -51,6 +51,7 @@ struct TrackRow: View {
 
     @State private var isPresentingNewPlaylist = false
     @State private var newPlaylistName = ""
+    @State private var isPresentingLyrics = false
     
     /// Downloaded artwork comes from disk and is never re-requested; see
     /// ``ArtworkImage`` and ``DownloadStore/localArtworkURL(for:)``.
@@ -82,6 +83,7 @@ struct TrackRow: View {
             } message: {
                 Text(newPlaylistMessage)
             }
+            .sheet(isPresented: $isPresentingLyrics) { LyricsView(track: track) }
             #if os(iOS)
             .swipeActions(edge: .leading) {
                 Button {
@@ -255,26 +257,27 @@ struct TrackRow: View {
             }
         }
 
-        // The artist and album pages load from the server, so browsing
-        // downloads doesn't offer them — the rule Instant Mix follows.
-        // Navigation always means the row's own album and artist, whatever
-        // the selection.
+        // The artist and album pages load from the server, as do the
+        // lyrics, so browsing downloads doesn't offer them — the rule
+        // Instant Mix follows. They always mean the row's own song, whatever
+        // the selection. Lyrics stay in the menu for a song the server has
+        // none for, disabled, like the now playing screen's lyrics button.
         if !offlineBrowsing {
-            let artists = track.artistNavigationItems
-            let album = track.albumNavigationItem
-            if !artists.isEmpty || album != nil {
-                Divider()
-                ForEach(artists) { artist in
-                    Button { navigator.open(artist) } label: {
-                        Label(artist.displayName, systemImage: "person")
-                    }
-                }
-                if let album {
-                    Button { navigator.open(album) } label: {
-                        Label(album.displayName, systemImage: "record.circle.fill")
-                    }
+            Divider()
+            ForEach(track.artistNavigationItems) { artist in
+                Button { navigator.open(artist) } label: {
+                    Label(artist.displayName, systemImage: "person")
                 }
             }
+            if let album = track.albumNavigationItem {
+                Button { navigator.open(album) } label: {
+                    Label(album.displayName, systemImage: "record.circle.fill")
+                }
+            }
+            Button { presentLyrics() } label: {
+                Label("View Lyrics", systemImage: "music.microphone")
+            }
+            .disabled(!track.supportsLyrics)
         }
 
         Divider()
@@ -311,6 +314,15 @@ struct TrackRow: View {
             for track in contextTracks where !favourites.isFavourite(track) {
                 favourites.toggle(track)
             }
+        }
+    }
+
+    /// Raised from the context menu, so the sheet waits for the menu to
+    /// leave the screen first, for the new playlist prompt's reason below.
+    private func presentLyrics() {
+        Task {
+            await Self.waitForPresentationDismissal()
+            isPresentingLyrics = true
         }
     }
 

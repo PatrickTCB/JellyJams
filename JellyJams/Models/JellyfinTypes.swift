@@ -24,9 +24,10 @@ extension JellyfinAPI.BaseItemDto {
     var isFavorite: Bool { userData?.isFavorite ?? false }
 
     /// Whether the server has lyrics for this item — its `HasLyrics` flag.
-    /// The now playing screen's lyrics button is enabled only for items that
-    /// have them, and ``LibraryRepository/lyrics(for:)`` doesn't ask
-    /// `/Audio/{itemId}/Lyrics` about items that don't.
+    /// The now playing screen's lyrics button and a song's "View Lyrics"
+    /// menu item are enabled only for items that have them, and
+    /// ``LibraryRepository/lyrics(for:)`` doesn't ask `/Audio/{itemId}/Lyrics`
+    /// about items that don't.
     var supportsLyrics: Bool { hasLyrics == true }
 
     var runtime: Duration? {

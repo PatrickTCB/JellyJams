@@ -1,13 +1,19 @@
 import SwiftUI
 
-/// The current track's lyrics, read along with the song: one line per row,
-/// with the line being sung highlighted and kept in view.
+/// A song's lyrics, read along with it: one line per row, with the line being
+/// sung highlighted and kept in view.
 ///
-/// Raised by the lyrics button in the now playing screen, in the queue's sheet
-/// shape — its own navigation bar and a "Done" to dismiss it. It follows the
-/// player rather than the track it was opened on, so a track change while it
-/// is open brings up the new track's lyrics.
+/// Raised in the queue's sheet shape — its own navigation bar and a "Done" to
+/// dismiss it — from two places. The lyrics button in the now playing screen
+/// opens it without a ``track``: it then follows the player rather than the
+/// track it was opened on, so a track change while it is open brings up the
+/// new track's lyrics. A song's context menu opens it on that song, which it
+/// keeps whatever plays next; its lines are read along only while that song
+/// is the one playing.
 struct LyricsView: View {
+    /// The song to show, or nil to follow the player.
+    var track: BaseItemDto?
+
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var player: PlayerController
     @Environment(\.dismiss) private var dismiss
@@ -16,14 +22,27 @@ struct LyricsView: View {
 
     private var timeline: LyricTimeline { loader.value }
 
+    /// The song whose lyrics are on screen.
+    private var item: BaseItemDto? { track ?? player.currentItem }
+
+    /// Whether the song on screen is the one playing — the only song the
+    /// clock is timing, so the only one with a line being sung.
+    private var isCurrent: Bool {
+        guard let id = item?.id else { return false }
+        return id == player.currentItem?.id
+    }
+
     var body: some View {
         NavigationStack {
-            LyricLines(timeline: timeline)
+            LyricLines(timeline: timeline, isCurrent: isCurrent)
                 // A new track's lines start from the top, not from wherever
                 // the last track's were scrolled to.
-                .id(player.currentItem?.id)
+                .id(item?.id)
                 .overlay { overlay }
                 .navigationTitle("Lyrics")
+                // The song on screen needn't be the one playing, so the sheet
+                // names it — falling back the way the now playing screen does.
+                .navigationSubtitle(item?.displayName ?? "Not Playing")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #endif
@@ -34,7 +53,7 @@ struct LyricsView: View {
                 }
         }
         .frame(minWidth: 360, minHeight: 420)
-        .task(id: player.currentItem?.id) {
+        .task(id: item?.id) {
             // Kept while the new track's load runs, the last track's lines
             // would be read against the new track's clock.
             loader.reset()
@@ -66,7 +85,7 @@ struct LyricsView: View {
     }
 
     private func load() async {
-        let item = player.currentItem
+        let item = self.item
         await loader.load {
             guard let item else { return LyricTimeline() }
             return try await session.library.lyrics(for: item)
@@ -82,6 +101,9 @@ struct LyricsView: View {
 /// handed to each row as a plain flag.
 private struct LyricLines: View {
     let timeline: LyricTimeline
+    /// Whether the song is the one playing. The clock times only that one,
+    /// so any other song's lines are shown with none of them current.
+    let isCurrent: Bool
 
     @EnvironmentObject private var clock: PlaybackClock
     @State private var position = ScrollPosition(idType: Int.self)
@@ -91,7 +113,7 @@ private struct LyricLines: View {
     @State private var isBrowsing = false
 
     var body: some View {
-        let currentIndex = timeline.currentLineIndex(at: clock.currentTime)
+        let currentIndex = isCurrent ? timeline.currentLineIndex(at: clock.currentTime) : nil
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(timeline.lines.indices, id: \.self) { index in
