@@ -115,7 +115,17 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
             return try await SongQuery().entities(matching: Self.titleQuery(name, artist: artist)).map(AudioEntity.song)
         default:
             if let name {
-                return try await SiriAudioSearch.search(matching: Self.titleQuery(name, artist: artist), client: client)
+                let phrase = Self.titleQuery(name, artist: artist)
+                let found = try await SiriAudioSearch.search(matching: phrase, client: client)
+                if found.isEmpty, let fallback = TextToTunesPlaylist.fallbackEntity(for: phrase) {
+                    // The library has nothing for these free-form words, so
+                    // they read as a description rather than a name — the
+                    // Text to Tunes sentinel takes them to the backend. A
+                    // request qualified by media type is a named item, and
+                    // a miss there stays a miss.
+                    return [fallback]
+                }
+                return found
             }
             if let artist {
                 return try await ArtistQuery().entities(matching: artist).map(AudioEntity.artist)
@@ -178,8 +188,9 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
 
     /// Turns the resolved media item's identifier back into a full
     /// ``AudioEntity``, rehydrating from the server so playback sees a fresh
-    /// item. The default-playback sentinel passes through untouched —
-    /// ``SiriPlayback`` applies the user's setting when it sees the id. A
+    /// item. The synthetic playlists pass through untouched —
+    /// ``SiriPlayback`` applies the user's setting when it sees the default
+    /// id, and decodes the phrase when it sees the Text to Tunes prefix. A
     /// missing or unresolvable identifier falls back to the favourites
     /// shuffle, which covers open-ended requests that skip resolution
     /// entirely.
@@ -187,6 +198,9 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
     private static func entity(identifier: String?, client: JellyfinService) async throws -> AudioEntity {
         if identifier == DefaultPlaybackPlaylist.id {
             return .playlist(DefaultPlaybackPlaylist.entity(setting: AppServices.shared.preferences.defaultPlayback))
+        }
+        if let identifier, let phrase = TextToTunesPlaylist.query(in: identifier) {
+            return .playlist(TextToTunesPlaylist.entity(query: phrase))
         }
         guard let identifier,
               identifier != FavouriteSongsPlaylist.id,

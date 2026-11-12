@@ -111,7 +111,8 @@ enum FavouriteSongsPlaylist {
 
 /// Rehydrates playlist entities from the server when Siri asks for a
 /// previously resolved playlist. The synthetic playlists — the favourites
-/// shuffle and the default-playback sentinel — resolve without a server.
+/// shuffle, the default-playback sentinel, and the Text to Tunes fallback —
+/// resolve without a server.
 struct PlaylistQuery {}
 
 extension PlaylistQuery: EntityQuery {
@@ -119,6 +120,10 @@ extension PlaylistQuery: EntityQuery {
         var entities: [PlaylistEntity] = []
         let client = await AppServices.shared.session.client
         for id in identifiers {
+            if let phrase = TextToTunesPlaylist.query(in: id) {
+                entities.append(TextToTunesPlaylist.entity(query: phrase))
+                continue
+            }
             if id == DefaultPlaybackPlaylist.id {
                 let setting = await AppServices.shared.preferences.defaultPlayback
                 entities.append(DefaultPlaybackPlaylist.entity(setting: setting))

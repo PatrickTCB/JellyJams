@@ -19,7 +19,7 @@ struct TextToTunesSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
-    @State private var songCount: Int? = 30
+    @State private var songCount: Int? = TextToTunes.defaultSongLimit
     @State private var isRequesting = false
     @State private var errorMessage: String?
 
@@ -110,14 +110,17 @@ struct TextToTunesSheet: View {
 
     /// `GET /text-to-tunes` with what the form settled on, and the account
     /// the picks belong to — the user id the sign-in registered with, never
-    /// typed here. A success replaces the queue, starts it and closes the
-    /// sheet; a refusal keeps the sheet open, with the backend's words about
-    /// why beside the fields.
+    /// typed here. The request itself is ``TextToTunes``'s, the same one
+    /// Siri's fallback runs; what happens to the answer is this sheet's: a
+    /// success replaces the queue, starts it and closes the sheet; a refusal
+    /// keeps the sheet open, with the backend's words about why beside the
+    /// fields.
     private func request() {
-        guard let backend = JellyJamsBackend.configured(
+        guard let destination = TextToTunes.destination(
             address: preferences.jellyJamsBackendAddress,
-            deviceInfo: session.deviceInfo
-        ), let userID = session.currentUser?.id else {
+            deviceInfo: session.deviceInfo,
+            userID: session.currentUser?.id
+        ) else {
             errorMessage = BackendError.notSignedIn.errorDescription
             return
         }
@@ -132,18 +135,18 @@ struct TextToTunesSheet: View {
         Task {
             defer { isRequesting = false }
             do {
-                let answer = try await backend.textToTunes(userID: userID, query: query, limit: songCount)
-                guard !answer.newTrackIDs.isEmpty else {
-                    errorMessage = "The backend couldn’t find any songs for that description — try a broader one."
-                    return
-                }
-                let tracks = try await client.tracks(byIds: answer.newTrackIDs)
-                guard !tracks.isEmpty else {
-                    errorMessage = "None of the songs the backend picked could be found on your server."
-                    return
-                }
+                let tracks = try await TextToTunes.tracks(
+                    description: query,
+                    limit: songCount,
+                    destination: destination,
+                    client: client
+                )
                 player.play(tracks)
                 dismiss()
+            } catch TextToTunes.Failure.noPicks {
+                errorMessage = "The backend couldn’t find any songs for that description — try a broader one."
+            } catch TextToTunes.Failure.noneResolvable {
+                errorMessage = "None of the songs the backend picked could be found on your server."
             } catch {
                 errorMessage = error.userFacingMessage
             }

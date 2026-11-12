@@ -56,7 +56,30 @@ enum SiriPlayback {
             alwaysShuffle = true
             nowPlaying = artist.name
         case .playlist(let playlist):
-            if playlist.id == DefaultPlaybackPlaylist.id {
+            if let phrase = TextToTunesPlaylist.query(in: playlist.id) {
+                // The Text to Tunes fallback: these words found nothing in
+                // the library, so the backend picks the songs instead — the
+                // sheet's own pipeline, played like any other queue. Every
+                // failure along the way reads as "nothing matched", because
+                // to the listener that is what happened.
+                // The fallback hinges on a configured backend (resolution
+                // offered the sentinel on that gate); a destination that
+                // went away since says so, rather than pretending it searched.
+                guard let destination = TextToTunes.currentDestination() else {
+                    throw AppIntentError(wrapping: SiriIntentError.backendUnavailable)
+                }
+                do {
+                    tracks = try await TextToTunes.tracks(
+                        description: phrase,
+                        limit: TextToTunes.defaultSongLimit,
+                        destination: destination,
+                        client: client
+                    )
+                } catch {
+                    throw AppIntentError(wrapping: SiriIntentError.noMatch(phrase))
+                }
+                nowPlaying = phrase
+            } else if playlist.id == DefaultPlaybackPlaylist.id {
                 let setting = AppServices.shared.preferences.defaultPlayback
                 let resolved = try await DefaultPlaybackResolver.resolve(setting: setting, client: client)
                 tracks = resolved.tracks
@@ -98,6 +121,10 @@ enum SiriIntentError: Error {
     case notSignedIn
     case noMatch(String)
     case itemUnavailable
+    /// Text to Tunes is a Jelly Jams Backend feature, and the backend is
+    /// optional — a request for it with no backend configured is a setup
+    /// gap, not a sign-in gap.
+    case backendUnavailable
 }
 
 extension SiriIntentError: CustomLocalizedStringResourceConvertible {
@@ -117,6 +144,11 @@ extension SiriIntentError: CustomLocalizedStringResourceConvertible {
             LocalizedStringResource(
                 "That couldn't be found on your Jellyfin server.",
                 comment: "Spoken when the requested audio isn't on the user's server."
+            )
+        case .backendUnavailable:
+            LocalizedStringResource(
+                "That feature needs the Jelly Jams Backend. Set it up in the Jelly Jams settings first.",
+                comment: "Spoken when a Text to Tunes request arrives with no Jelly Jams Backend configured."
             )
         }
     }
