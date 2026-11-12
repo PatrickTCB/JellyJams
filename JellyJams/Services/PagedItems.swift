@@ -7,34 +7,35 @@ import SwiftUI
 /// keeps its items, its sort selection and its scroll position when the user
 /// navigates away and comes back.
 @MainActor
-final class PagedItems: ObservableObject {
+@Observable
+final class PagedItems {
     /// Fetches one page given a start index and a limit. Production loads go
     /// through ``LibraryRepository``; tests supply their own to exercise paging
     /// without a server.
     typealias PageLoader = (Int, Int) async throws -> BaseItemDtoQueryResult
 
-    @Published private(set) var items: [BaseItemDto] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var total = 0
-    @Published private(set) var hasLoadedOnce = false
+    private(set) var items: [BaseItemDto] = []
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
+    private(set) var total = 0
+    private(set) var hasLoadedOnce = false
 
     /// The user's sort selection, bound directly by the toolbar controls.
     /// Changing either re-keys ``query`` so the next ``load(from:)`` refetches,
     /// and both persist for as long as the list stays cached.
-    @Published var sortBy: SortBy
-    @Published var sortOrder: SortOrder
+    var sortBy: SortBy
+    var sortOrder: SortOrder
 
     let list: LibraryList
 
     private let pageSize: Int
-    private var loader: PageLoader?
-    private var generation = UUID()
-    private var nextStartIndex = 0
-    private var reachedEnd = false
+    @ObservationIgnored private var loader: PageLoader?
+    @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var nextStartIndex = 0
+    @ObservationIgnored private var reachedEnd = false
     /// Identifies the query behind the currently loaded items, so a view that
     /// re-appears can tell "same list, keep it" from "sort changed, reload".
-    private var loadedQuery: LibraryQuery?
+    @ObservationIgnored private var loadedQuery: LibraryQuery?
 
     init(list: LibraryList, pageSize: Int? = nil) {
         self.list = list

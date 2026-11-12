@@ -7,7 +7,7 @@ import SwiftUI
 /// unconditionally.
 struct GenreChips: View {
     let genres: [GenreRef]
-    @EnvironmentObject private var navigator: LibraryNavigator
+    @Environment(LibraryNavigator.self) private var navigator
 
     var body: some View {
         if !genres.isEmpty {

@@ -5,7 +5,7 @@ import SwiftUI
 /// Creates an empty playlist via ``PlaylistStore``; pass `onCreated` to react
 /// (e.g. reload the visible list). Failures surface in an error alert.
 private struct NewPlaylistModifier: ViewModifier {
-    @EnvironmentObject private var playlistStore: PlaylistStore
+    @Environment(PlaylistStore.self) private var playlistStore
 
     let onCreated: () async -> Void
 

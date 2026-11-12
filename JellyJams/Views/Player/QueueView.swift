@@ -10,9 +10,9 @@ import SwiftUI
 /// a click selects, a drag reorders, a double-click plays, and the delete key
 /// or the "Remove" toolbar button takes out the selection.
 struct QueueView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(DownloadStore.self) private var downloads
     @Environment(\.dismiss) private var dismiss
 
     #if os(macOS)
@@ -138,8 +138,8 @@ private struct QueueRow: View {
     let isPlaying: Bool
     let onPlay: () -> Void
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(SessionStore.self) private var session
+    @Environment(DownloadStore.self) private var downloads
 
     /// A downloaded track's cover comes from disk, never from the server.
     private var localArtworkURL: URL? { downloads.localArtworkURL(for: item) }

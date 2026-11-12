@@ -10,7 +10,8 @@ import SwiftUI
 /// reset them — the state the app stored last time is shown, read-only,
 /// beside the reason it could not ask better.
 @MainActor
-final class JellyJamsBackendSettingsModel: ObservableObject {
+@Observable
+final class JellyJamsBackendSettingsModel {
     /// Whether the backend can be talked to, and if so whether it knows who
     /// this device is yet. `unreachable` and `needsRegistration` both show
     /// remembered state and allow no edits; the difference is who has work
@@ -22,16 +23,16 @@ final class JellyJamsBackendSettingsModel: ObservableObject {
         case online
     }
 
-    @Published private(set) var connection: Connection = .checking
+    private(set) var connection: Connection = .checking
     /// A refused Server Playlist change, shown until the next refresh or retry.
-    @Published private(set) var serverPlaylistError: String?
-    @Published private(set) var isApplyingServerPlaylistChange = false
+    private(set) var serverPlaylistError: String?
+    private(set) var isApplyingServerPlaylistChange = false
     /// A refused limits save, shown until the next refresh or retry. The
     /// typed numbers stay put beside it — the address above keeps a failed
     /// registration's text for the same reason: fixing it should not mean
     /// retyping everything.
-    @Published private(set) var limitsError: String?
-    @Published private(set) var isApplyingLimitsChange = false
+    private(set) var limitsError: String?
+    private(set) var isApplyingLimitsChange = false
 
     /// Whether the Server Playlist switch takes input now: the backend is
     /// answering, it knows this account, and no change of its own is

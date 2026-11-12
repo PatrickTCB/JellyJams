@@ -59,8 +59,8 @@ struct DownloadedGroupRef: Hashable {
 struct DownloadedArtistDetail: View {
     let artist: DownloadStore.DownloadGroup
 
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var player: PlayerController
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PlayerController.self) private var player
 
     private var albums: [DownloadStore.DownloadGroup] {
         downloads.downloadedAlbums(forArtistID: artist.id)

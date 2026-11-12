@@ -8,13 +8,13 @@ import SwiftUI
 struct ItemContextMenu: ViewModifier {
     let item: BaseItemDto
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var navigator: LibraryNavigator
-    @EnvironmentObject private var playlistStore: PlaylistStore
-    @EnvironmentObject private var favourites: FavouriteStore
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var pinnedItems: PinnedItemsStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(LibraryNavigator.self) private var navigator
+    @Environment(PlaylistStore.self) private var playlistStore
+    @Environment(FavouriteStore.self) private var favourites
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PinnedItemsStore.self) private var pinnedItems
     @Environment(\.gridRefreshAction) private var gridRefreshAction
     @Environment(\.offlineBrowsing) private var offlineBrowsing
 

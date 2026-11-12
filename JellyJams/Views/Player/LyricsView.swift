@@ -14,11 +14,11 @@ struct LyricsView: View {
     /// The song to show, or nil to follow the player.
     var track: BaseItemDto?
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
     @Environment(\.dismiss) private var dismiss
 
-    @StateObject private var loader = LoadableModel(LyricTimeline())
+    @State private var loader = LoadableModel(LyricTimeline())
 
     private var timeline: LyricTimeline { loader.value }
 
@@ -105,7 +105,7 @@ private struct LyricLines: View {
     /// so any other song's lines are shown with none of them current.
     let isCurrent: Bool
 
-    @EnvironmentObject private var clock: PlaybackClock
+    @Environment(PlaybackClock.self) private var clock
     @State private var position = ScrollPosition(idType: Int.self)
     /// Set while the listener scrolls the lines by hand, so following the
     /// song doesn't drag them back mid-gesture. Following picks up again at

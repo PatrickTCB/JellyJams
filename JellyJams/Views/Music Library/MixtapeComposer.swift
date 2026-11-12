@@ -13,8 +13,8 @@ import SwiftUI
 /// backend's own rule: it appends the ending Jelly Jams identifies
 /// mixtapes by, so typing it here would double it.
 struct MixtapeComposer: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""

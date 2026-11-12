@@ -11,8 +11,8 @@ import SwiftUI
 /// (``DefaultPlaybackSetting``), and ``DefaultPlaybackResolver`` rehydrates
 /// the tracks at play time.
 struct DefaultPlaybackSettingsView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""

@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// The state of one asynchronous read: the value, whether a load is in flight,
 /// and any error worth showing the user.
@@ -13,13 +14,14 @@ import Foundation
 /// Views supply the work at call time, the way ``PagedItems/load(from:)`` does,
 /// so this stays independent of how anything is fetched.
 @MainActor
-final class LoadableModel<Value>: ObservableObject {
-    @Published private(set) var value: Value
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
+@Observable
+final class LoadableModel<Value> {
+    private(set) var value: Value
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
     /// Whether a load has finished, successfully or not. This is what tells
     /// "there is nothing here" apart from "nothing has been asked for yet".
-    @Published private(set) var hasLoadedOnce = false
+    private(set) var hasLoadedOnce = false
 
     /// Whether a spinner is the right thing to show: nothing has arrived yet,
     /// or a retry is in flight.
@@ -28,7 +30,7 @@ final class LoadableModel<Value>: ObservableObject {
     private let initialValue: Value
     /// Identifies the load whose result is still wanted, so a response that has
     /// been superseded is dropped instead of overwriting a newer one.
-    private var generation = UUID()
+    @ObservationIgnored private var generation = UUID()
 
     init(_ initialValue: Value) {
         self.initialValue = initialValue

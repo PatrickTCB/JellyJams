@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Retains the state of every browsable library list for the lifetime of a
 /// sign-in session.
@@ -10,7 +11,8 @@ import Foundation
 /// account starts fresh, which also releases the ``JellyfinService`` each list
 /// captured for paging.
 @MainActor
-final class LibraryCache: ObservableObject {
+@Observable
+final class LibraryCache {
     private var models: [LibraryList: PagedItems]
 
     init() {
@@ -21,11 +23,9 @@ final class LibraryCache: ObservableObject {
     ///
     /// Every list is seeded up front rather than created on first access,
     /// because ``SectionRootView`` calls this from its `body`. Creating a model
-    /// lazily would mutate this cache during a view update — which today only
-    /// escapes SwiftUI's "Modifying state during view update" warning because
-    /// `models` isn't published, and would become an update loop the moment it
-    /// were. A ``PagedItems`` costs nothing until it is asked to load, so there
-    /// is no reason to defer it.
+    /// lazily would mutate this cache — which the reading view observes —
+    /// during that view's update: an update loop. A ``PagedItems`` costs
+    /// nothing until it is asked to load, so there is no reason to defer it.
     func items(for list: LibraryList) -> PagedItems {
         guard let model = models[list] else {
             // Unreachable: `freshModels()` covers every case. Vending a

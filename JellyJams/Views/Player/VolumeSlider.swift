@@ -4,13 +4,13 @@ import SwiftUI
 /// The macOS playback volume control: a standard slider flanked by speaker
 /// glyphs, bound to ``PlayerController/volume``.
 struct VolumeSlider: View {
-    @EnvironmentObject private var player: PlayerController
+    @Environment(PlayerController.self) private var player
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "speaker.fill")
                 .accessibilityHidden(true)
-            Slider(value: $player.volume, in: 0...1) {
+            Slider(value: Bindable(player).volume, in: 0...1) {
                 Text("Volume")
             }
             .labelsHidden()

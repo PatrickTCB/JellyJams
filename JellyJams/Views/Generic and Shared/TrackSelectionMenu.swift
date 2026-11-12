@@ -12,8 +12,8 @@ struct TrackSelectionMenu: View {
     /// The selected tracks in list order.
     let tracks: [BaseItemDto]
 
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var playlistStore: PlaylistStore
+    @Environment(PlayerController.self) private var player
+    @Environment(PlaylistStore.self) private var playlistStore
     @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     @State private var isPresentingNewPlaylist = false

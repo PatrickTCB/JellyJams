@@ -1,5 +1,5 @@
-import Combine
-import Dispatch
+import Foundation
+import Observation
 #if os(iOS)
 import AppIntents
 #endif
@@ -10,9 +10,9 @@ import AppIntents
 /// from ``RootContainerView``, which only runs once UI appears. App Intents
 /// (Siri) launch the app into the background with no scene, so the graph — and
 /// the session restore and wiring underneath it — has to come up without any
-/// UI. The scene graph adopts these exact instances through `@StateObject`, so
-/// there is one of each service per process, whichever surface reaches them
-/// first: a window, Settings, CarPlay, or an intent.
+/// UI. The scenes hand these exact instances to the environment, so there is
+/// one of each service per process, whichever surface reaches them first: a
+/// window, Settings, CarPlay, or an intent.
 @MainActor
 final class AppServices {
     static let shared = AppServices()
@@ -31,92 +31,95 @@ final class AppServices {
     let pinnedItems = PinnedItemsStore()
     let networkStatus = NetworkStatus()
 
-    private var cancellables: Set<AnyCancellable> = []
-
     /// The signed-in state the graph was last wired for, so wiring re-runs on
     /// every transition but never twice for the same state.
     private var lastWiredSignedIn: Bool?
 
     private init() {
         // Wiring follows the signed-in state wherever it changes, including
-        // sign-in and sign-out that happen with no UI on screen. The closure
-        // inherits this init's MainActor isolation, and every emission arrives
-        // on the main thread because SessionStore only mutates on MainActor.
-        //
-        // `wire` receives the session values from the publisher rather than
-        // reading them back off `session`: `@Published` publishes from
-        // `willSet`, so inside this sink a property read can still return the
-        // old value — and reading `session.currentUser` during the emission
-        // that announces it returns nil, which wired `PinnedItemsStore` to no
-        // account: persisted pins never loaded, and new ones never saved.
-        Publishers.CombineLatest(session.$client, session.$currentUser)
-            .sink { [weak self] client, user in
+        // sign-in and sign-out that happen with no UI on screen. A change
+        // arrives once it has landed — a sign-in's client and user together —
+        // and the observation, like the graph, lasts as long as the process.
+        Task { [weak self, session] in
+            for await (client, user) in Observations({ (session.client, session.currentUser) }) {
                 self?.wire(client: client, user: user)
             }
-            .store(in: &cancellables)
+        }
 
         // Server reachability follows the network: a LAN-only server appears
         // and disappears as the device's connectivity changes, so every path
         // update re-pings — including transitions that keep the device
-        // online, like moving from home Wi-Fi to cellular. (The
-        // subscription's synchronous initial value is skipped — `wire`
-        // already checked once at process start — and the burst of updates a
-        // transition emits is coalesced into a single ping.)
-        networkStatus.$isOnline
-            .dropFirst()
-            .debounce(for: .seconds(1), scheduler: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self, session.isSignedIn else { return }
-                Task { await session.checkServerReachability() }
+        // online, like moving from home Wi-Fi to cellular, which is why this
+        // counts path updates rather than watching `isOnline`. (The value
+        // observation starts from is skipped — `wire` already checked once at
+        // process start — and the burst of updates a transition emits is
+        // coalesced into a single ping, a second after the last of them.)
+        Task { [weak self, networkStatus] in
+            var pendingPing: Task<Void, Never>?
+            for await _ in Observations({ networkStatus.pathUpdateCount }).dropFirst() {
+                pendingPing?.cancel()
+                pendingPing = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !Task.isCancelled, let session = self?.session, session.isSignedIn else { return }
+                    // A task of its own, so a later update cancels only the
+                    // wait above, never a ping already under way: a cancelled
+                    // ping comes back as the server being unreachable.
+                    Task { await session.checkServerReachability() }
+                }
             }
-            .store(in: &cancellables)
+        }
 
         // Bans and Infinite Queue follow the backend rather than the session
         // alone: whether a "Ban" menu may offer itself — and whether a
         // running queue can be extended — depends on who is signed in, where
-        // the backend lives, and whether it knows this account yet. Every
-        // value comes from the publisher rather than being read back
-        // (`@Published` announces before the change lands, and
-        // mid-registration the suffix the store holds can still be the old
-        // one). The `registered` check is the same rule
-        // `PreferencesStore.isMixtapesActive` reads: a registration recorded a
-        // playlist-name ending.
-        Publishers.CombineLatest3(
-            session.$currentUser,
-            preferences.$jellyJamsBackendAddress,
-            preferences.$mixtapeSuffix
-        )
-            .sink { [weak self] user, address, suffix in
-                guard let self else { return }
-                let registered = !suffix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                self.bans.configure(
-                    userID: user?.id,
-                    address: address,
-                    registered: registered,
-                    deviceInfo: self.session.deviceInfo
-                )
-                self.queueExtender.configure(
-                    userID: user?.id,
-                    address: address,
-                    registered: registered,
-                    deviceInfo: self.session.deviceInfo
-                )
+        // the backend lives, and whether it knows this account yet. The
+        // closure names what ``configureBackend()`` depends on; a
+        // registration records its address and suffix together, so they
+        // arrive as the one change they are.
+        Task { [weak self, session, preferences] in
+            let backendSettings = Observations {
+                (session.currentUser?.id, preferences.jellyJamsBackendAddress, preferences.isMixtapesActive)
             }
-            .store(in: &cancellables)
+            for await _ in backendSettings {
+                self?.configureBackend()
+            }
+        }
 
         // Restoring here rather than in the app's `onAppear` puts the saved
         // session in place at process start, foreground launch or background.
         session.restore()
-        // The subscription above has already wired for this state when restore
-        // signed someone in; this call guarantees the graph is ready the
-        // moment `shared` exists even when it didn't.
+        // The observations above deliver their first values only once this
+        // init has returned; wiring and configuring now guarantees the graph
+        // is ready the moment `shared` exists.
         wire(client: session.client, user: session.currentUser)
+        configureBackend()
     }
 
-    /// Connects the session to every service that depends on it. Takes the
-    /// values to wire for rather than reading them off `session`, which during
-    /// a `@Published` emission still holds the old value; the signed-in state
-    /// is just that both halves are present.
+    /// Points the backend clients at the backend as the session and settings
+    /// now describe it. `registered` is the rule
+    /// ``PreferencesStore/isMixtapesActive`` reads: a registration recorded a
+    /// playlist-name ending.
+    private func configureBackend() {
+        let userID = session.currentUser?.id
+        let address = preferences.jellyJamsBackendAddress
+        let registered = preferences.isMixtapesActive
+        bans.configure(
+            userID: userID,
+            address: address,
+            registered: registered,
+            deviceInfo: session.deviceInfo
+        )
+        queueExtender.configure(
+            userID: userID,
+            address: address,
+            registered: registered,
+            deviceInfo: session.deviceInfo
+        )
+    }
+
+    /// Connects the session to every service that depends on it, for the
+    /// client and user it is handed; the signed-in state is just that both
+    /// halves are present.
     ///
     /// A transition *from* signed-in is a sign-out — the settings button's or
     /// the account menu's — as distinct from launching with nobody signed in,

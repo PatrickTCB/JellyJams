@@ -3,9 +3,9 @@ import SwiftUI
 /// A toolbar menu showing the signed-in user, with a way into Settings and a
 /// Sign Out action.
 struct AccountMenu: View {
-    @EnvironmentObject private var session: SessionStore
+    @Environment(SessionStore.self) private var session
     #if os(iOS)
-    @EnvironmentObject private var settingsPresentation: SettingsPresentation
+    @Environment(SettingsPresentation.self) private var settingsPresentation
     #endif
 
     var body: some View {

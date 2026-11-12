@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// The phrases the Recent Music header rotates through. Adding one to
 /// ``options`` is all it takes to expand the rotation.
@@ -16,7 +17,8 @@ enum RecentMusicHeading {
 /// Loads the home screen's server-backed sections in one place, so a section
 /// added later is a fetch here and a view in ``HomeView``.
 @MainActor
-final class HomeModel: ObservableObject {
+@Observable
+final class HomeModel {
     struct Latest {
         var albums: [BaseItemDto] = []
         var artists: [BaseItemDto] = []
@@ -29,9 +31,9 @@ final class HomeModel: ObservableObject {
     /// How many mixtapes the quick links show.
     static let mixtapeLimit = 5
 
-    @Published private(set) var latest = Latest()
-    @Published private(set) var mixtapes: [BaseItemDto] = []
-    @Published private(set) var recentHeading = RecentMusicHeading.random()
+    private(set) var latest = Latest()
+    private(set) var mixtapes: [BaseItemDto] = []
+    private(set) var recentHeading = RecentMusicHeading.random()
 
     /// Reloads every section, keeping the last good data when a request fails:
     /// a home screen with one stale row is better than a home screen with an

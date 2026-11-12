@@ -40,43 +40,20 @@ struct JellyJamsApp: App {
     // Routes classic-Siri (SiriKit Media) intents to their in-app handlers.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
-    // The instances come from ``AppServices``, the process-wide owner, so a
-    // background launch that never creates a scene — an App Intent — still
-    // shares this exact graph. `@StateObject` adopts them so the scene graph
-    // observes the same objects.
-    @StateObject private var session: SessionStore
-    @StateObject private var player: PlayerController
-    @StateObject private var playerPresentation: PlayerPresentation
-    @StateObject private var playlistStore: PlaylistStore
-    @StateObject private var libraryCache: LibraryCache
-    @StateObject private var favourites: FavouriteStore
-    @StateObject private var bans: BanStore
-    @StateObject private var settingsPresentation: SettingsPresentation
-    @StateObject private var preferences: PreferencesStore
-    @StateObject private var downloads: DownloadStore
-    @StateObject private var pinnedItems: PinnedItemsStore
-    @StateObject private var networkStatus: NetworkStatus
+    // The service graph belongs to ``AppServices``, the process-wide owner,
+    // so a background launch that never creates a scene — an App Intent —
+    // still shares this exact graph. The scenes hand those same instances to
+    // the environment; the app itself only holds on to their owner.
+    private let services: AppServices
     #if os(macOS)
     private let updaterController: SPUStandardUpdaterController
     #endif
 
     init() {
-        // Referencing `shared` here — not only in the property autoclosures —
-        // forces the service graph, its session restore and its wiring to run
-        // at process start, even when no scene ever appears.
-        let services = AppServices.shared
-        _session = StateObject(wrappedValue: services.session)
-        _player = StateObject(wrappedValue: services.player)
-        _playerPresentation = StateObject(wrappedValue: services.playerPresentation)
-        _playlistStore = StateObject(wrappedValue: services.playlistStore)
-        _libraryCache = StateObject(wrappedValue: services.libraryCache)
-        _favourites = StateObject(wrappedValue: services.favourites)
-        _bans = StateObject(wrappedValue: services.bans)
-        _settingsPresentation = StateObject(wrappedValue: services.settingsPresentation)
-        _preferences = StateObject(wrappedValue: services.preferences)
-        _downloads = StateObject(wrappedValue: services.downloads)
-        _pinnedItems = StateObject(wrappedValue: services.pinnedItems)
-        _networkStatus = StateObject(wrappedValue: services.networkStatus)
+        // Referencing `shared` here forces the service graph, its session
+        // restore and its wiring to run at process start, even when no scene
+        // ever appears.
+        services = AppServices.shared
         #if os(macOS)
         // Don't start the updater during test runs: its scheduled checks and
         // installer services have no place in a test host.
@@ -89,23 +66,23 @@ struct JellyJamsApp: App {
     var body: some Scene {
         WindowGroup {
             RootContainerView()
-                .environmentObject(session)
-                .environmentObject(player)
-                .environmentObject(player.clock)
-                .environmentObject(playerPresentation)
-                .environmentObject(playlistStore)
-                .environmentObject(libraryCache)
-                .environmentObject(favourites)
-                .environmentObject(bans)
-                .environmentObject(settingsPresentation)
-                .environmentObject(preferences)
-                .environmentObject(downloads)
-                .environmentObject(pinnedItems)
-                .environmentObject(networkStatus)
+                .environment(services.session)
+                .environment(services.player)
+                .environment(services.player.clock)
+                .environment(services.playerPresentation)
+                .environment(services.playlistStore)
+                .environment(services.libraryCache)
+                .environment(services.favourites)
+                .environment(services.bans)
+                .environment(services.settingsPresentation)
+                .environment(services.preferences)
+                .environment(services.downloads)
+                .environment(services.pinnedItems)
+                .environment(services.networkStatus)
                 .frame(minWidth: 400, minHeight: 300)
         }
         .commands {
-            PlaybackCommands(player: player)
+            PlaybackCommands(player: services.player)
             #if os(macOS)
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
@@ -113,7 +90,7 @@ struct JellyJamsApp: App {
             #endif
             CommandGroup(replacing: .newItem) { }
             #if os(iOS)
-            SettingsCommands(presentation: settingsPresentation)
+            SettingsCommands(presentation: services.settingsPresentation)
             #endif
         }
         #if os(macOS)
@@ -128,18 +105,18 @@ struct JellyJamsApp: App {
             // service graph as the main window rather than the handful the
             // settings forms once needed alone.
             SettingsView()
-                .environmentObject(session)
-                .environmentObject(preferences)
-                .environmentObject(downloads)
-                .environmentObject(player)
-                .environmentObject(player.clock)
-                .environmentObject(playerPresentation)
-                .environmentObject(playlistStore)
-                .environmentObject(libraryCache)
-                .environmentObject(favourites)
-                .environmentObject(bans)
-                .environmentObject(pinnedItems)
-                .environmentObject(networkStatus)
+                .environment(services.session)
+                .environment(services.preferences)
+                .environment(services.downloads)
+                .environment(services.player)
+                .environment(services.player.clock)
+                .environment(services.playerPresentation)
+                .environment(services.playlistStore)
+                .environment(services.libraryCache)
+                .environment(services.favourites)
+                .environment(services.bans)
+                .environment(services.pinnedItems)
+                .environment(services.networkStatus)
         }
         // A settings scene is fixed to its content's size by default, which
         // leaves no way to widen the window when a long server address or a

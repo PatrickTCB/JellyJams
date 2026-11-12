@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct AlbumsView: View {
-    @EnvironmentObject private var session: SessionStore
-    @ObservedObject var model: PagedItems
+    @Environment(SessionStore.self) private var session
+    @Bindable var model: PagedItems
 
     var body: some View {
         ItemGrid(model: model, emptyMessage: "No albums", emptySystemImage: "square.stack")

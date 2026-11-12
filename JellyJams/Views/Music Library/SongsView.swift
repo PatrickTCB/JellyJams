@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct SongsView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @ObservedObject var model: PagedItems
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Bindable var model: PagedItems
     /// The selected songs (rows are keyed by track id): click to select,
     /// double-click to play, shift-arrow to extend.
     @State private var selection: Set<String> = []

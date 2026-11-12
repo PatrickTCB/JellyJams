@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Onboarding screen: enter a Jellyfin server address and sign in.
 struct ServerLoginView: View {
-    @EnvironmentObject private var session: SessionStore
+    @Environment(SessionStore.self) private var session
 
     @State private var serverURL = ""
     @State private var username = ""

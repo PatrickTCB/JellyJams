@@ -13,9 +13,9 @@ import SwiftUI
 /// resolves to nothing leaves the sheet open saying so instead of closing
 /// over a player that stays silent.
 struct TextToTunesSheet: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
-    @EnvironmentObject private var player: PlayerController
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
+    @Environment(PlayerController.self) private var player
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""

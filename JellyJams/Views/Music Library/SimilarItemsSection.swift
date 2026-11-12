@@ -29,10 +29,10 @@ struct SimilarItemsSection: View {
     private static let wideCount = 5
     private static let narrowCount = 3
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
-    @EnvironmentObject private var navigator: LibraryNavigator
-    @StateObject private var loader = LoadableModel<[BaseItemDto]>([])
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
+    @Environment(LibraryNavigator.self) private var navigator
+    @State private var loader = LoadableModel<[BaseItemDto]>([])
     /// The `item`+`count` the current suggestions were fetched for. Jellyfin's
     /// "similar" endpoint returns a fresh random sample on every call, so
     /// re-running the load when nothing has actually changed — which `task`

@@ -17,7 +17,7 @@ struct BansScreen: Hashable { }
 /// artist, the album for a banned album, and the album a banned song was
 /// taken from — the song itself has no page of its own outside it.
 struct BannedItemsView: View {
-    @EnvironmentObject private var bans: BanStore
+    @Environment(BanStore.self) private var bans
 
     /// The banned items the macOS selection holds, keyed by item id — the
     /// same key `DELETE /ban` unbans by, and unique across the three
@@ -148,7 +148,7 @@ private struct BannedItemRow: View {
     let banned: BannedItem
 
     #if os(macOS)
-    @EnvironmentObject private var navigator: LibraryNavigator
+    @Environment(LibraryNavigator.self) private var navigator
     #endif
 
     var body: some View {

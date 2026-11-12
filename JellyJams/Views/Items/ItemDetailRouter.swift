@@ -48,26 +48,36 @@ extension View {
     /// path disagrees with what it is showing resolves later pushes against the
     /// wrong screen.
     ///
-    /// The destinations reach the navigator through the environment the stack
-    /// was given. ``SimilarItemsSection`` and ``GenreChips`` push through it
-    /// rather than through a `NavigationLink`: both sit inside a single `List`
-    /// row on the album screen (``TrackListDetail``), and a `List` turns any
-    /// row that contains a `NavigationLink` into one tap target — so a whole
-    /// grid or flow of them collapses into a single button that opens
-    /// whichever link is last (and, on iOS, each gets a disclosure chevron). A
-    /// plain `Button` that appends to the path gets none of that treatment.
-    func libraryNavigationDestinations() -> some View {
+    /// The destinations are handed the stack's navigator rather than left to
+    /// find it in the environment: on macOS, inside the sidebar-adaptable
+    /// `TabView`, environment set on the `NavigationStack` reaches its root
+    /// but never the screens it pushes — and the screens these build declare
+    /// the navigator (``TrackListDetail``, ``TrackRow``, ``ItemContextMenu``),
+    /// which `@Environment` resolves as soon as a view renders.
+    ///
+    /// ``SimilarItemsSection`` and ``GenreChips`` push through it rather than
+    /// through a `NavigationLink`: both sit inside a single `List` row on the
+    /// album screen (``TrackListDetail``), and a `List` turns any row that
+    /// contains a `NavigationLink` into one tap target — so a whole grid or
+    /// flow of them collapses into a single button that opens whichever link
+    /// is last (and, on iOS, each gets a disclosure chevron). A plain `Button`
+    /// that appends to the path gets none of that treatment.
+    func libraryNavigationDestinations(navigator: LibraryNavigator) -> some View {
         navigationDestination(for: BaseItemDto.self) {
             ItemDetailRouter(item: $0)
+                .environment(navigator)
         }
         .navigationDestination(for: GenreRef.self) {
             GenreResultsView(genre: $0)
+                .environment(navigator)
         }
         .navigationDestination(for: LibrarySection.self) {
             SectionRootView(section: $0)
+                .environment(navigator)
         }
         .navigationDestination(for: DownloadedGroupRef.self) { ref in
             DownloadedGroupDestination(ref: ref)
+                .environment(navigator)
         }
     }
 }
@@ -80,7 +90,7 @@ extension View {
 private struct DownloadedGroupDestination: View {
     let ref: DownloadedGroupRef
 
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(DownloadStore.self) private var downloads
 
     var body: some View {
         if let group = downloads.group(id: ref.id, kind: ref.kind) {

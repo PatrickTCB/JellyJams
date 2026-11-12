@@ -8,12 +8,12 @@ struct FavouritesView: View {
         var title: String { rawValue.capitalized }
     }
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @ObservedObject var songs: PagedItems
-    @ObservedObject var albums: PagedItems
-    @ObservedObject var artists: PagedItems
-    @ObservedObject var playlists: PagedItems
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Bindable var songs: PagedItems
+    @Bindable var albums: PagedItems
+    @Bindable var artists: PagedItems
+    let playlists: PagedItems
     @State private var tab: Tab = .songs
     /// The favourite songs the user has selected (rows are keyed by track
     /// id): click to select, double-click to play, shift-arrow to extend.

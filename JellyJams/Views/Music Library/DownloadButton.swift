@@ -9,7 +9,7 @@ struct DownloadButton: View {
     var size: Font = .body
     #endif
 
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(DownloadStore.self) private var downloads
 
     private var isDownloaded: Bool { downloads.isDownloaded(item) }
 

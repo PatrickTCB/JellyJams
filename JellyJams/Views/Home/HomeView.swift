@@ -5,10 +5,10 @@ import SwiftUI
 /// Each section hides itself when it has nothing to show, so the page grows by
 /// adding a view to the stack here and a fetch to ``HomeModel``.
 struct HomeView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
-    @EnvironmentObject private var pinnedItems: PinnedItemsStore
-    @StateObject private var model = HomeModel()
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
+    @Environment(PinnedItemsStore.self) private var pinnedItems
+    @State private var model = HomeModel()
 
     var body: some View {
         ScrollView {

@@ -9,6 +9,7 @@ import SwiftUI
 /// Holding the flag here — and binding the sheet to a stable host such as
 /// ``MainShellView`` — keeps the player up.
 @MainActor
-final class PlayerPresentation: ObservableObject {
-    @Published var isShowingPlayer = false
+@Observable
+final class PlayerPresentation {
+    var isShowingPlayer = false
 }

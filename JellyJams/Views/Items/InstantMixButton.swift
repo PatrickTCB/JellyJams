@@ -12,9 +12,9 @@ import SwiftUI
 struct InstantMixButton: View {
     let item: BaseItemDto
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var playlistStore: PlaylistStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(PlaylistStore.self) private var playlistStore
     @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     @State private var isLoading = false

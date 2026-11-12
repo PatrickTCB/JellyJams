@@ -1,5 +1,6 @@
 import Foundation
 import JellyfinAPI
+import Observation
 
 /// Offline playback: saves audio files under Application Support/Downloads,
 /// keyed by track id.
@@ -64,7 +65,8 @@ import JellyfinAPI
 /// cancelled transfer's file is discarded rather than resurrecting what was
 /// just deleted.
 @MainActor
-final class DownloadStore: ObservableObject {
+@Observable
+final class DownloadStore {
     /// The kinds a downloaded collection can have. Albums, artists and
     /// playlists are the views the downloads section browses; a genre is a
     /// download source and reference key with no browsing view of its own.
@@ -268,19 +270,19 @@ final class DownloadStore: ObservableObject {
         }
     }
 
-    @Published var entries: [String: Entry] = [:]
+    var entries: [String: Entry] = [:]
     /// Downloaded playlists by id — the only stored grouping, because playlist
     /// membership is the one thing a song's metadata cannot say.
-    @Published var playlists: [String: PlaylistRecord] = [:]
-    @Published var batches: [Batch] = []
-    @Published var errorMessage: String?
+    var playlists: [String: PlaylistRecord] = [:]
+    var batches: [Batch] = []
+    var errorMessage: String?
 
-    @Published var artworkEntries: [String: ArtworkEntry] = [:]
+    var artworkEntries: [String: ArtworkEntry] = [:]
 
     /// Whether an artist-artwork sync is running — the sign-in one or the one
     /// the Downloads artist tab's refresh button starts. Drives that button's
     /// spinner and disabled state.
-    @Published var isSyncingArtistArtwork = false
+    var isSyncingArtistArtwork = false
 
     /// Every file transfer, feeding the throughput the downloads status bar
     /// shows.
@@ -288,50 +290,50 @@ final class DownloadStore: ObservableObject {
 
     /// The task running each batch, keyed by batch id, so removals can cancel
     /// them: a download the user has deleted must not keep landing tracks.
-    var batchTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var batchTasks: [String: Task<Void, Never>] = [:]
     /// The task running ``syncArtistArtwork()``, held so a manual refresh
     /// never overlaps the sign-in sync or an earlier press, and so a wipe can
     /// cancel a run that would otherwise keep landing pictures after it.
-    var artistArtworkTask: Task<Void, Never>?
+    @ObservationIgnored var artistArtworkTask: Task<Void, Never>?
     /// The item each running batch was started for, persisted so a relaunch
     /// can resume batches whose process died mid-download.
-    var activeBatchItems: [String: BaseItemDto] = [:]
+    @ObservationIgnored var activeBatchItems: [String: BaseItemDto] = [:]
     /// Transfers in flight, keyed by transfer key; see ``PendingTransfer``.
-    var pendingTransfers: [String: PendingTransfer] = [:]
+    @ObservationIgnored var pendingTransfers: [String: PendingTransfer] = [:]
     /// The transfers the system was still running for an earlier process when
     /// this one started, by transfer key — held in ``transfersInFlight``, so a
     /// fetch of the same song or cover waits for their delivery instead of
     /// downloading it a second time.
-    var transfersRunningElsewhere: Set<String> = []
+    @ObservationIgnored var transfersRunningElsewhere: Set<String> = []
     /// Finds those transfers, at launch; every fetch waits for it first.
-    var reconnection: Task<Void, Never>?
+    @ObservationIgnored var reconnection: Task<Void, Never>?
     /// Whether the batches a previous process persisted have been resumed
     /// this launch.
-    var hasResumedInterruptedBatches = false
+    @ObservationIgnored var hasResumedInterruptedBatches = false
     /// The token of each batch's current run. A cancelled run keeps unwinding
     /// after its batch is gone — or has started again under the same id — so
     /// its progress updates and final cleanup check they still belong to the
     /// current run before touching anything.
-    var batchRunTokens: [String: UUID] = [:]
+    @ObservationIgnored var batchRunTokens: [String: UUID] = [:]
     /// Transfers in flight, keyed by what they fetch, each with the downloads
     /// waiting on it: a second download of the same song or cover waits for
     /// the first rather than fetching — and filing — it again.
-    var transfersInFlight: [String: [CheckedContinuation<Void, Never>]] = [:]
+    @ObservationIgnored var transfersInFlight: [String: [CheckedContinuation<Void, Never>]] = [:]
     /// The highest download order handed out; see ``reserveOrders(count:)``.
-    var lastReservedOrder = 0
+    @ObservationIgnored var lastReservedOrder = 0
     /// Identifies the running artist-artwork sync, so a cancelled one that is
     /// still unwinding can't clear the state of the sync started after it.
-    var artistArtworkSyncToken: UUID?
+    @ObservationIgnored var artistArtworkSyncToken: UUID?
     /// Writes the manifest, in order; see ``persist()`` and ``persistSoon()``.
     let manifestWriter = ManifestWriter()
     /// How long ``persistSoon()`` waits before saving, so the per-song
     /// changes of a running download share one write.
     let manifestSaveDelay: Duration
     /// Counts manifest snapshots, so the writer can drop a stale one.
-    var manifestRevision = 0
-    var isManifestWriteScheduled = false
+    @ObservationIgnored var manifestRevision = 0
+    @ObservationIgnored var isManifestWriteScheduled = false
 
-    var client: JellyfinService?
+    @ObservationIgnored var client: JellyfinService?
     let directory: URL
     let manifestURL: URL
     let artworkDirectory: URL

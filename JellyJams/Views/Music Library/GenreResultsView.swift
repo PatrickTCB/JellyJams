@@ -8,8 +8,8 @@ import SwiftUI
 struct GenreResultsView: View {
     let genre: GenreRef
 
-    @EnvironmentObject private var session: SessionStore
-    @StateObject private var loader = LoadableModel(LibraryRepository.GenreContents())
+    @Environment(SessionStore.self) private var session
+    @State private var loader = LoadableModel(LibraryRepository.GenreContents())
 
     private var contents: LibraryRepository.GenreContents { loader.value }
 

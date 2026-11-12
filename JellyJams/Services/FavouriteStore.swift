@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// The single source of truth for which items are favourited.
 ///
@@ -16,15 +17,16 @@ import Foundation
 /// item gets the same answer for as long as the session lasts, whichever
 /// request the item arrived on.
 @MainActor
-final class FavouriteStore: ObservableObject {
+@Observable
+final class FavouriteStore {
     /// Items the user has changed this session, and what they changed them to.
-    @Published private var overrides: [String: Bool] = [:]
+    private var overrides: [String: Bool] = [:]
     /// Items with a write in flight, so the affordance can disable itself and
     /// a second tap can't race the first.
-    @Published private var inFlight: Set<String> = []
-    @Published private(set) var errorMessage: String?
+    private var inFlight: Set<String> = []
+    private(set) var errorMessage: String?
 
-    private var client: JellyfinService?
+    @ObservationIgnored private var client: JellyfinService?
 
     /// Points the store at a new session, discarding the previous account's
     /// changes. Pass `nil` on sign-out.

@@ -12,11 +12,11 @@ import SwiftUI
 /// Mixtapes are shown under their own names, without the ending the backend
 /// puts on them — see ``mixtapeName(_:)``.
 struct MixtapesView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var preferences: PreferencesStore
-    @EnvironmentObject private var playlistStore: PlaylistStore
-    @ObservedObject var model: PagedItems
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(PreferencesStore.self) private var preferences
+    @Environment(PlaylistStore.self) private var playlistStore
+    let model: PagedItems
 
     @State private var isComposingTape = false
     @State private var isShowingConfiguredTapes = false

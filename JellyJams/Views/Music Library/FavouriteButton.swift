@@ -12,7 +12,7 @@ struct FavouriteButton: View {
     var size: Font = .body
     #endif
 
-    @EnvironmentObject private var favourites: FavouriteStore
+    @Environment(FavouriteStore.self) private var favourites
 
     private var isFavourite: Bool { favourites.isFavourite(item) }
 

@@ -39,12 +39,12 @@ struct TrackRow: View {
         case play
     }
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var navigator: LibraryNavigator
-    @EnvironmentObject private var playlistStore: PlaylistStore
-    @EnvironmentObject private var favourites: FavouriteStore
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(LibraryNavigator.self) private var navigator
+    @Environment(PlaylistStore.self) private var playlistStore
+    @Environment(FavouriteStore.self) private var favourites
+    @Environment(DownloadStore.self) private var downloads
     /// Inside the Downloads section the row must issue no requests at all: no
     /// artwork fetch, and no background playlist-cache refresh on appear.
     @Environment(\.offlineBrowsing) private var offlineBrowsing

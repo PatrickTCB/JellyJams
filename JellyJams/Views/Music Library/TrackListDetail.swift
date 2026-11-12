@@ -18,11 +18,11 @@ struct TrackListDetail: View {
     var showsSimilarAlbums = false
     var downloaded = false
     
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var navigator: LibraryNavigator
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var player: PlayerController
-    @StateObject private var loader = LoadableModel<[BaseItemDto]>([])
+    @Environment(SessionStore.self) private var session
+    @Environment(LibraryNavigator.self) private var navigator
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PlayerController.self) private var player
+    @State private var loader = LoadableModel<[BaseItemDto]>([])
     /// Measured here rather than inside the row so the suggestion row can
     /// render nothing when it has nothing, and still know how much to ask for.
     @State private var contentWidth: CGFloat = 0

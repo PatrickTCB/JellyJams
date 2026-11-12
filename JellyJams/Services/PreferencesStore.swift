@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// The item an open-ended play request starts, with its transport settings.
 ///
@@ -39,7 +40,8 @@ struct DefaultPlaybackSetting: Codable, Equatable, Sendable {
 /// ``forgetBackend()`` covers the backend's share on its own for the
 /// backend's own Sign Out.
 @MainActor
-final class PreferencesStore: ObservableObject {
+@Observable
+final class PreferencesStore {
     private enum Key {
         static let showsSimilarItems = "showsSimilarItems"
         static let showsCompleteAlbumsOnly = "showsCompleteAlbumsOnly"
@@ -72,7 +74,7 @@ final class PreferencesStore: ObservableObject {
     /// ``SimilarItemsSection`` never appears, so its `task` never runs and
     /// Jellyfin is never asked. Someone turning this off to keep their server
     /// quiet gets exactly that.
-    @Published var showsSimilarItems: Bool {
+    var showsSimilarItems: Bool {
         didSet { defaults.set(showsSimilarItems, forKey: Key.showsSimilarItems) }
     }
 
@@ -83,7 +85,7 @@ final class PreferencesStore: ObservableObject {
     /// listen to, so albums that surfaced from one borrowed song shouldn't
     /// crowd it. Switching it off shows those partial albums too, which is how
     /// you find an album to finish downloading.
-    @Published var showsCompleteAlbumsOnly: Bool {
+    var showsCompleteAlbumsOnly: Bool {
         didSet { defaults.set(showsCompleteAlbumsOnly, forKey: Key.showsCompleteAlbumsOnly) }
     }
 
@@ -94,7 +96,7 @@ final class PreferencesStore: ObservableObject {
     /// Infinite Queue talk to — never holds a half-typed host. It alone
     /// decides nothing about the feature, because an address nobody
     /// registered with has no rules yet.
-    @Published var jellyJamsBackendAddress: String {
+    var jellyJamsBackendAddress: String {
         didSet { defaults.set(jellyJamsBackendAddress, forKey: Key.jellyJamsBackendAddress) }
     }
 
@@ -106,7 +108,7 @@ final class PreferencesStore: ObservableObject {
     ///
     /// Match through ``playlistNameFilter(for:)``, which trims it, rather
     /// than comparing against this directly.
-    @Published private(set) var mixtapeSuffix: String {
+    private(set) var mixtapeSuffix: String {
         didSet { defaults.set(mixtapeSuffix, forKey: Key.mixtapeSuffix) }
     }
     
@@ -152,12 +154,12 @@ final class PreferencesStore: ObservableObject {
     /// first and only settles it here once the backend agrees — which is also
     /// why joining is opt-in: the blend gathers a real account's listening
     /// for everyone in it, so nobody should be in it before asking to be.
-    @Published var serverPlaylistJoined: Bool {
+    var serverPlaylistJoined: Bool {
         didSet { defaults.set(serverPlaylistJoined, forKey: Key.serverPlaylistJoined) }
     }
     
     /// This is the name for the server playlist that the was set in the backend
-    @Published private(set) var serverPlaylist: String {
+    private(set) var serverPlaylist: String {
         didSet { defaults.set(serverPlaylist, forKey: Key.serverPlaylist) }
     }
 
@@ -166,20 +168,20 @@ final class PreferencesStore: ObservableObject {
     /// answer when it could be reached, this memory when it could not. The
     /// defaults are the backend's own — album 3 — so an account that never
     /// set limits is remembered the way the backend would answer it.
-    @Published var sameAlbumLimit: Int {
+    var sameAlbumLimit: Int {
         didSet { defaults.set(sameAlbumLimit, forKey: Key.sameAlbumLimit) }
     }
 
     /// The most tracks from one artist that the backend may put into a single
     /// generated mixtape for this account — the artist twin of
     /// ``sameAlbumLimit``, defaulting to the backend's own 5.
-    @Published var sameArtistLimit: Int {
+    var sameArtistLimit: Int {
         didSet { defaults.set(sameArtistLimit, forKey: Key.sameArtistLimit) }
     }
 
     /// What "play some music" starts. `nil` is the built-in favourites
     /// shuffle; a value names the item and transport settings the user chose.
-    @Published var defaultPlayback: DefaultPlaybackSetting? {
+    var defaultPlayback: DefaultPlaybackSetting? {
         didSet {
             guard let defaultPlayback,
                   let data = try? JSONEncoder().encode(defaultPlayback)
@@ -202,7 +204,7 @@ final class PreferencesStore: ObservableObject {
     /// the backend keeps no copy of it — so it is editable whether or not the
     /// backend can be reached; an unreachable backend simply means nothing
     /// extends.
-    @Published var infiniteQueueEnabled: Bool {
+    var infiniteQueueEnabled: Bool {
         didSet { defaults.set(infiniteQueueEnabled, forKey: Key.infiniteQueueEnabled) }
     }
 
@@ -210,7 +212,7 @@ final class PreferencesStore: ObservableObject {
     /// measured audio level, applying each track's loudness normalization gain
     /// — or its album's — as a gain on top of the player's volume. Off by
     /// default: normalization is a listening preference the user opts into.
-    @Published var audioNormalizationEnabled: Bool {
+    var audioNormalizationEnabled: Bool {
         didSet { defaults.set(audioNormalizationEnabled, forKey: Key.audioNormalizationEnabled) }
     }
 

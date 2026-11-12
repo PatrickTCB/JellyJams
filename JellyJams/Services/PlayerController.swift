@@ -1,6 +1,6 @@
 import Foundation
 import AVFoundation
-import Combine
+import Observation
 import OSLog
 #if os(iOS)
 import UIKit
@@ -40,39 +40,42 @@ private struct PlaybackState: Codable, Sendable {
 
 /// The ticking transport position: playback time and total length.
 ///
-/// Deliberately its own observable object, separate from ``PlayerController``:
-/// these values change every half second while playing, and `ObservableObject`
-/// invalidation is whole-object — publishing them on the controller re-renders
-/// every view that merely observes the queue, like album, playlist and queue
-/// lists. Only the scrubber and now-playing UI observe the clock.
+/// Its own observable object, separate from ``PlayerController``: these
+/// values change every half second while playing, and only the scrubber and
+/// now-playing UI observe them. The split began as a workaround for
+/// `ObservableObject`, whose whole-object invalidation re-rendered every view
+/// observing the queue on each tick; Observation tracks each property on its
+/// own, so the split is organisation now rather than a performance need.
 /// Writes belong to ``PlayerController``.
 @MainActor
-final class PlaybackClock: ObservableObject {
-    @Published var currentTime: Double = 0
-    @Published var duration: Double = 0
+@Observable
+final class PlaybackClock {
+    var currentTime: Double = 0
+    var duration: Double = 0
 }
 
 /// Owns audio playback: the queue, the `AVPlayer`, transport controls, shuffle
 /// and repeat, system Now Playing integration, and server playback reporting.
 @MainActor
-final class PlayerController: ObservableObject {
-    /// The transport position, published on its own so 0.5s time ticks don't
-    /// invalidate every view that observes the player for queue state.
+@Observable
+final class PlayerController {
+    /// The transport position, kept on an object of its own; see
+    /// ``PlaybackClock``.
     let clock = PlaybackClock()
-    @Published private(set) var queue: [QueueEntry] = []
-    @Published private(set) var currentIndex: Int?
-    @Published private(set) var isPlaying = false
-    @Published private(set) var isShuffled = false
+    private(set) var queue: [QueueEntry] = []
+    private(set) var currentIndex: Int?
+    private(set) var isPlaying = false
+    private(set) var isShuffled = false
     /// A user-facing message set when a track fails to load or play. Views
     /// observe this to present an alert offering Retry / Skip.
-    @Published private(set) var errorMessage: String?
-    @Published var repeatMode: RepeatMode = .repeatNone {
+    private(set) var errorMessage: String?
+    var repeatMode: RepeatMode = .repeatNone {
         didSet { updateNowPlaying() }
     }
     #if os(macOS)
     /// The app's playback volume, from 0 to 1, remembered across launches.
     /// iOS has no in-app volume: the hardware buttons and system controls own it.
-    @Published var volume: Float = PlayerController.storedVolume {
+    var volume: Float = PlayerController.storedVolume {
         didSet {
             let clamped = min(max(volume, 0), 1)
             if clamped != volume { volume = clamped; return }
@@ -92,7 +95,7 @@ final class PlayerController: ObservableObject {
     /// off or the item carries no gain. Applied on top of the player's volume
     /// so the user's own volume control keeps full say over the final level;
     /// `0` is no normalization, which is also the neutral multiplier.
-    private var normalizationGain: Double = 0 {
+    @ObservationIgnored private var normalizationGain: Double = 0 {
         didSet { applyNormalizationGain() }
     }
 
@@ -117,43 +120,45 @@ final class PlayerController: ObservableObject {
     }
 
     private let player = AVPlayer()
-    private var client: JellyfinService?
-    private weak var downloads: DownloadStore?
-    private weak var preferences: PreferencesStore?
-    private var preferencesObservation: AnyCancellable?
-    private var normalizationObservation: AnyCancellable?
+    @ObservationIgnored private var client: JellyfinService?
+    @ObservationIgnored private weak var downloads: DownloadStore?
+    @ObservationIgnored private weak var preferences: PreferencesStore?
+    /// Follow the preferences the player acts on as they change. Replaced on
+    /// every ``configure(preferences:)``, and cancelled with the player.
+    @ObservationIgnored private var infiniteQueueObservation: Task<Void, Never>?
+    @ObservationIgnored private var normalizationObservation: Task<Void, Never>?
     /// The Infinite Queue fetcher, configured from ``AppServices`` as the
     /// session and backend settings describe. Nil — or unconfigured — while
     /// there is no backend account to extend a queue with.
-    private var queueExtender: QueueExtender?
+    @ObservationIgnored private var queueExtender: QueueExtender?
 
     /// The user's favourite overrides, so the Now Playing transport — the
     /// lock screen heart — can flip the current track's favourite state exactly
     /// like an in-app tap does.
-    private var favourites: FavouriteStore?
-    private var favouritesObservation: AnyCancellable?
+    @ObservationIgnored private var favourites: FavouriteStore?
+    @ObservationIgnored private var favouritesObservation: Task<Void, Never>?
     /// The player's last observed time-control status. A change — starting,
     /// pausing, stalling to buffer, recovering — is one of the moments the
     /// lock screen's elapsed time is re-sent, since the system extrapolates
     /// it from the last update.
-    private var lastTimeControlStatus: AVPlayer.TimeControlStatus = .paused
+    @ObservationIgnored private var lastTimeControlStatus: AVPlayer.TimeControlStatus = .paused
     /// Replaced whenever the queue is swapped wholesale or deliberately cut
     /// short, so an extension fetched for an older queue can never land in
     /// the new one — the same guard ``BanStore`` keeps over its ban lists.
-    private var queueGeneration = UUID()
+    @ObservationIgnored private var queueGeneration = UUID()
     /// Whether an extension request is in flight. Extension checks run on
     /// every queue event, which arrive far faster than the backend answers;
     /// without this, one slow fetch would stack identical ones behind it.
-    private var isExtendingQueue = false
-    private var timeObserver: Any?
-    private var endObserver: NSObjectProtocol?
-    private var originalQueue: [QueueEntry]?
-    private var playSessionId = UUID().uuidString
-    private var lastProgressReport = Date.distantPast
-    private var hasActivePlayback = false
-    private var reportingTask: Task<Void, Never>?
-    private var itemStatusObserver: NSKeyValueObservation?
-    private var failedToEndObserver: NSObjectProtocol?
+    @ObservationIgnored private var isExtendingQueue = false
+    @ObservationIgnored private var timeObserver: Any?
+    @ObservationIgnored private var endObserver: NSObjectProtocol?
+    @ObservationIgnored private var originalQueue: [QueueEntry]?
+    @ObservationIgnored private var playSessionId = UUID().uuidString
+    @ObservationIgnored private var lastProgressReport = Date.distantPast
+    @ObservationIgnored private var hasActivePlayback = false
+    @ObservationIgnored private var reportingTask: Task<Void, Never>?
+    @ObservationIgnored private var itemStatusObserver: NSKeyValueObservation?
+    @ObservationIgnored private var failedToEndObserver: NSObjectProtocol?
     /// Whether the user has asked for playback, as distinct from whether the
     /// `AVPlayer` is producing sound right now.
     ///
@@ -162,18 +167,18 @@ final class PlayerController: ObservableObject {
     /// observer can write that before the interruption notification is even
     /// delivered. This flag only moves when something *asks* for a state
     /// change, which is what "was it playing before the call?" has to mean.
-    private var isPlaybackRequested = false
+    @ObservationIgnored private var isPlaybackRequested = false
     #if os(iOS)
-    private var sessionInactiveObserver: NSObjectProtocol?
-    private var resumptionObserver: NSObjectProtocol?
-    private var routeChangeObserver: NSObjectProtocol?
+    @ObservationIgnored private var sessionInactiveObserver: NSObjectProtocol?
+    @ObservationIgnored private var resumptionObserver: NSObjectProtocol?
+    @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
     /// Whether this app currently holds the audio session. Claiming it is what
     /// silences whatever else is playing, so it is tracked rather than
     /// re-requested on every transport action.
-    private var isAudioSessionActive = false
+    @ObservationIgnored private var isAudioSessionActive = false
     /// Whether playback was running when an interruption began, so it is only
     /// resumed if it was actually interrupted.
-    private var wasPlayingBeforeInterruption = false
+    @ObservationIgnored private var wasPlayingBeforeInterruption = false
     #endif
 
     var currentItem: BaseItemDto? {
@@ -244,27 +249,25 @@ final class PlayerController: ObservableObject {
         self.preferences = preferences
         // Turning Infinite Queue on mid-listen should top the queue up right
         // away, not at the next track change — a listener sitting on the last
-        // track would otherwise watch the toggle do nothing. The check hops
-        // through a `Task` because `@Published` emits in `willSet`: run
-        // synchronously from the emission, `infiniteQueueEnabled` still reads
-        // the old value and the fresh choice is missed. `dropFirst()` skips
-        // the subscription's replay of the current value: wiring is not a
-        // request to extend.
-        preferencesObservation = preferences?.$infiniteQueueEnabled
-            .dropFirst()
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in self?.maybeExtendQueue() }
+        // track would otherwise watch the toggle do nothing. A change arrives
+        // once it has landed, so the check reads the fresh choice.
+        // `dropFirst()` skips the value observation starts from: wiring is
+        // not a request to extend.
+        infiniteQueueObservation?.cancel()
+        infiniteQueueObservation = Task { [weak self] in
+            for await _ in Observations({ preferences?.infiniteQueueEnabled }).dropFirst() {
+                self?.maybeExtendQueue()
             }
-        normalizationObservation = preferences?.$audioNormalizationEnabled
-            .dropFirst()
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.normalizationGain = self.preferences?.audioNormalizationEnabled == true
-                        ? self.currentItem?.loudnessNormalizationGain ?? 0
-                        : 0
-                }
+        }
+        normalizationObservation?.cancel()
+        normalizationObservation = Task { [weak self] in
+            for await enabled in Observations({ preferences?.audioNormalizationEnabled }).dropFirst() {
+                guard let self else { return }
+                normalizationGain = enabled == true
+                    ? currentItem?.loudnessNormalizationGain ?? 0
+                    : 0
             }
+        }
     }
 
     func configure(queueExtender: QueueExtender?) {
@@ -273,16 +276,20 @@ final class PlayerController: ObservableObject {
 
     func configure(favourites: FavouriteStore?) {
         self.favourites = favourites
-        // The lock screen heart follows a favourite changed anywhere in the
-        // app while the track plays. The check hops through a `Task` because
-        // `objectWillChange` fires before the change lands.
-        favouritesObservation = favourites?.objectWillChange
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self, self.currentItem != nil else { return }
-                    NowPlayingCenter.shared.updateFavourite(self.isCurrentItemFavourite)
-                }
+        favouritesObservation?.cancel()
+        favouritesObservation = nil
+        guard favourites != nil else { return }
+        // The lock screen heart follows the current track's favourite state,
+        // changed anywhere in the app while the track plays. `dropFirst()`
+        // skips the value observation starts from: wiring changes no heart.
+        favouritesObservation = Task { [weak self] in
+            let favouriteStates = Observations { [weak self] in self?.isCurrentItemFavourite ?? false }
+            for await isFavourite in favouriteStates.dropFirst() {
+                guard let self else { return }
+                guard currentItem != nil else { continue }
+                NowPlayingCenter.shared.updateFavourite(isFavourite)
             }
+        }
     }
 
     // MARK: - State Persistence
@@ -431,8 +438,13 @@ final class PlayerController: ObservableObject {
 
     /// Tears down the observers that keep the `AVPlayer` (and this controller)
     /// alive. Without this, every discarded controller leaves a periodic time
-    /// observer running and several notification registrations behind.
+    /// observer running and several notification registrations behind — and
+    /// the tasks following its preferences and favourites waiting on changes
+    /// that no longer concern it.
     isolated deinit {
+        infiniteQueueObservation?.cancel()
+        normalizationObservation?.cancel()
+        favouritesObservation?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let failedToEndObserver { NotificationCenter.default.removeObserver(failedToEndObserver) }
@@ -949,15 +961,10 @@ final class PlayerController: ObservableObject {
                 // which is still "playing" to the user and to the transport.
                 // Treating only `.playing` as playing flipped the button back
                 // to Play mid-stream and undid what `resume()` had just set.
-                // Assigned only when it actually changes: `@Published` fires
-                // on every assignment, and this runs twice a second — a blind
-                // write here would re-render every view observing the player,
-                // which is the whole reason the clock lives in its own object.
+                // This runs twice a second, but an assignment that leaves the
+                // value as it was notifies no observer, so nothing re-renders.
                 let status = self.player.timeControlStatus
-                let playing = status != .paused
-                if self.isPlaying != playing {
-                    self.isPlaying = playing
-                }
+                self.isPlaying = status != .paused
                 if status != self.lastTimeControlStatus {
                     // Includes a stall and its recovery, which leave
                     // `isPlaying` alone but drift the extrapolated time.

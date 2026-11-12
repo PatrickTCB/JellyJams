@@ -12,6 +12,7 @@ import SwiftUI
 /// — drives one sheet hosted on a view that stays put, rather than each
 /// toolbar item owning a sheet of its own.
 @MainActor
-final class SettingsPresentation: ObservableObject {
-    @Published var isShowingSettings = false
+@Observable
+final class SettingsPresentation {
+    var isShowingSettings = false
 }

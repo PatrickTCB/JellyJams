@@ -17,7 +17,7 @@ extension View {
 /// an `if` instead re-creates the tab view when playback starts, which throws
 /// away every tab's `@State` — including its navigation stack.
 private struct NowPlayingTabAccessoryModifier: ViewModifier {
-    @EnvironmentObject private var player: PlayerController
+    @Environment(PlayerController.self) private var player
 
     func body(content: Content) -> some View {
         content
@@ -31,7 +31,7 @@ private struct NowPlayingTabAccessoryModifier: ViewModifier {
 /// The mini player as an iOS 26 tab bar accessory, condensed when the tab bar
 /// minimises on scroll.
 struct NowPlayingTabAccessory: View {
-    @EnvironmentObject private var player: PlayerController
+    @Environment(PlayerController.self) private var player
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
 
     var body: some View {

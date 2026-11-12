@@ -16,12 +16,12 @@ import SwiftUI
 struct PinnedItemsSection: View {
     let entries: [PinnedItemsStore.Entry]
 
-    @EnvironmentObject private var preferences: PreferencesStore
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var playlistStore: PlaylistStore
-    @EnvironmentObject private var navigator: LibraryNavigator
-    @EnvironmentObject private var pinnedItems: PinnedItemsStore
+    @Environment(PreferencesStore.self) private var preferences
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(PlaylistStore.self) private var playlistStore
+    @Environment(LibraryNavigator.self) private var navigator
+    @Environment(PinnedItemsStore.self) private var pinnedItems
 
     /// The pin whose removal has been offered and not yet answered.
     @State private var pinPendingRemoval: PinnedItemsStore.PinnedItem?

@@ -86,8 +86,8 @@ enum QueueExtensionPlan: Equatable, Sendable {
 /// What the backend can extend for follows the same rule bans do — a signed-in
 /// account, a saved address that parses, and a registration — because both
 /// endpoints key off the `userID` that `/register` put on the backend's books.
-/// Configured from ``AppServices`` on the same publisher trio, for the same
-/// reason: every value arrives from the publisher rather than being read back.
+/// Configured from ``AppServices`` alongside ``BanStore``, from the same
+/// session and settings.
 @MainActor
 final class QueueExtender {
     /// How many of the queue's ids seed one alchemy request. The queue of a

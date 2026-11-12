@@ -3,7 +3,7 @@ import SwiftUI
 /// A paginated, adaptive grid of items (albums, artists, playlists, genres).
 /// Each cell navigates directly through ``ItemDetailRouter``.
 struct ItemGrid: View {
-    @ObservedObject var model: PagedItems
+    let model: PagedItems
     var minCellWidth: CGFloat = 160
     var emptyMessage = "Nothing here yet"
     var emptySystemImage = "music.note"

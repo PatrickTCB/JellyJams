@@ -81,10 +81,10 @@ struct DownloadsView: View {
         }
     }
 
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var preferences: PreferencesStore
-    @EnvironmentObject private var session: SessionStore
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PlayerController.self) private var player
+    @Environment(PreferencesStore.self) private var preferences
+    @Environment(SessionStore.self) private var session
     @State private var tab: Tab = .albums
     @State private var confirmingDeleteAll = false
     /// The downloaded songs the user has selected (rows are keyed by track
@@ -195,7 +195,7 @@ struct DownloadsView: View {
                 // that turns it off lives in the menu it opens.
                 ToolbarItem(placement: .automatic) {
                     Menu {
-                        Toggle("Complete Albums Only", isOn: $preferences.showsCompleteAlbumsOnly)
+                        Toggle("Complete Albums Only", isOn: Bindable(preferences).showsCompleteAlbumsOnly)
                     } label: {
                         Image(systemName: preferences.showsCompleteAlbumsOnly
                                 ? "line.3.horizontal.decrease.circle.fill"
@@ -421,7 +421,7 @@ struct DownloadsView: View {
 /// it is on disk, the full ``DownloadedGroupContextMenu`` of offline actions,
 /// and a swipe to remove.
 struct DownloadedItemRow: View {
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(DownloadStore.self) private var downloads
     let group: DownloadStore.DownloadGroup
 
     var body: some View {
@@ -488,8 +488,8 @@ struct DownloadedItemRow: View {
 /// cover from disk. No server artwork URL is ever built; a downloaded tile's
 /// cover is its saved file or a placeholder, never a request.
 struct DownloadedGroupCell: View {
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var favourites: FavouriteStore
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(FavouriteStore.self) private var favourites
     let group: DownloadStore.DownloadGroup
 
     private var isArtist: Bool { group.kind == .artist }
@@ -555,9 +555,9 @@ struct DownloadedGroupCell: View {
 private struct DownloadedGroupContextMenu: ViewModifier {
     let group: DownloadStore.DownloadGroup
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var player: PlayerController
+    @Environment(SessionStore.self) private var session
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PlayerController.self) private var player
 
     func body(content: Content) -> some View {
         content.contextMenu {

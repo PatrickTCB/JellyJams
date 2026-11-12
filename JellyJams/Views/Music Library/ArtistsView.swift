@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ArtistsView: View {
-    @EnvironmentObject private var session: SessionStore
-    @ObservedObject var model: PagedItems
+    @Environment(SessionStore.self) private var session
+    let model: PagedItems
 
     var body: some View {
         ItemGrid(model: model, minCellWidth: 150, emptyMessage: "No artists", emptySystemImage: "music.mic")

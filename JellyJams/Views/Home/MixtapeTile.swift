@@ -6,10 +6,10 @@ import SwiftUI
 struct MixtapeTile: View {
     let mixtape: BaseItemDto
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var playlistStore: PlaylistStore
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(PlaylistStore.self) private var playlistStore
+    @Environment(PreferencesStore.self) private var preferences
 
     var body: some View {
         HomeItemTile(item: mixtape, title: preferences.mixtapeName(for: mixtape)) { _ in

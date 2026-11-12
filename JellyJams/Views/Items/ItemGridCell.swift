@@ -9,9 +9,9 @@ struct ItemGridCell: View {
     /// tiles, shown without the ending that identifies them as generated.
     var title: String?
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var favourites: FavouriteStore
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(SessionStore.self) private var session
+    @Environment(FavouriteStore.self) private var favourites
+    @Environment(DownloadStore.self) private var downloads
     @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     private var isArtist: Bool { item.itemType == .musicArtist }

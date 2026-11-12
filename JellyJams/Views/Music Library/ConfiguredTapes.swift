@@ -13,8 +13,8 @@ import SwiftUI
 /// a selection and the delete key on macOS, and the sheet tells the
 /// backend after the row is gone — the refusal puts the row back.
 struct ConfiguredTapes: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
     @Environment(\.dismiss) private var dismiss
 
     @State private var tapes: [BackendMixtape] = []

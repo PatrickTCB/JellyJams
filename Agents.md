@@ -19,5 +19,5 @@ Standard SwiftUI controls, behaviours, and design patterns should always be pref
   `xcodebuild -project JellyJams.xcodeproj -scheme JellyJams -destination 'generic/platform=iOS Simulator' build`
 
 ## Architecture & Tech
-- **DI**: Core services are provided via `EnvironmentObject` (see `JellyJamsApp.swift`).
+- **DI**: Core services are `@Observable` classes owned by `AppServices` and provided to views via `.environment(_:)` / `@Environment(Type.self)` (see `JellyJamsApp.swift`). Outside views, follow changes with `Observations`, not Combine.
 - **SDK**: Not pinned but should only be updated by human hands.

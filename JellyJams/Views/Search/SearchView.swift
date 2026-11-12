@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct SearchView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
 
     @State private var query = ""
-    @StateObject private var loader = LoadableModel(LibraryRepository.SearchResults())
+    @State private var loader = LoadableModel(LibraryRepository.SearchResults())
 
     private var results: LibraryRepository.SearchResults { loader.value }
 

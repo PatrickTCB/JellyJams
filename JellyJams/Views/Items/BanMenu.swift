@@ -21,7 +21,7 @@ struct BanMenu: View {
     /// with its navigation buttons.
     var selectedSongIds: [String]?
 
-    @EnvironmentObject private var bans: BanStore
+    @Environment(BanStore.self) private var bans
     @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     var body: some View {

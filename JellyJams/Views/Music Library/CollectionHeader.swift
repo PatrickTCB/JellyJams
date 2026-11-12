@@ -16,8 +16,8 @@ struct CollectionHeader: View {
     var onPlay: () -> Void
     var onShuffle: () -> Void
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(SessionStore.self) private var session
+    @Environment(DownloadStore.self) private var downloads
     /// Downloaded content never builds a server artwork request.
     @Environment(\.offlineBrowsing) private var offlineBrowsing
 

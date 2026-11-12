@@ -1,6 +1,6 @@
 #if os(iOS)
 import CarPlay
-import Combine
+import Observation
 import UIKit
 
 /// Builds and drives the CarPlay interface.
@@ -23,12 +23,12 @@ final class CarPlayController: NSObject {
     private var downloads: DownloadStore?
     private var pinnedItems: PinnedItemsStore?
 
-    /// The Home tab's list and its subscriptions to the store. All belong to
-    /// one CarPlay connection: the template is rebuilt on every connect, and
-    /// the subscriptions end on disconnect so a detached template is never
-    /// updated and a reconnect starts observing afresh.
+    /// The Home tab's list and the observations that keep it current. All
+    /// belong to one CarPlay connection: the template is rebuilt on every
+    /// connect, and the observations end on disconnect so a detached template
+    /// is never updated and a reconnect starts observing afresh.
     private var homeTemplate: CPListTemplate?
-    private var pinnedCancellables: [AnyCancellable] = []
+    private var pinnedObservations: [Task<Void, Never>] = []
     /// A pin refresh in flight, so a second trigger landing mid-request does
     /// not start another one.
     private var isRefreshingPins = false
@@ -58,7 +58,8 @@ final class CarPlayController: NSObject {
         if self.interfaceController === interfaceController {
             self.interfaceController = nil
             homeTemplate = nil
-            pinnedCancellables.removeAll()
+            pinnedObservations.forEach { $0.cancel() }
+            pinnedObservations = []
         }
     }
 
@@ -143,29 +144,29 @@ final class CarPlayController: NSObject {
 
     /// Mirrors the store onto the Home tab. Runs once the store and the
     /// template are both in place — whichever of `configure` and `connect`
-    /// lands second — and each subscription's immediate first emission covers
-    /// the state that is already current: rows from the entries as they
-    /// stand, a resolve for the pins as they stand. From then on the store
-    /// drives both, so pins made, removed or resolved on the phone while
-    /// CarPlay is connected update the car's rows live — including a sign-in
-    /// that happens after the car is already showing Home.
+    /// lands second — and each observation's first value covers the state
+    /// that is already current: rows from the entries as they stand, a
+    /// resolve for the pins as they stand. From then on the store drives
+    /// both, so pins made, removed or resolved on the phone while CarPlay is
+    /// connected update the car's rows live — including a sign-in that
+    /// happens after the car is already showing Home.
     private func observePinnedItems() {
-        guard pinnedCancellables.isEmpty, let pinnedItems, let homeTemplate else { return }
-        pinnedItems.$entries
-            .sink { [weak self] entries in
+        guard pinnedObservations.isEmpty, let pinnedItems, let homeTemplate else { return }
+        pinnedObservations.append(Task { [weak self] in
+            for await entries in Observations({ pinnedItems.entries }) {
                 guard let self else { return }
                 homeTemplate.updateSections([CPListSection(items: entries.map { self.pinnedRow($0) })])
             }
-            .store(in: &pinnedCancellables)
+        })
         // The pin set itself changing — a sign-in restoring pins, a pin made
         // or removed anywhere in the app — is the resolve trigger. Refresh
         // only ever rewrites entries, so this cannot feed itself.
-        pinnedItems.$pins
-            .sink { [weak self] pins in
-                guard !pins.isEmpty else { return }
+        pinnedObservations.append(Task { [weak self] in
+            for await pins in Observations({ pinnedItems.pins }) {
+                guard !pins.isEmpty else { continue }
                 self?.refreshPins()
             }
-            .store(in: &pinnedCancellables)
+        })
     }
 
     /// Resolves the pins against the server the way the phone's Home does on

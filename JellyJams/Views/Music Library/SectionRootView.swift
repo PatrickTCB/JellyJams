@@ -3,7 +3,7 @@ import SwiftUI
 /// Maps a ``LibrarySection`` to its root browsing view, supplying each one the
 /// cached model for the list it shows.
 struct SectionRootView: View {
-    @EnvironmentObject private var libraryCache: LibraryCache
+    @Environment(LibraryCache.self) private var libraryCache
     let section: LibrarySection
 
     var body: some View {
@@ -44,7 +44,7 @@ struct SectionRootView: View {
 /// push, of an album or artist from the section below, gets reconciled against
 /// the section screen instead of landing on top of it.
 struct LibraryHubView: View {
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(PreferencesStore.self) private var preferences
 
     var body: some View {
         List {

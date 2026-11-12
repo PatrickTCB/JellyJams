@@ -10,7 +10,7 @@ import SwiftUI
 /// enclosing ``TimelineView``, which is what lets it fall as samples age out
 /// of the tracker's window instead of freezing at the last landed byte.
 struct DownloadStatusBar: View {
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(DownloadStore.self) private var downloads
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in

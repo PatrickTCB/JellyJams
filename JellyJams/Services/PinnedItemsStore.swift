@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// The items the user has pinned to the home screen.
 ///
@@ -20,7 +21,8 @@ import Foundation
 /// changes nothing, because "the server didn't answer" is not "the item is
 /// gone".
 @MainActor
-final class PinnedItemsStore: ObservableObject {
+@Observable
+final class PinnedItemsStore {
     /// How many items can be pinned at once.
     static let maxPins = 5
 
@@ -92,12 +94,12 @@ final class PinnedItemsStore: ObservableObject {
         case cancelled
     }
 
-    @Published private(set) var pins: [PinnedItem] = []
-    @Published private(set) var entries: [Entry] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
+    private(set) var pins: [PinnedItem] = []
+    private(set) var entries: [Entry] = []
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
     /// The pin a tap is currently resolving, if any, so its tile can show it.
-    @Published private(set) var resolvingPinId: String?
+    private(set) var resolvingPinId: String?
 
     private enum Key {
         static let storage = "jellyjams.pinnedItems"
@@ -106,8 +108,8 @@ final class PinnedItemsStore: ObservableObject {
     private let defaults: UserDefaults
     /// Every account's pins, as persisted. Only the active account's slice is
     /// published; the rest is kept so signing back in restores it.
-    private var stored: [String: [PinnedItem]] = [:]
-    private var accountKey: String?
+    @ObservationIgnored private var stored: [String: [PinnedItem]] = [:]
+    @ObservationIgnored private var accountKey: String?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

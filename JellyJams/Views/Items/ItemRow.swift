@@ -8,8 +8,8 @@ struct ItemRow: View {
     var circular = false
     var placeholderSystemImage = "square.stack"
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(SessionStore.self) private var session
+    @Environment(DownloadStore.self) private var downloads
     @Environment(\.offlineBrowsing) private var offlineBrowsing
 
     /// Downloaded artwork comes from disk and is never re-requested; see

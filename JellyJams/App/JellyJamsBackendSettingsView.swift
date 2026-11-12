@@ -26,17 +26,17 @@ import SwiftUI
 /// server's own sign-out forgets everything the app stored, this
 /// relationship included, and never calls the backend.
 struct JellyJamsBackendSettingsView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
-    @EnvironmentObject private var bans: BanStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
+    @Environment(BanStore.self) private var bans
     @Environment(\.dismiss) private var dismiss
 
-    @StateObject private var model = JellyJamsBackendSettingsModel()
+    @State private var model = JellyJamsBackendSettingsModel()
     /// Owns the sheet's push stack so the bans screen can open banned
     /// artists, albums and the albums behind banned songs — the same
     /// value-based routing the library columns run, hosted here (see
-    /// ``libraryNavigationDestinations()``).
-    @StateObject private var navigator = LibraryNavigator()
+    /// ``libraryNavigationDestinations(navigator:)``).
+    @State private var navigator = LibraryNavigator()
     /// The address being typed, while it differs from the saved one; `nil`
     /// shows the saved address. Edits stay here until Save registers them:
     /// the saved address is the one bans and Infinite Queue talk to, so it
@@ -98,12 +98,13 @@ struct JellyJamsBackendSettingsView: View {
                     Text("The app forgets this backend — its address, your registration, limits, and Server Playlist membership. The account on the backend is left standing, with everything it holds. Your Jellyfin sign-in is untouched either way.")
                 }
             }
-            .libraryNavigationDestinations()
+            .libraryNavigationDestinations(navigator: navigator)
             .navigationDestination(for: BansScreen.self) { _ in
                 BannedItemsView()
+                    .environment(navigator)
             }
         }
-        .environmentObject(navigator)
+        .environment(navigator)
         .frame(minWidth: 380, minHeight: 420)
         .task { await refresh() }
     }
@@ -389,7 +390,7 @@ struct JellyJamsBackendSettingsView: View {
     /// agreed.
     private var limitsSection: some View {
         Section {
-            Stepper(value: $preferences.sameAlbumLimit, in: 1...20) {
+            Stepper(value: Bindable(preferences).sameAlbumLimit, in: 1...20) {
                 HStack {
                     Text("Same album limit")
                     Spacer()
@@ -400,7 +401,7 @@ struct JellyJamsBackendSettingsView: View {
             }
             .disabled(!model.canEditLimits)
 
-            Stepper(value: $preferences.sameArtistLimit, in: 1...20) {
+            Stepper(value: Bindable(preferences).sameArtistLimit, in: 1...20) {
                 HStack {
                     Text("Same artist limit")
                     Spacer()
@@ -461,7 +462,7 @@ struct JellyJamsBackendSettingsView: View {
     /// where the user left it.
     private var infiniteQueueSection: some View {
         Section {
-            Toggle("Infinite Queue", isOn: $preferences.infiniteQueueEnabled)
+            Toggle("Infinite Queue", isOn: Bindable(preferences).infiniteQueueEnabled)
         } header: {
             Text("Infinite Queue")
         } footer: {

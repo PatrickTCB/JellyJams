@@ -5,11 +5,11 @@ import AVKit
 /// The full-screen "Now Playing" view: large artwork, scrubber, transport, and
 /// shuffle/repeat controls, plus access to the queue.
 struct PlayerView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var clock: PlaybackClock
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(PlaybackClock.self) private var clock
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PreferencesStore.self) private var preferences
     @Environment(\.dismiss) private var dismiss
 
     @State private var isScrubbing = false

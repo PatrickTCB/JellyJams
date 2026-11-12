@@ -5,12 +5,12 @@ import SwiftUI
 /// renders, and hosts the alerts that need to outlive the screens raising
 /// them.
 struct RootContainerView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var favourites: FavouriteStore
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var playlistStore: PlaylistStore
-    @EnvironmentObject private var bans: BanStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(FavouriteStore.self) private var favourites
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PlaylistStore.self) private var playlistStore
+    @Environment(BanStore.self) private var bans
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {

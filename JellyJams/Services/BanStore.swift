@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// The kind of thing a ban removes from the playlists the backend generates.
 ///
@@ -129,41 +130,42 @@ struct BannedItem: Identifiable, Equatable, Sendable {
 /// saved address, and a registration — an app that never registered has no
 /// backend account to ban with.
 @MainActor
-final class BanStore: ObservableObject {
+@Observable
+final class BanStore {
     /// Whether the "Ban" menus have everything a `POST /ban` needs. Menus
     /// ask this before offering themselves, so nobody can reach an action
     /// that has nowhere to go.
-    @Published private(set) var canBan = false
+    private(set) var canBan = false
     /// Errors raised by ban actions in context menus. The menu is usually on
     /// its way out by the time the request fails, so these are hosted by the
     /// root container rather than the affordance that raised them — the same
     /// arrangement ``PlaylistStore`` keeps for playlist actions.
-    @Published private(set) var actionErrorMessage: String?
+    private(set) var actionErrorMessage: String?
 
     /// The bans, sorted into sections and into name order within each, as
     /// the backend last answered for this account. Empty is also an answer;
     /// ``hasBans`` and ``isLoading`` tell an empty list from nothing yet.
-    @Published private(set) var bannedArtists: [BannedItem] = []
-    @Published private(set) var bannedAlbums: [BannedItem] = []
-    @Published private(set) var bannedSongs: [BannedItem] = []
-    @Published private(set) var isLoading = false
+    private(set) var bannedArtists: [BannedItem] = []
+    private(set) var bannedAlbums: [BannedItem] = []
+    private(set) var bannedSongs: [BannedItem] = []
+    private(set) var isLoading = false
     /// The bans list's own failures — a refused read, unban or reset. The
     /// bans screen stays open through them and says so in place, unlike the
     /// context-menu sends whose failures the root alert hosts.
-    @Published private(set) var listErrorMessage: String?
+    private(set) var listErrorMessage: String?
 
-    private var userID: String?
+    @ObservationIgnored private var userID: String?
     /// The saved backend address, normalised — nil while there is no
     /// address, it will not parse, or the account has never registered.
-    private var backendURL: URL?
-    private var deviceInfo: DeviceInfo?
+    @ObservationIgnored private var backendURL: URL?
+    @ObservationIgnored private var deviceInfo: DeviceInfo?
     /// Passed through to every client the store builds. Production leaves
     /// it nil; tests install their stub loader with it.
-    private var sessionConfiguration: URLSessionConfiguration?
+    @ObservationIgnored private var sessionConfiguration: URLSessionConfiguration?
     /// Replaced on every load and every account change, so a response that
     /// predates either can never write it over the screen's newer state —
     /// ``PlaylistStore`` keeps the same guard over the playlist cache.
-    private var loadGeneration = UUID()
+    @ObservationIgnored private var loadGeneration = UUID()
 
     var hasBans: Bool {
         !bannedArtists.isEmpty || !bannedAlbums.isEmpty || !bannedSongs.isEmpty
@@ -179,12 +181,9 @@ final class BanStore: ObservableObject {
     }
 
     /// Points the store at the backend as the session and settings describe
-    /// it. Everything arrives as the value a publisher just emitted rather
-    /// than being read back off the stores — `@Published` announces a change
-    /// before it lands, so reading `preferences` here can still return the
-    /// old address, or the old suffix, mid-registration. `registered` speaks
-    /// the same rule ``PreferencesStore/isMixtapesActive`` does: a
-    /// registration that recorded a playlist-name ending.
+    /// it — ``AppServices`` passes them in whenever any of them changes.
+    /// `registered` speaks the same rule ``PreferencesStore/isMixtapesActive``
+    /// does: a registration that recorded a playlist-name ending.
     func configure(
         userID: String?,
         address: String,

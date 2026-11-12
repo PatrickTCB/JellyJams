@@ -20,11 +20,11 @@ struct NowPlayingBar: View {
 
     var presentation: Presentation = .docked
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @EnvironmentObject private var clock: PlaybackClock
-    @EnvironmentObject private var playerPresentation: PlayerPresentation
-    @EnvironmentObject private var downloads: DownloadStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @Environment(PlaybackClock.self) private var clock
+    @Environment(PlayerPresentation.self) private var playerPresentation
+    @Environment(DownloadStore.self) private var downloads
 
     private var isDocked: Bool { presentation == .docked }
     private var isInline: Bool { presentation == .accessoryInline }

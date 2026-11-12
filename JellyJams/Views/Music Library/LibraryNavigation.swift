@@ -13,8 +13,9 @@ import SwiftUI
 /// survives the row reloading its contents (which would otherwise cancel a
 /// `NavigationLink` mid-tap).
 @MainActor
-final class LibraryNavigator: ObservableObject {
-    @Published var path = NavigationPath()
+@Observable
+final class LibraryNavigator {
+    var path = NavigationPath()
 
     func open(_ item: BaseItemDto) { path.append(item) }
     func open(_ genre: GenreRef) { path.append(genre) }
@@ -27,20 +28,22 @@ final class LibraryNavigator: ObservableObject {
 /// and resolves through the single destinations registered here, so the whole
 /// app pushes onto this one ``LibraryNavigator/path``.
 ///
-/// The navigator is injected on the `NavigationStack` itself, not on its
-/// root: environment set inside the stack stays with the root view, while
-/// environment set on the stack reaches every screen it pushes — which is what
-/// lets ``SimilarItemsSection``, ``GenreChips`` and the row menus push from a
-/// pushed screen too.
+/// The navigator is set on the `NavigationStack`, which supplies its root, and
+/// handed to every screen the stack pushes by
+/// ``View/libraryNavigationDestinations(navigator:)``. The stack alone is not
+/// enough: on macOS, inside the sidebar-adaptable `TabView`, environment set
+/// on the stack never reaches the pushed screens — the album, playlist, artist
+/// and genre pages whose ``SimilarItemsSection``, ``GenreChips`` and row menus
+/// push through it.
 struct LibraryNavigationStack<Root: View>: View {
     @ViewBuilder var root: () -> Root
-    @StateObject private var navigator = LibraryNavigator()
+    @State private var navigator = LibraryNavigator()
 
     var body: some View {
         NavigationStack(path: $navigator.path) {
             root()
-                .libraryNavigationDestinations()
+                .libraryNavigationDestinations(navigator: navigator)
         }
-        .environmentObject(navigator)
+        .environment(navigator)
     }
 }

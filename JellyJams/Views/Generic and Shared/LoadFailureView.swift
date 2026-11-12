@@ -31,7 +31,7 @@ struct LoadFailureOverlay: View {
     /// offline case can decide whether to re-check server reachability.
     let retry: () async -> Bool
 
-    @EnvironmentObject private var session: SessionStore
+    @Environment(SessionStore.self) private var session
 
     var body: some View {
         if session.serverReachable {

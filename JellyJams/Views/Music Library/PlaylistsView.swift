@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct PlaylistsView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
-    @ObservedObject var model: PagedItems
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
+    let model: PagedItems
 
     /// The playlists the user made. While the app is registered with a
     /// backend, the mixtapes it builds belong to that section instead and are

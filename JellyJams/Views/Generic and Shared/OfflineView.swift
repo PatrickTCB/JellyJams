@@ -13,7 +13,7 @@ struct OfflineView: View {
     var message: String = "Check your connection to the Jellyfin server and try again."
     let retry: () async -> Bool
 
-    @EnvironmentObject private var session: SessionStore
+    @Environment(SessionStore.self) private var session
 
     var body: some View {
         ContentUnavailableView {

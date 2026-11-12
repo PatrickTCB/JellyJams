@@ -8,9 +8,9 @@ struct ArtistDetailView: View {
     /// summary of what the artist sounds like.
     private static let derivedGenreLimit = 8
 
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var player: PlayerController
-    @StateObject private var loader = LoadableModel(LibraryRepository.ArtistOverview())
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
+    @State private var loader = LoadableModel(LibraryRepository.ArtistOverview())
     @State private var contentWidth: CGFloat = 0
 
     private var overview: LibraryRepository.ArtistOverview { loader.value }

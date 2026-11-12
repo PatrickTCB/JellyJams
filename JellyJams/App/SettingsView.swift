@@ -8,8 +8,8 @@ import SwiftUI
 /// iOS has no settings scene, so ``MainShellView`` presents the same form as a
 /// sheet and this view supplies its own navigation chrome.
 struct SettingsView: View {
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PreferencesStore.self) private var preferences
     #if os(iOS)
     @Environment(\.dismiss) private var dismiss
     #endif
@@ -68,7 +68,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Show Similar Albums & Artists", isOn: $preferences.showsSimilarItems)
+                Toggle("Show Similar Albums & Artists", isOn: Bindable(preferences).showsSimilarItems)
             } header: {
                 Text("Library")
             } footer: {
@@ -76,7 +76,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Normalize Volume", isOn: $preferences.audioNormalizationEnabled)
+                Toggle("Normalize Volume", isOn: Bindable(preferences).audioNormalizationEnabled)
             } header: {
                 Text("Audio")
             } footer: {

@@ -1,19 +1,20 @@
-import Combine
 import Foundation
+import Observation
 
 /// Caches the signed-in user's audio playlists so "Add to Playlist" menus can
 /// be built instantly instead of hitting the server once per menu.
 @MainActor
-final class PlaylistStore: ObservableObject {
-    @Published private(set) var playlists: [BaseItemDto] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var errorMessage: String?
+@Observable
+final class PlaylistStore {
+    private(set) var playlists: [BaseItemDto] = []
+    private(set) var isLoading = false
+    private(set) var errorMessage: String?
     /// Errors raised by "Add to Playlist"-style actions in context menus. The
     /// menu is usually on its way out by the time the request fails, so these
     /// are hosted by the root container rather than the affordance that raised
     /// them. Kept separate from ``errorMessage``, which covers background
     /// cache refreshes that shouldn't interrupt the user with an alert.
-    @Published private(set) var actionErrorMessage: String?
+    private(set) var actionErrorMessage: String?
 
     /// How long a cached list is trusted before a menu triggers a refresh.
     private let staleInterval: TimeInterval = 300
@@ -21,11 +22,11 @@ final class PlaylistStore: ObservableObject {
     /// outage turns into one request per grid cell that scrolls into view.
     private let retryInterval: TimeInterval = 30
 
-    private var client: JellyfinService?
-    private var loadTask: Task<Void, Never>?
-    private var generation = UUID()
-    private var lastAttempt: Date?
-    private var lastAttemptSucceeded = false
+    @ObservationIgnored private var client: JellyfinService?
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var lastAttempt: Date?
+    @ObservationIgnored private var lastAttemptSucceeded = false
 
     var hasPlaylists: Bool { !playlists.isEmpty }
 

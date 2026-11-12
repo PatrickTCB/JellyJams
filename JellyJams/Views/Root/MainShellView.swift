@@ -14,13 +14,13 @@ struct MainShellView: View {
     /// Raised by the Home toolbar's sparkles button; the sheet itself is
     /// hosted above the tabs in ``body``, like the player and settings ones.
     @State private var isPresentingTextToTunes = false
-    @EnvironmentObject private var session: SessionStore
-    @EnvironmentObject private var playerPresentation: PlayerPresentation
-    @EnvironmentObject private var downloads: DownloadStore
-    @EnvironmentObject private var preferences: PreferencesStore
+    @Environment(SessionStore.self) private var session
+    @Environment(PlayerPresentation.self) private var playerPresentation
+    @Environment(DownloadStore.self) private var downloads
+    @Environment(PreferencesStore.self) private var preferences
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @EnvironmentObject private var settingsPresentation: SettingsPresentation
+    @Environment(SettingsPresentation.self) private var settingsPresentation
     #endif
 
     /// The library sections the sidebar offers, Mixtapes among them only while
@@ -31,7 +31,7 @@ struct MainShellView: View {
 
     var body: some View {
         settingsHost
-            .sheet(isPresented: $playerPresentation.isShowingPlayer) { PlayerView() }
+            .sheet(isPresented: Bindable(playerPresentation).isShowingPlayer) { PlayerView() }
             // Hosted here rather than by the toolbar button that raises it,
             // for the settings sheet's own reason: a sheet owned by a
             // toolbar item dies with the tab bar teardown on iOS.
@@ -59,7 +59,7 @@ struct MainShellView: View {
     @ViewBuilder private var settingsHost: some View {
         #if os(iOS)
         layout
-            .sheet(isPresented: $settingsPresentation.isShowingSettings) { SettingsView() }
+            .sheet(isPresented: Bindable(settingsPresentation).isShowingSettings) { SettingsView() }
         #else
         layout
         #endif
