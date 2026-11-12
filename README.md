@@ -81,7 +81,7 @@ meant to make browsing your library with the keyboard a breeze.
 * **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — `brew install xcodegen`
 * A **Jellyfin server**. The pinned SDK is generated from the **Jellyfin 12** API, so a
   Jellyfin 12 server is expected.
-* Deployment targets are **macOS 15** and **iOS/iPadOS 27**
+* Deployment targets are **macOS 27** and **iOS/iPadOS 27**
 
 ## Building
 

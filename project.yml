@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: net.aseriesoftubes
   createIntermediateGroups: true
   deploymentTarget:
-    macOS: "15.0"
+    macOS: "27.0"
     iOS: "27.0"
   groupSortPosition: top
 
@@ -29,9 +29,6 @@ targets:
   JellyJams:
     type: application
     supportedDestinations: [macOS, iOS]
-    deploymentTarget:
-      macOS: "15.0"
-      iOS: "27.0"
     sources:
       - path: JellyJams
         type: syncedFolder
@@ -43,6 +40,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: net.aseriesoftubes.JellyJams
         PRODUCT_NAME: JellyJams
+        # Sparkle decides whether an update is newer by CURRENT_PROJECT_VERSION
+        # (the build number), so bump it along with MARKETING_VERSION.
+        MARKETING_VERSION: "2.1.10"
+        CURRENT_PROJECT_VERSION: "92"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: JellyJams/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: iOS
@@ -66,9 +67,6 @@ targets:
   JellyJamsTests:
     type: bundle.unit-test
     supportedDestinations: [macOS, iOS]
-    deploymentTarget:
-      macOS: "15.0"
-      iOS: "27.0"
     sources:
       - path: JellyJamsTests
     dependencies:
