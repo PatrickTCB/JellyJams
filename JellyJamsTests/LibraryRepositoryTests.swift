@@ -91,7 +91,7 @@ final class LibraryRepositoryTests: XCTestCase {
     func testQueryDefaultsToTheListsOwnSort() async throws {
         let request = try await recordPage(for: LibraryQuery(list: .albums))
 
-        XCTAssertEqual(request.values(for: "sortBy"), ["AlbumArtist", "SortName"])
+        XCTAssertEqual(request.values(for: "sortBy"), ["AlbumArtist", "PremiereDate", "SortName"])
         XCTAssertEqual(request.value(for: "sortOrder"), "Ascending")
     }
 
