@@ -1063,18 +1063,7 @@ final class PlayerController: ObservableObject {
     }
 
     /// Fetches the HTTP status code of the item's most recent logged error.
-    ///
-    /// `errorLog()` used to be synchronous but could block the calling thread,
-    /// so it was replaced by this async variant in macOS/iOS 27. iOS targets 27
-    /// outright; macOS still supports older systems, where the synchronous
-    /// property remains correct (and only starts warning once the deployment
-    /// target reaches 27).
     nonisolated private static func lastErrorStatusCode(of item: AVPlayerItem) async -> Int? {
-        #if os(macOS)
-        guard #available(macOS 27, *) else {
-            return item.errorLog()?.events.last?.errorStatusCode
-        }
-        #endif
         guard let log = await item.errorLog else { return nil }
         return log.events.last?.errorStatusCode
     }

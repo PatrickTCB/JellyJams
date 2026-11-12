@@ -1,44 +1,12 @@
 import SwiftUI
 
-extension View {
-    /// Docks the persistent ``NowPlayingBar`` below this view.
-    ///
-    /// The bar renders nothing while the queue is empty, so the inset collapses
-    /// to zero height and the layout is untouched until playback starts.
-    ///
-    /// Apply this to a tab's *content* rather than to a `TabView`: an inset
-    /// added around a tab view is laid out outside the tab bar, so the bar ends
-    /// up covering it.
-    func nowPlayingDock() -> some View {
-        safeAreaInset(edge: .bottom, spacing: 0) {
-            NowPlayingBar()
-        }
-    }
-}
-
 #if os(iOS)
 extension View {
-    /// Docks the mini player inside a tab's content on OS versions without the
-    /// tab bar accessory API. On iOS 26.1+ the tab view hosts the bar via
-    /// ``nowPlayingTabAccessory()`` instead, so this is a no-op there — which,
-    /// at this deployment target, is every supported system.
-    @ViewBuilder func nowPlayingTabContentDock() -> some View {
-        if #available(iOS 26.1, *) {
-            self
-        } else {
-            nowPlayingDock()
-        }
-    }
-
-    /// Attaches the mini player to the tab bar as a bottom accessory on iOS
-    /// 26.1+, floating it above the tab bar and letting it collapse alongside
-    /// the bar as the user scrolls.
-    @ViewBuilder func nowPlayingTabAccessory() -> some View {
-        if #available(iOS 26.1, *) {
-            modifier(NowPlayingTabAccessoryModifier())
-        } else {
-            self
-        }
+    /// Attaches the mini player to the tab bar as a bottom accessory, floating
+    /// it above the tab bar and letting it collapse alongside the bar as the
+    /// user scrolls.
+    func nowPlayingTabAccessory() -> some View {
+        modifier(NowPlayingTabAccessoryModifier())
     }
 }
 
@@ -48,7 +16,6 @@ extension View {
 /// The `isEnabled:` overload matters: applying `tabViewBottomAccessory` inside
 /// an `if` instead re-creates the tab view when playback starts, which throws
 /// away every tab's `@State` — including its navigation stack.
-@available(iOS 26.1, *)
 private struct NowPlayingTabAccessoryModifier: ViewModifier {
     @EnvironmentObject private var player: PlayerController
 
@@ -63,7 +30,6 @@ private struct NowPlayingTabAccessoryModifier: ViewModifier {
 
 /// The mini player as an iOS 26 tab bar accessory, condensed when the tab bar
 /// minimises on scroll.
-@available(iOS 26.0, *)
 struct NowPlayingTabAccessory: View {
     @EnvironmentObject private var player: PlayerController
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement

@@ -56,15 +56,9 @@ struct PlayerView: View {
 
     private var handle: some View {
         HStack {
-            if #available(iOS 26, macOS 26, *) {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.down").font(.headline)
-                }.buttonStyle(.glassProminent)
-            } else {
-                Button { dismiss() } label: {
-                    Image(systemName: "chevron.down").font(.headline)
-                }.buttonStyle(.bordered)
-            }
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.down").font(.headline)
+            }.buttonStyle(.glassProminent)
             Spacer()
             if let item = player.currentItem {
                 // The same submenu the song's context menu offers — the song,

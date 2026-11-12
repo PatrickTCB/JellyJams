@@ -176,9 +176,6 @@ struct TrackListDetail: View {
         .task(id: headerItem.id) { await reload() }
         .refreshableWhenAvailable(!downloaded) { await reload() }
         .refreshToolbarItem(isAvailable: !downloaded) { await reload() }
-        #if os(iOS)
-        .nowPlayingTabContentDock()
-        #endif
     }
 
     // MARK: - Track rows

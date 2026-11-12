@@ -8,8 +8,7 @@ import SwiftUI
 ///   portrait on iPad.
 ///
 /// The persistent ``NowPlayingBar`` is hosted as an iOS 26 tab bar accessory
-/// on iOS — every supported version has the API — and docked below the tab
-/// view on macOS.
+/// on iOS and docked below the tab view on macOS.
 struct MainShellView: View {
     @State private var selection: LibrarySection = .home
     /// Raised by the Home toolbar's sparkles button; the sheet itself is
@@ -84,9 +83,8 @@ struct MainShellView: View {
     // MARK: - iPhone tabs
 
     #if os(iOS)
-    /// The tab bar hosts the mini player as a bottom accessory (iOS 26.1+,
-    /// which is every supported iOS), floating it above the bar instead of
-    /// covering it.
+    /// The tab bar hosts the mini player as a bottom accessory, floating it
+    /// above the bar instead of covering it.
     private var tabLayout: some View {
         TabView(selection: $selection) {
             Tab(LibrarySection.home.title, systemImage: LibrarySection.home.systemImage, value: LibrarySection.home) {

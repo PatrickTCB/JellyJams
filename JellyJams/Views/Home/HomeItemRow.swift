@@ -53,9 +53,6 @@ extension HomeItemRow where Trailing == EmptyView {
 /// reorder. SwiftUI never delivers this row's drags to it, so every
 /// dropped tile springs back.)
 ///
-/// The reordering API needs macOS 27, so on earlier macOS versions this is
-/// the plain row and its order is fixed.
-///
 /// It is a sibling of ``HomeItemRow`` rather than a mode of it because
 /// `.reorderable()` must sit on the `ForEach` itself — SwiftUI's list
 /// identity only survives the chain when the modifier is unconditional —
@@ -77,41 +74,36 @@ struct ReorderableHomeItemRow<Item: Identifiable, Content: View>: View where Ite
     }
 
     var body: some View {
-        if #available(macOS 27, *) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 16) {
-                    ForEach(items) { item in
-                        // The stack makes every tile a single view. A tile
-                        // whose body opens with an `if` or `switch` — as
-                        // HomeItemTile and PinnedItemsSection's tiles do —
-                        // otherwise crashes SwiftUI as the drag lifts
-                        // ("Unexpected identifier type"). `.id`, `.frame`
-                        // and other modifiers distribute over the branches
-                        // and do not help; `AnyView` crashes too.
-                        ZStack {
-                            content(item)
-                        }
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: 16) {
+                ForEach(items) { item in
+                    // The stack makes every tile a single view. A tile
+                    // whose body opens with an `if` or `switch` — as
+                    // HomeItemTile and PinnedItemsSection's tiles do —
+                    // otherwise crashes SwiftUI as the drag lifts
+                    // ("Unexpected identifier type"). `.id`, `.frame`
+                    // and other modifiers distribute over the branches
+                    // and do not help; `AnyView` crashes too.
+                    ZStack {
+                        content(item)
                     }
-                    .reorderable()
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 4)
+                .reorderable()
             }
-            .reorderContainer(for: Item.self) { difference in
-                // The API declares this closure nonisolated, but a drop is a
-                // UI event on the main actor.
-                MainActor.assumeIsolated {
-                    moveTile(within: difference)
-                }
+            .padding(.horizontal)
+            .padding(.vertical, 4)
+        }
+        .reorderContainer(for: Item.self) { difference in
+            // The API declares this closure nonisolated, but a drop is a
+            // UI event on the main actor.
+            MainActor.assumeIsolated {
+                moveTile(within: difference)
             }
-        } else {
-            HomeItemRow(items: items, content: content)
         }
     }
 
     /// The reordering API's drop, translated for `move`: the dragged tile's
     /// item, and the index of the tile it landed before.
-    @available(macOS 27, *)
     private func moveTile(within difference: ReorderDifference<Item.ID, ReorderableSingleCollectionIdentifier>) {
         // Tiles move one at a time.
         guard let id = difference.sources.first,

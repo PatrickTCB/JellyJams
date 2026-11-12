@@ -12,8 +12,7 @@ import SwiftUI
 /// The user sets the row's order themselves. With more than one pin, a tile
 /// can be dragged along the row — long-press on iOS, click-drag on macOS —
 /// and dropping it moves the pin there. The new order is persisted with the
-/// pins. Before macOS 27, which lacks SwiftUI's reordering API, the row
-/// keeps its order.
+/// pins.
 struct PinnedItemsSection: View {
     let entries: [PinnedItemsStore.Entry]
 

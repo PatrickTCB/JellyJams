@@ -55,10 +55,6 @@ struct ArtistDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task(id: artist.id) { await load() }
-        #if os(iOS)
-        .nowPlayingTabContentDock()
-        #endif
-        
     }
 
     /// The artist's own genres, falling back to the genres of their albums.

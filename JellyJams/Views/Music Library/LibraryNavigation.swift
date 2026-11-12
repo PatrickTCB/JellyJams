@@ -40,9 +40,6 @@ struct LibraryNavigationStack<Root: View>: View {
         NavigationStack(path: $navigator.path) {
             root()
                 .libraryNavigationDestinations()
-                #if os(iOS)
-                .nowPlayingTabContentDock()
-                #endif
         }
         .environmentObject(navigator)
     }
