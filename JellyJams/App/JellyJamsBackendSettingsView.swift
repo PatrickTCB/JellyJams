@@ -105,8 +105,11 @@ struct JellyJamsBackendSettingsView: View {
             }
         }
         .environment(navigator)
-        .frame(minWidth: 380, minHeight: 420)
+        .frame(minWidth: 300, minHeight: 420, idealHeight: 800)
         .task { await refresh() }
+        #if os(macOS)
+        //.background(ResizableWindow())
+        #endif
     }
 
     // MARK: - The backend's address

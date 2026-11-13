@@ -43,10 +43,8 @@ struct SettingsView: View {
             // the grouped form scrolls below that.
             .frame(
                 minWidth: 420,
-                idealWidth: 460,
                 maxWidth: .infinity,
                 minHeight: 320,
-                idealHeight: 420,
                 maxHeight: .infinity
             )
             .background(ResizableWindow())

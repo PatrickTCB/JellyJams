@@ -123,7 +123,7 @@ struct JellyJamsApp: App {
         // wrapped explanation is squeezed. `contentMinSize` keeps the minimums
         // the content asks for and hands the rest to the user.
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 460, height: 420)
+        .defaultSize(width: 500, height: 920)
         #endif
     }
 }
