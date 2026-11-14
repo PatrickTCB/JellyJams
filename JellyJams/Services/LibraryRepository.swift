@@ -177,6 +177,20 @@ struct LibraryRepository: Sendable {
         )
         return result.items ?? []
     }
+    
+    func mostPlayedItems(_ kind: LatestKind, limit: Int) async throws -> [BaseItemDto] {
+        let client = try requireClient()
+        guard limit > 0 else { return [] }
+        let result = try await client.getItems(
+            includeItemTypes: [kind.itemType],
+            recursive: true,
+            sortBy: .playCount,
+            sortOrder: .descending,
+            filters: [ItemFilter.isPlayed],
+            limit: limit
+        )
+        return result.items ?? []
+    }
 
     /// Resolves specific item ids, in whatever order the server answers.
     ///

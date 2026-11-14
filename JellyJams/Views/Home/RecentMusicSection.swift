@@ -13,11 +13,11 @@ struct RecentMusicSection: View {
             Text(heading)
                 .font(.title2.bold())
                 .padding(.horizontal)
-            if !latest.albums.isEmpty {
-                row("Albums", items: latest.albums, section: .albums)
+            if !latest.recentAlbums.isEmpty {
+                row("Recently Added Albums", items: latest.recentAlbums, section: .albums)
             }
-            if !latest.artists.isEmpty {
-                row("Artists", items: latest.artists, section: .artists)
+            if !latest.topAlbums.isEmpty {
+                row("Frequently Played Albums", items: latest.topAlbums, section: .albums)
             }
         }
     }

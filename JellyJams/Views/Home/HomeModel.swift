@@ -4,7 +4,7 @@ import Observation
 /// The phrases the Recent Music header rotates through. Adding one to
 /// ``options`` is all it takes to expand the rotation.
 enum RecentMusicHeading {
-    static let options = ["New Tunage", "New Jams", "New Music", "What's New", "Latest Music", "Fresh Cuts"]
+    static let options = ["Current Favourites & New Tunage", "Classic Sounds & New Jams", "Familiar Sounds & New Music", "What's Familiar & What's New", "Loved & Latest Music", "Well Worn Albums & Fresh Cuts"]
 
     /// A heading other than `current` where possible, so consecutive builds of
     /// the home screen don't repeat the same phrase.
@@ -20,10 +20,10 @@ enum RecentMusicHeading {
 @Observable
 final class HomeModel {
     struct Latest {
-        var albums: [BaseItemDto] = []
-        var artists: [BaseItemDto] = []
+        var recentAlbums: [BaseItemDto] = []
+        var topAlbums: [BaseItemDto] = []
 
-        var isEmpty: Bool { albums.isEmpty && artists.isEmpty }
+        var isEmpty: Bool { recentAlbums.isEmpty && topAlbums.isEmpty }
     }
 
     /// How many tiles each Recent Music row asks for.
@@ -53,8 +53,8 @@ final class HomeModel {
     }
 
     private func fetchLatest(using library: LibraryRepository) async throws -> Latest {
-        async let albums = library.latestItems(.albums, limit: Self.latestLimit)
-        async let artists = library.latestItems(.artists, limit: Self.latestLimit)
-        return try await Latest(albums: albums, artists: artists)
+        async let recentAlbums = library.latestItems(.albums, limit: Self.latestLimit)
+        async let topAlbums = library.mostPlayedItems(.albums, limit: Self.latestLimit)
+        return try await Latest(recentAlbums: recentAlbums, topAlbums: topAlbums)
     }
 }
