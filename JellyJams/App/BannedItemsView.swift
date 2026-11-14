@@ -152,7 +152,7 @@ private struct BannedItemRow: View {
     #endif
 
     var body: some View {
-        #if os(iOS)
+        #if !os(macOS)
         if let target = banned.navigationTarget {
             NavigationLink(value: target) { label }
         } else {

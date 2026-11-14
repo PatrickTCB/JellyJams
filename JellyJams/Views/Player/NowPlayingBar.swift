@@ -88,7 +88,11 @@ struct NowPlayingBar: View {
                 .padding(.vertical, isInline ? 8 : 12)
                 .overlay(alignment: .bottom) { if isDocked { progressLine } }
             }
+            #if os(tvOS)
+            .background { if isDocked { Rectangle().fill(.regularMaterial) } }
+            #else
             .background { if isDocked { Rectangle().fill(.bar) } }
+            #endif
         }
     }
 

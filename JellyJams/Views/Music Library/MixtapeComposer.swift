@@ -86,7 +86,11 @@ struct MixtapeComposer: View {
 
     private var alchemySection: some View {
         Section {
+            #if os(tvOS)
+            TextField("Percent", value: $alchemyPercent, format: .number)
+            #else
             Slider(value: $alchemyPercent, in: 0...100, step: 1)
+            #endif
         } header: {
             HStack {
                 Text("Alchemy Percentage")

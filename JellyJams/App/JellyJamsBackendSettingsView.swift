@@ -589,6 +589,10 @@ struct JellyJamsBackendSettingsView: View {
     /// agreed.
     private var limitsSection: some View {
         Section {
+            #if os(tvOS)
+            TextField("Same album limit", value: Bindable(preferences).sameAlbumLimit, format: .number)
+                .disabled(!model.canEditLimits)
+            #else
             Stepper(value: Bindable(preferences).sameAlbumLimit, in: 1...20) {
                 HStack {
                     Text("Same album limit")
@@ -599,7 +603,12 @@ struct JellyJamsBackendSettingsView: View {
                 }
             }
             .disabled(!model.canEditLimits)
+            #endif
 
+            #if os(tvOS)
+            TextField("Same artist limit", value: Bindable(preferences).sameArtistLimit, format: .number)
+                .disabled(!model.canEditLimits)
+            #else
             Stepper(value: Bindable(preferences).sameArtistLimit, in: 1...20) {
                 HStack {
                     Text("Same artist limit")
@@ -610,6 +619,7 @@ struct JellyJamsBackendSettingsView: View {
                 }
             }
             .disabled(!model.canEditLimits)
+            #endif
 
             Button("Save") { saveLimits() }
                 .disabled(!model.canEditLimits)

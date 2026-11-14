@@ -39,7 +39,9 @@ struct QuickConnectSheet: View {
                         Spacer()
                         Text(code)
                             .font(.system(.largeTitle, design: .monospaced))
+                            #if !os(tvOS)
                             .textSelection(.enabled)
+                            #endif
                         Spacer()
                     }
                     .padding(.vertical, 4)
@@ -55,6 +57,18 @@ struct QuickConnectSheet: View {
                     Text("Enter this code on your Jellyfin server's Quick Connect page, signed in as “\(userName)”. It expires in a couple of minutes; if it gets stale, start a new Sign In from here.")
                 }
 
+                #if os(tvOS)
+                // tvOS has no browser to hand the URL to, so show the address
+                // to open on another device instead of a link.
+                Section {
+                    Text(quickConnectURL.absoluteString)
+                        .font(.callout)
+                } header: {
+                    Text("On your server")
+                } footer: {
+                    Text("On another device, open this address and enter the code, signed in as “\(userName)”. Once it’s accepted, come back and press Done, then press Verify.")
+                }
+                #else
                 Section {
                     Link(destination: quickConnectURL) {
                         Label("Open Quick Connect in your browser", systemImage: "safari")
@@ -64,6 +78,7 @@ struct QuickConnectSheet: View {
                 } footer: {
                     Text("This opens \(jellyfinHost.host() ?? "your Jellyfin server")/web/#/quickconnect in your default browser. Once the code is accepted, come back and press Done, then press Verify.")
                 }
+                #endif
             }
             .navigationTitle("Quick Connect")
             #if os(iOS)

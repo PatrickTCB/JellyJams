@@ -73,7 +73,7 @@ struct QueueView: View {
     private var queueList: some View {
         let start = player.visibleQueueStartIndex
         let entries = player.queue[start...]
-        #if os(iOS)
+        #if !os(macOS)
         List {
             queueRows(start: start, entries: entries)
         }
@@ -145,7 +145,7 @@ private struct QueueRow: View {
     private var localArtworkURL: URL? { downloads.localArtworkURL(for: item) }
 
     var body: some View {
-        #if os(iOS)
+        #if !os(macOS)
         Button(action: onPlay) { rowLabel }
             .buttonStyle(.plain)
         #else

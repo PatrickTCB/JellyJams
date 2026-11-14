@@ -24,7 +24,7 @@ struct RootContainerView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            #if os(iOS)
+            #if os(iOS) || os(tvOS)
             if phase == .background || phase == .inactive {
                 player.savePlaybackState()
             }

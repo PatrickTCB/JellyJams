@@ -85,7 +85,9 @@ struct ServerLoginView: View {
                     .onSubmit { submit() }
             }
         }
+        #if !os(tvOS)
         .textFieldStyle(.roundedBorder)
+        #endif
     }
 
     private func labeledField(_ title: String, systemImage: String, @ViewBuilder content: () -> some View) -> some View {
@@ -108,7 +110,9 @@ struct ServerLoginView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .disabled(!canSubmit)
+        #if !os(tvOS)
         .keyboardShortcut(.defaultAction)
+        #endif
         .frame(maxWidth: 380)
     }
 

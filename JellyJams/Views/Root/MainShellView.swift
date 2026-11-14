@@ -3,12 +3,12 @@ import SwiftUI
 /// The signed-in app shell.
 ///
 /// - iPhone (compact width) uses a tab bar (``tabLayout``).
-/// - iPad (regular width) and macOS use a sidebar-adaptable `TabView`
-///   (``sidebarLayout``): a sidebar in landscape and on macOS, a top tab bar in
-///   portrait on iPad.
+/// - iPad (regular width), macOS and tvOS use a sidebar-adaptable `TabView`
+///   (``sidebarLayout``): a sidebar in landscape, on macOS and on tvOS, a top
+///   tab bar in portrait on iPad.
 ///
 /// The persistent ``NowPlayingBar`` is hosted as an iOS 26 tab bar accessory
-/// on iOS and docked below the tab view on macOS.
+/// on iOS and docked below the tab view on macOS and tvOS.
 struct MainShellView: View {
     @State private var selection: LibrarySection = .home
     /// Raised by the Home toolbar's sparkles button; the sheet itself is
@@ -20,6 +20,8 @@ struct MainShellView: View {
     @Environment(PreferencesStore.self) private var preferences
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+    #if !os(macOS)
     @Environment(SettingsPresentation.self) private var settingsPresentation
     #endif
 
@@ -52,12 +54,12 @@ struct MainShellView: View {
             #endif
     }
 
-    /// iOS reaches settings through a sheet rather than a scene. It is hosted
-    /// here, above the tabs, so that it survives the tab bar teardown that
-    /// dismisses sheets owned by toolbar items, and so every tab's
+    /// iOS and tvOS reach settings through a sheet rather than a scene. It is
+    /// hosted here, above the tabs, so that it survives the tab bar teardown
+    /// that dismisses sheets owned by toolbar items, and so every tab's
     /// ``AccountMenu`` raises the same one.
     @ViewBuilder private var settingsHost: some View {
-        #if os(iOS)
+        #if !os(macOS)
         layout
             .sheet(isPresented: Bindable(settingsPresentation).isShowingSettings) { SettingsView() }
         #else
@@ -159,7 +161,9 @@ struct MainShellView: View {
             } label: {
                 downloadsLabel
             }
+            #if !os(tvOS)
             .badge(downloads.remainingDownloadCount)
+            #endif
             Tab(LibrarySection.search.title, systemImage: LibrarySection.search.systemImage, value: LibrarySection.search) {
                 sectionTab(.search)
             }

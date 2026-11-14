@@ -74,6 +74,10 @@ struct ReorderableHomeItemRow<Item: Identifiable, Content: View>: View where Ite
     }
 
     var body: some View {
+        #if os(tvOS)
+        // tvOS has no drag-to-reorder; render the row plainly.
+        HomeItemRow(items: items, content: content)
+        #else
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 16) {
                 ForEach(items) { item in
@@ -100,8 +104,10 @@ struct ReorderableHomeItemRow<Item: Identifiable, Content: View>: View where Ite
                 moveTile(within: difference)
             }
         }
+        #endif
     }
 
+    #if !os(tvOS)
     /// The reordering API's drop, translated for `move`: the dragged tile's
     /// item, and the index of the tile it landed before.
     private func moveTile(within difference: ReorderDifference<Item.ID, ReorderableSingleCollectionIdentifier>) {
@@ -114,4 +120,5 @@ struct ReorderableHomeItemRow<Item: Identifiable, Content: View>: View where Ite
         }
         move(item, index)
     }
+    #endif
 }

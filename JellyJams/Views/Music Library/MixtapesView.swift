@@ -56,7 +56,9 @@ struct MixtapesView: View {
                 Button { isComposingTape = true } label: {
                     Label("New Mixtape", systemImage: "plus")
                 }
+                #if !os(tvOS)
                 .keyboardShortcut("n", modifiers: .command)
+                #endif
             }
         }
         .sheet(isPresented: $isComposingTape) { MixtapeComposer() }

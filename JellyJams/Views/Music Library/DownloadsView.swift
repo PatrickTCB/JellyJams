@@ -431,11 +431,13 @@ struct DownloadedItemRow: View {
             rowContent
         }
         .modifier(DownloadedGroupContextMenu(group: group))
+        #if !os(tvOS)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive, action: { downloads.remove(group.item) }) {
                 Label("Remove Download", systemImage: "trash")
             }
         }
+        #endif
     }
 
     private var rowContent: some View {

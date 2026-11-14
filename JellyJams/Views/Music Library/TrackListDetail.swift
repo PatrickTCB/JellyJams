@@ -54,7 +54,9 @@ struct TrackListDetail: View {
             Section {
                 header
                     .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
+                    #if !os(tvOS)
                     .listRowSeparator(.hidden)
+                    #endif
             }
 
             Section {
@@ -65,7 +67,9 @@ struct TrackListDetail: View {
                 Section {
                     GenreChips(genres: headerItem.genreRefs)
                         .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
+                        #if !os(tvOS)
                         .listRowSeparator(.hidden)
+                        #endif
                 }
             }
 
@@ -81,7 +85,9 @@ struct TrackListDetail: View {
                     contentInsets: EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
                 )
                 .listRowInsets(EdgeInsets())
+                #if !os(tvOS)
                 .listRowSeparator(.hidden)
+                #endif
             }
         }
         .listStyle(.plain)
@@ -222,11 +228,16 @@ struct TrackListDetail: View {
             row(entry.item, at: index, in: items, selected: selection.contains(entry.id) ? selected : [])
         }
         .reorderable()
-        #else
+        #elseif os(macOS)
         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
             row(entry.item, at: index, in: items, selected: selection.contains(entry.id) ? selected : [])
         }
         .onMove(perform: move)
+        #else
+        // tvOS has no drag-to-reorder; the rows play on select.
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            row(entry.item, at: index, in: items, selected: selection.contains(entry.id) ? selected : [])
+        }
         #endif
     }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 
+#if !os(tvOS)
 /// Native menu-bar commands for playback, wired to the shared
 /// ``PlayerController``. Added to the app's `Controls` menu on macOS.
 struct PlaybackCommands: Commands {
@@ -31,3 +32,4 @@ struct PlaybackCommands: Commands {
         }
     }
 }
+#endif

@@ -42,7 +42,9 @@ struct LyricsView: View {
                 .navigationTitle("Lyrics")
                 // The song on screen needn't be the one playing, so the sheet
                 // names it — falling back the way the now playing screen does.
+                #if !os(tvOS)
                 .navigationSubtitle(item?.displayName ?? "Not Playing")
+                #endif
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #endif

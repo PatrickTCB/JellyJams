@@ -74,6 +74,11 @@ struct PlayerView: View {
 
     private var scrubber: some View {
         VStack(spacing: 4) {
+            #if os(tvOS)
+            // tvOS has no Slider; seeking happens on the Siri Remote and in
+            // the system Now Playing overlay. Show progress read-only here.
+            ProgressView(value: clock.currentTime, total: max(clock.duration, 0.1))
+            #else
             Slider(
                 value: Binding(
                     get: { isScrubbing ? scrubTime : clock.currentTime },
@@ -90,6 +95,7 @@ struct PlayerView: View {
                     }
                 }
             )
+            #endif
             HStack {
                 Text(Format.duration(isScrubbing ? scrubTime : clock.currentTime))
                 Spacer()
@@ -113,7 +119,9 @@ struct PlayerView: View {
                     .font(.system(size: 64))
             }
             .buttonStyle(.plain)
+            #if !os(tvOS)
             .keyboardShortcut(.space, modifiers: [])
+            #endif
 
             Button { player.next() } label: {
                 Image(systemName: "forward.fill").font(.title)

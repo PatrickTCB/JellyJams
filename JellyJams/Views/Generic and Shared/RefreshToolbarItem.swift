@@ -25,7 +25,9 @@ private struct RefreshToolbarModifier: ViewModifier {
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
+                    #if !os(tvOS)
                     .keyboardShortcut("r", modifiers: .command)
+                    #endif
                 }
             }
         }

@@ -22,7 +22,9 @@ private struct NewPlaylistModifier: ViewModifier {
                     } label: {
                         Label("New Playlist", systemImage: "plus")
                     }
+                    #if !os(tvOS)
                     .keyboardShortcut("n", modifiers: .command)
+                    #endif
                 }
             }
             .alert("New Playlist", isPresented: $isPresenting) {

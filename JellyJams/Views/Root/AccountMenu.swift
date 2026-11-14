@@ -4,7 +4,7 @@ import SwiftUI
 /// Sign Out action.
 struct AccountMenu: View {
     @Environment(SessionStore.self) private var session
-    #if os(iOS)
+    #if !os(macOS)
     @Environment(SettingsPresentation.self) private var settingsPresentation
     #endif
 

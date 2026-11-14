@@ -81,6 +81,7 @@ struct JellyJamsApp: App {
                 .environment(services.networkStatus)
                 .frame(minWidth: 400, minHeight: 300)
         }
+        #if !os(tvOS)
         .commands {
             PlaybackCommands(player: services.player)
             #if os(macOS)
@@ -93,6 +94,7 @@ struct JellyJamsApp: App {
             SettingsCommands(presentation: services.settingsPresentation)
             #endif
         }
+        #endif
         #if os(macOS)
         .defaultSize(width: 1100, height: 720)
         #endif

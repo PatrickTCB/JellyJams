@@ -5,12 +5,12 @@ import SwiftUI
 ///
 /// On macOS this is the content of the `Settings` scene — the standard
 /// settings window, opened from the app menu with ⌘, or from ``AccountMenu``.
-/// iOS has no settings scene, so ``MainShellView`` presents the same form as a
-/// sheet and this view supplies its own navigation chrome.
+/// iOS and tvOS have no settings scene, so ``MainShellView`` presents the same
+/// form as a sheet and this view supplies its own navigation chrome.
 struct SettingsView: View {
     @Environment(SessionStore.self) private var session
     @Environment(PreferencesStore.self) private var preferences
-    #if os(iOS)
+    #if !os(macOS)
     @Environment(\.dismiss) private var dismiss
     #endif
     @State private var isChoosingDefaultPlayback = false
@@ -23,11 +23,13 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        #if os(iOS)
+        #if !os(macOS)
         NavigationStack {
             form
                 .navigationTitle("Settings")
+                #if !os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
+                #endif
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }
@@ -135,7 +137,7 @@ struct SettingsView: View {
     /// hosted by that shell, so it is dismissed first — both so it animates out
     /// over the screen it belongs to and to clear the flag driving it.
     private func signOut() {
-        #if os(iOS)
+        #if !os(macOS)
         dismiss()
         #endif
         session.signOut()

@@ -49,6 +49,8 @@ struct DeviceInfo: Sendable, Hashable {
     private static func currentDeviceOS() -> String {
         #if os(iOS)
         return "iOS"
+        #elseif os(tvOS)
+        return "tvOS"
         #else
         return "macOS"
         #endif

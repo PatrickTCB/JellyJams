@@ -108,7 +108,9 @@ struct FavouritesView: View {
                 }
                 if songs.isLoading {
                     HStack { Spacer(); ProgressView(); Spacer() }
+                        #if !os(tvOS)
                         .listRowSeparator(.hidden)
+                        #endif
                 } else if let error = songs.errorMessage, !songs.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("Couldn’t load more favourites", systemImage: "wifi.exclamationmark")

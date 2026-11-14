@@ -32,7 +32,9 @@ struct SongsView: View {
             }
             if model.isLoading {
                 HStack { Spacer(); ProgressView(); Spacer() }
+                    #if !os(tvOS)
                     .listRowSeparator(.hidden)
+                    #endif
             } else if let error = model.errorMessage, !model.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Couldn’t load more songs", systemImage: "wifi.exclamationmark")
