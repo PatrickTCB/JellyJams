@@ -71,8 +71,8 @@ final class JellyJamsBackendSettingsModel {
         guard let backend else {
             let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
             connection = .unreachable(reason: trimmed.isEmpty
-                ? "No backend address has been saved yet. Add one above and press Sign In."
-                : "The saved backend address is not valid. Correct it above and press Sign In.")
+                ? "No backend address has been saved yet. Add one above and press Verify if another device already set it up, or Sign In to register this one."
+                : "The saved backend address is not valid. Correct it above and press Verify, or Sign In to register this one.")
             return
         }
         do {

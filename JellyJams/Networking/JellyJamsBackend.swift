@@ -277,9 +277,11 @@ enum BackendError: LocalizedError, Sendable, Equatable {
 
     /// Whether this is `/verify`'s 400 — "nothing is pending": the Quick
     /// Connect flow expired before the code was typed, or no Sign In ever
-    /// ran against this backend. The sheet answers it with a local
-    /// sign-out rather than a failure line, because there is no flow left
-    /// for a Verify to retry.
+    /// ran against this backend, including from any other device. The
+    /// sheet answers a 400 about its own flow with a local sign-out rather
+    /// than a failure line, because there is no flow left for a Verify to
+    /// retry; a Verify that never started a flow here reads it as "this
+    /// backend doesn't know the account" and leaves the memory alone.
     var isQuickConnectExpired: Bool {
         if case .rejected(status: 400, _) = self { return true }
         return false
@@ -379,15 +381,17 @@ final class JellyJamsBackend: Sendable {
         return try JSONDecoder().decode(BackendRegistration.self, from: data)
     }
 
-    /// `GET /verify` — where the sign-in flow got to.
+    /// `GET /verify` — whether this account is on the backend's books, and if
+    /// not, where its Quick Connect flow got to.
     ///
-    /// A 200 with `saved` true and `inProgress` false means Quick Connect
-    /// finished and the account is on the books with the backend's own
-    /// token; a 200 with `inProgress` true means the user has not typed the
-    /// code yet (or not correctly), and the answer's `code` is the one
-    /// still waiting on the server. A 400 means the flow expired — or the
-    /// user never ran a Sign In against this backend — and nothing is
-    /// pending to verify.
+    /// A 200 with `saved` true and `inProgress` false means the account is
+    /// on the books with the backend's own token — whether the flow was
+    /// finished from this device or another one; this call is how a fresh
+    /// install adopts a backend that already knows the account. A 200 with
+    /// `inProgress` true means a flow is still waiting on the user (or not
+    /// finished correctly), and the answer's `code` is the one waiting on
+    /// the server. A 400 means the backend has no account and no flow for
+    /// this user.
     func verify(userID: String) async throws -> BackendRegistration {
         let data = try await perform(
             .get,

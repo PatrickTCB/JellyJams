@@ -211,6 +211,36 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertEqual(answer.playlistSuffix, "_automatic")
     }
 
+    /// The whole cross-device case rests on this: `/verify` is a pure read
+    /// of what the backend already knows about the `userID`, so a device
+    /// that never ran a Sign In still gets the same answer as the device
+    /// that did. Nothing in the request names a flow, a code, or a device.
+    func testVerifyAnswersForADeviceThatNeverSignedIn() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.successResponse(statusCode: 200, payload: Self.savedPayload)(request)
+        }
+
+        // A saved answer is the whole answer: no flow to follow, just the
+        // registration another device made.
+        let answer = try await TestFixtures.stubbedBackend().verify(userID: "user-id")
+
+        XCTAssertTrue(answer.saved, "A backend configured elsewhere reports the account saved")
+        XCTAssertFalse(answer.inProgress)
+        XCTAssertEqual(answer.code, "")
+        XCTAssertEqual(answer.serverPlaylist, "Server Mix", "The rules travel with the answer, so this device adopts them too")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/verify")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertTrue(request.body.isEmpty)
+        // Nothing identifies the calling device or a flow: the userID is
+        // the entire conversation, which is what makes it device-neutral.
+        XCTAssertEqual(Set(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems?.map(\.name) ?? []), ["userID"])
+    }
+
     /// A flow the user has not finished (or has not finished *correctly*)
     /// answers in progress with the code still live on the server — that
     /// code is what the sheet re-presents, so losing it to a mis-decode

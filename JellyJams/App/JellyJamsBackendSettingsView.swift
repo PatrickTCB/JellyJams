@@ -21,6 +21,12 @@ import SwiftUI
 /// backend how that went: a saved account is recorded the way an
 /// old-style registration was, a flow still in progress re-presents the
 /// code, and an expired one signs the app out of the backend locally.
+/// Verify does not need a Sign In from this sheet, though: it asks
+/// whatever address the field holds, so a second device can press Verify
+/// and adopt the account the backend already knows instead of running
+/// Quick Connect again. A backend that simply has no account for this
+/// user — and no flow either — is answered with a line saying so, and
+/// what this device remembers stands.
 /// Sign Out is a clean break, and local by default: the app forgets the
 /// backend entirely — every feature
 /// stands down and the address goes with them, so a different backend can
@@ -50,9 +56,11 @@ struct JellyJamsBackendSettingsView: View {
     @State private var addressDraft: String?
     @State private var saveStatus: SaveStatus?
     /// The normalised address the pending Quick Connect flow was started
-    /// against, and the one Verify asks. A flow belongs to a backend as
-    /// much as a registration does, and the typed draft is free to wander
-    /// while the user is away typing the code.
+    /// against, and the one Verify asks while it is pending. A flow belongs
+    /// to a backend as much as a registration does, and the typed draft is
+    /// free to wander while the user is away typing the code. Without a
+    /// flow, Verify asks the typed address instead — the field names the
+    /// backend either way.
     @State private var pendingSignInAddress: String?
     /// The Quick Connect flow the user still owes their server a code to,
     /// while it is on the books this sheet keeps. Presenting it as an item
@@ -60,7 +68,8 @@ struct JellyJamsBackendSettingsView: View {
     @State private var quickConnect: PendingQuickConnect?
     /// Whether the expired-flow pop-up is up. Its one button signs the app
     /// out of the backend locally — there is nothing left to delete there
-    /// if the flow was never finished.
+    /// if the flow was never finished. Only a flow this sheet started can
+    /// raise it: a Verify standing alone never wipes a registration.
     @State private var isReportingExpiredFlow = false
     /// Whether the Sign Out confirmation is up. The button itself only asks;
     /// the alert's destructive action is what runs ``signOut()`` — leaving
@@ -198,6 +207,8 @@ struct JellyJamsBackendSettingsView: View {
                     Text("Sign In starts a Quick Connect flow on your Jellyfin server, so there must be someone signed in.")
                         .foregroundStyle(.secondary)
                 }
+                Text("Verify asks the backend whether it already knows this Jellyfin account, so a backend set up on another device can be adopted here without signing in again.")
+                    .foregroundStyle(.secondary)
                 saveStatusLine
             }
         }
@@ -228,13 +239,25 @@ struct JellyJamsBackendSettingsView: View {
         return session.isSignedIn && !address.isEmpty && !isBusy
     }
 
-    /// Verify asks the backend how the Sign In started from here got on,
-    /// so it waits on exactly that: a flow this sheet started, and no
-    /// request of its own already in flight. A Sign In whose Quick Connect
-    /// went stale is restarted rather than verified — pressing Sign In
-    /// again always hands out a fresh code.
+    /// Verify asks the backend whether this account is registered, so the
+    /// only things that can hold it back are a request of its own already in
+    /// flight and having no Jellyfin account to ask about. It deliberately
+    /// does not wait on a Sign In from this sheet: that is what lets a
+    /// second device adopt the registration the first one made — press
+    /// Verify, and the backend's own answer settles it.
     private var canVerify: Bool {
-        pendingSignInAddress != nil && !isBusy && session.currentUser != nil
+        !isBusy && session.currentUser != nil
+    }
+
+    /// Where Verify sends its question: the address the field shows — the one
+    /// Sign In would use, and the one the user can point anywhere — with a
+    /// pending flow's own address only standing in when the field is empty.
+    /// That is the shape both jobs share: a device following a Sign In it
+    /// started asks at that backend, and a device adopting a backend it
+    /// never signed in to asks at the address typed for it.
+    private var verifyTargetAddress: String {
+        let typed = typedAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? (pendingSignInAddress ?? "") : typedAddress
     }
 
     /// Sign Out forgets the backend locally, so it is available whenever
@@ -271,7 +294,7 @@ struct JellyJamsBackendSettingsView: View {
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Asking the backend how the Quick Connect went…")
+                Text("Asking the backend about this account…")
             }
             .foregroundStyle(.secondary)
         case .registered(let suffix):
@@ -327,25 +350,58 @@ struct JellyJamsBackendSettingsView: View {
         }
     }
 
-    /// Ask the backend how the pending flow got on. Saved means the
-    /// account is on the books and the app adopts the backend the way it
-    /// always has; in progress means the user's half is still outstanding,
-    /// and the sheet goes back up with the code `/verify` says is live —
-    /// which may be a fresh one; and the 400 means there is no flow left
-    /// to finish, which the pop-up signs the app out of locally. Other
-    /// refusals land on the failure line beside the address.
+    /// Ask the backend whether this account is registered there. Saved means
+    /// the account is on the books and the app adopts the backend the way it
+    /// always has — which is how a second device joins a backend configured
+    /// on another one, without a fresh Quick Connect; in progress means the
+    /// user's half is still outstanding, and the sheet goes back up with the
+    /// code `/verify` says is live — which may be a fresh one, and may have
+    /// been started from another device; and the 400 means the backend has
+    /// no account and no flow for this user. That is the expired-flow pop-up
+    /// (whose button signs out locally) when this sheet started the Sign In,
+    /// and a plain explanation asking for a Sign In when it did not — a
+    /// Verify standing alone must not wipe a registration that is not
+    /// actually known to be gone. Other refusals land on the failure line
+    /// beside the address.
     private func verify() {
-        guard let address = pendingSignInAddress, let userID = session.currentUser?.id else { return }
+        guard let userID = session.currentUser?.id else { return }
+        let address = verifyTargetAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else {
+            saveStatus = .failed("Enter the backend's address above, then press Verify.")
+            return
+        }
+        let baseURL: URL
+        do {
+            baseURL = try JellyJamsBackend.normalizeAddress(address)
+        } catch {
+            saveStatus = .failed(error.userFacingMessage)
+            return
+        }
+        // The pop-up's local sign-out is only owed when this sheet's own
+        // flow is the thing that came back empty; a 400 from a backend the
+        // user merely pointed the field at says nothing about what this
+        // device remembers.
+        let askedAboutThePendingFlow = pendingSignInAddress == baseURL.absoluteString
         saveStatus = .verifying
         Task {
             do {
-                let baseURL = try JellyJamsBackend.normalizeAddress(address)
                 let backend = JellyJamsBackend(baseURL: baseURL, deviceInfo: session.deviceInfo)
                 let answer = try await backend.verify(userID: userID)
+                // An answer that is not the finished registration is a flow:
+                // it becomes this sheet's pending one, so the code stays on
+                // the books here and the next Verify asks the same backend
+                // even if the address draft wanders.
+                if !(answer.saved && !answer.inProgress) {
+                    pendingSignInAddress = baseURL.absoluteString
+                }
                 if settle(answer, at: baseURL) { await refresh() }
             } catch let error as BackendError where error.isQuickConnectExpired {
-                saveStatus = nil
-                isReportingExpiredFlow = true
+                if askedAboutThePendingFlow {
+                    saveStatus = nil
+                    isReportingExpiredFlow = true
+                } else {
+                    saveStatus = .failed("The backend doesn't know this account yet. Press Sign In above to start the Quick Connect flow it needs.")
+                }
             } catch {
                 saveStatus = .failed(error.userFacingMessage)
             }
@@ -513,7 +569,7 @@ struct JellyJamsBackendSettingsView: View {
             Text("The saved state is shown until the backend answers again.")
                 .foregroundStyle(.secondary)
         case .needsRegistration:
-            Text("The backend is answering, but it doesn't know this account yet. Press Sign In above, enter the code it gives you on your Jellyfin server, and press Verify when you're back.")
+            Text("The backend is answering, but it doesn't know this account yet. If you've already set it up on another device, press Verify. Otherwise press Sign In above, enter the code it gives you on your Jellyfin server, and press Verify when you're back.")
                 .foregroundStyle(.secondary)
         case .online:
             Text("Connected — the backend confirms what it knows about this account.")
