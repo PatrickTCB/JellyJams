@@ -12,11 +12,17 @@ import SwiftUI
 /// shown in the switches, read-only, with the reason beside it. The address
 /// itself stays editable regardless: it is how you get the backend back.
 ///
-/// Registration is the gate everything else sits behind — saving sends the
-/// current Jellyfin sign-in to `/register`, which checks it against the
-/// server and answers with the name ending the backend's mixtapes carry, the
-/// rule that turns the Mixtapes section on. Sign Out is a clean break, and
-/// local by default: the app forgets the backend entirely — every feature
+/// Registration is the gate everything else sits behind, and it is a
+/// conversation with the user's Jellyfin server rather than a handover of
+/// credentials: Sign In starts a Quick Connect flow on the backend, the
+/// sheet shows the code it hands back, and the user types it into the
+/// server's own web page to give the backend a token of its own.
+/// The app never sends its access token anywhere. Verify then asks the
+/// backend how that went: a saved account is recorded the way an
+/// old-style registration was, a flow still in progress re-presents the
+/// code, and an expired one signs the app out of the backend locally.
+/// Sign Out is a clean break, and local by default: the app forgets the
+/// backend entirely — every feature
 /// stands down and the address goes with them, so a different backend can
 /// take its place from a blank slate — without owing the backend a request,
 /// which is what lets a dead one be left behind. Its confirmation carries
@@ -38,11 +44,24 @@ struct JellyJamsBackendSettingsView: View {
     /// ``libraryNavigationDestinations(navigator:)``).
     @State private var navigator = LibraryNavigator()
     /// The address being typed, while it differs from the saved one; `nil`
-    /// shows the saved address. Edits stay here until Save registers them:
-    /// the saved address is the one bans and Infinite Queue talk to, so it
-    /// must never be a half-typed host.
+    /// shows the saved address. Edits stay here until Verify registers
+    /// them: the saved address is the one bans and Infinite Queue talk to,
+    /// so it must never be a half-typed host.
     @State private var addressDraft: String?
     @State private var saveStatus: SaveStatus?
+    /// The normalised address the pending Quick Connect flow was started
+    /// against, and the one Verify asks. A flow belongs to a backend as
+    /// much as a registration does, and the typed draft is free to wander
+    /// while the user is away typing the code.
+    @State private var pendingSignInAddress: String?
+    /// The Quick Connect flow the user still owes their server a code to,
+    /// while it is on the books this sheet keeps. Presenting it as an item
+    /// means a fresh code from `/verify` simply replaces the old one.
+    @State private var quickConnect: PendingQuickConnect?
+    /// Whether the expired-flow pop-up is up. Its one button signs the app
+    /// out of the backend locally — there is nothing left to delete there
+    /// if the flow was never finished.
+    @State private var isReportingExpiredFlow = false
     /// Whether the Sign Out confirmation is up. The button itself only asks;
     /// the alert's destructive action is what runs ``signOut()`` — leaving
     /// the backend is not a one-tap affair.
@@ -53,12 +72,30 @@ struct JellyJamsBackendSettingsView: View {
     /// deleting the account is an explicit extra, never a default.
     @State private var alsoDeletesAccount = false
 
-    /// Where the last Save or Sign Out got to. Transient by design: a retry
-    /// is a fresh request, and the standing truth ("registered with ending
-    /// X") lives in ``PreferencesStore`` and is read back when this view has
-    /// nothing to say about the current moment.
+    /// A Sign In the backend accepted and the user has not finished: the
+    /// code to show, the account it belongs to, and the server whose
+    /// Quick Connect page takes it.
+    private struct PendingQuickConnect: Identifiable {
+        let userName: String
+        let code: String
+        let jellyfinHost: URL
+        var id: String { code }
+    }
+
+    /// Where the last Sign In, Verify, or Sign Out got to. Transient by
+    /// design: a retry is a fresh request, and the standing truth
+    /// ("registered with ending X") lives in ``PreferencesStore`` and is
+    /// read back when this view has nothing to say about the current
+    /// moment.
     private enum SaveStatus {
-        case saving
+        /// The `/register` request that starts a Quick Connect flow.
+        case starting
+        /// The sheet showed the code; the user's half — typing it on the
+        /// Jellyfin server — is what is outstanding, and Verify is how the
+        /// app finds out they did.
+        case awaitingVerification
+        /// The `/verify` request checking how the flow got on.
+        case verifying
         case registered(suffix: String)
         /// The deletion the confirmation's checkbox asked for is in flight.
         case signingOut
@@ -98,6 +135,18 @@ struct JellyJamsBackendSettingsView: View {
                     Text("The app forgets this backend — its address, your registration, limits, and Server Playlist membership. The account on the backend is left standing, with everything it holds. Your Jellyfin sign-in is untouched either way.")
                 }
             }
+            .alert("Quick Connect", isPresented: $isReportingExpiredFlow) {
+                Button("Ok") { forgetBackendLocally() }
+            } message: {
+                Text("Either the Quick Connect flow you started expired, or you have not started a Sign In Flow on this Jelly Jams Backend.")
+            }
+            .sheet(item: $quickConnect) { flow in
+                QuickConnectSheet(
+                    userName: flow.userName,
+                    code: flow.code,
+                    jellyfinHost: flow.jellyfinHost
+                )
+            }
             .libraryNavigationDestinations(navigator: navigator)
             .navigationDestination(for: BansScreen.self) { _ in
                 BannedItemsView()
@@ -128,8 +177,11 @@ struct JellyJamsBackendSettingsView: View {
             #endif
             .disabled(isBusy)
 
-            Button("Save") { save() }
-                    .disabled(!canSave)
+            Button("Sign In") { signIn() }
+                    .disabled(!canSignIn)
+
+            Button("Verify") { verify() }
+                    .disabled(!canVerify)
 
             Button("Sign Out", role: .destructive) {
                 alsoDeletesAccount = false
@@ -143,7 +195,7 @@ struct JellyJamsBackendSettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("The Jelly Jams Backend is a companion / sidecar service. Check out the code and docs at [github.com/PatrickTCB/JellyJamsBackend](https://github.com/PatrickTCB/JellyJamsBackend).")
                 if !session.isSignedIn {
-                    Text("Registration checks your Jellyfin credentials with the backend, so there must be someone signed in.")
+                    Text("Sign In starts a Quick Connect flow on your Jellyfin server, so there must be someone signed in.")
                         .foregroundStyle(.secondary)
                 }
                 saveStatusLine
@@ -151,11 +203,12 @@ struct JellyJamsBackendSettingsView: View {
         }
     }
 
-    /// Whether a request this sheet owns is in flight — a Save or a Sign
-    /// Out. While one runs the other waits, and the address stays put.
+    /// Whether a request this sheet owns is in flight — a Sign In, a
+    /// Verify, or a Sign Out. While one runs the others wait, and the
+    /// address stays put.
     private var isBusy: Bool {
         switch saveStatus {
-        case .saving, .signingOut: return true
+        case .starting, .verifying, .signingOut: return true
         default: return false
         }
     }
@@ -170,9 +223,18 @@ struct JellyJamsBackendSettingsView: View {
         Binding(get: { typedAddress }, set: { addressDraft = $0 })
     }
 
-    private var canSave: Bool {
+    private var canSignIn: Bool {
         let address = typedAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         return session.isSignedIn && !address.isEmpty && !isBusy
+    }
+
+    /// Verify asks the backend how the Sign In started from here got on,
+    /// so it waits on exactly that: a flow this sheet started, and no
+    /// request of its own already in flight. A Sign In whose Quick Connect
+    /// went stale is restarted rather than verified — pressing Sign In
+    /// again always hands out a fresh code.
+    private var canVerify: Bool {
+        pendingSignInAddress != nil && !isBusy && session.currentUser != nil
     }
 
     /// Sign Out forgets the backend locally, so it is available whenever
@@ -188,18 +250,28 @@ struct JellyJamsBackendSettingsView: View {
         return !isBusy && (preferences.isMixtapesActive || !address.isEmpty)
     }
 
-    /// A line for where the save or sign-out got to: the in-flight request,
-    /// the result of the last one, or the registration carried over from
-    /// before this sheet opened.
+    /// A line for where the sign-in, verification or sign-out got to: the
+    /// in-flight request, the result of the last one, or the registration
+    /// carried over from before this sheet opened.
     @ViewBuilder private var saveStatusLine: some View {
         switch currentSaveStatus {
         case nil:
             EmptyView()
-        case .saving:
+        case .starting:
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Registering…")
+                Text("Starting Quick Connect…")
+            }
+            .foregroundStyle(.secondary)
+        case .awaitingVerification:
+            Label("Almost there — enter the code on your Jellyfin server, press Done, then press Verify.", systemImage: "arrow.forward.circle.fill")
+                .foregroundStyle(.secondary)
+        case .verifying:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Asking the backend how the Quick Connect went…")
             }
             .foregroundStyle(.secondary)
         case .registered(let suffix):
@@ -232,55 +304,107 @@ struct JellyJamsBackendSettingsView: View {
         return nil
     }
 
-    /// The whole save: normalise the typed address, register with it, and
-    /// record what the backend says — which is the moment the address
-    /// becomes the saved one. On failure the typed address stays put — the
-    /// user should be able to fix a typo rather than retype a whole host —
-    /// and the saved one keeps serving bans and Infinite Queue. On success
-    /// the sheet refreshes: a save that worked is proof the backend answers,
-    /// and the fresh registration may have just unlocked the features below
-    /// it.
-    private func save() {
-        saveStatus = .saving
+    /// The whole Sign In: normalise the typed address and ask the backend
+    /// to start a Quick Connect flow for this account. Nothing is saved
+    /// here — the backend earns its own token from the Jellyfin server
+    /// while the user types the code into the server's web page, and only
+    /// ``verify()`` settles the outcome. The typed address stays a draft
+    /// beside the flow's own copy: a half-registered backend must not take
+    /// over what bans and Infinite Queue talk to.
+    private func signIn() {
+        saveStatus = .starting
         let address = typedAddress
         Task {
             do {
                 let baseURL = try JellyJamsBackend.normalizeAddress(address)
                 let backend = JellyJamsBackend(baseURL: baseURL, deviceInfo: session.deviceInfo)
                 let registration = try await backend.register(try currentJellyfinAccount())
-                preferences.recordRegistration(
-                    address: backend.baseURL.absoluteString,
-                    suffix: registration.playlistSuffix,
-                    playlist: registration.serverPlaylist
-                )
-                // The field now shows the saved, normalised address.
-                addressDraft = nil
-                saveStatus = .registered(suffix: registration.playlistSuffix)
-                await refresh()
+                pendingSignInAddress = baseURL.absoluteString
+                if settle(registration, at: baseURL) { await refresh() }
             } catch {
                 saveStatus = .failed(error.userFacingMessage)
             }
         }
     }
 
+    /// Ask the backend how the pending flow got on. Saved means the
+    /// account is on the books and the app adopts the backend the way it
+    /// always has; in progress means the user's half is still outstanding,
+    /// and the sheet goes back up with the code `/verify` says is live —
+    /// which may be a fresh one; and the 400 means there is no flow left
+    /// to finish, which the pop-up signs the app out of locally. Other
+    /// refusals land on the failure line beside the address.
+    private func verify() {
+        guard let address = pendingSignInAddress, let userID = session.currentUser?.id else { return }
+        saveStatus = .verifying
+        Task {
+            do {
+                let baseURL = try JellyJamsBackend.normalizeAddress(address)
+                let backend = JellyJamsBackend(baseURL: baseURL, deviceInfo: session.deviceInfo)
+                let answer = try await backend.verify(userID: userID)
+                if settle(answer, at: baseURL) { await refresh() }
+            } catch let error as BackendError where error.isQuickConnectExpired {
+                saveStatus = nil
+                isReportingExpiredFlow = true
+            } catch {
+                saveStatus = .failed(error.userFacingMessage)
+            }
+        }
+    }
+
+    /// Settle what a `/register` or `/verify` answer means for the sheet.
+    /// `Saved` with nothing in progress is the registration — the address
+    /// becomes the saved one, the backend's rules are remembered, and this
+    /// returns true so the caller knows a refresh is owed, the same proof
+    /// the old Save took as its cue that the backend answers. Anything else
+    /// is a flow still waiting on the user: the code goes back up in the
+    /// sheet, and the address stays put.
+    @discardableResult
+    private func settle(_ answer: BackendRegistration, at baseURL: URL) -> Bool {
+        if answer.saved && !answer.inProgress {
+            preferences.recordRegistration(
+                address: baseURL.absoluteString,
+                suffix: answer.playlistSuffix,
+                playlist: answer.serverPlaylist
+            )
+            // The field now shows the saved, normalised address.
+            addressDraft = nil
+            pendingSignInAddress = nil
+            quickConnect = nil
+            saveStatus = .registered(suffix: answer.playlistSuffix)
+            return true
+        }
+
+        guard let user = session.currentUser else {
+            pendingSignInAddress = nil
+            saveStatus = .failed(BackendError.notSignedIn.userFacingMessage)
+            return false
+        }
+        quickConnect = PendingQuickConnect(
+            userName: user.name,
+            code: answer.code,
+            jellyfinHost: user.serverURL
+        )
+        saveStatus = .awaitingVerification
+        return false
+    }
+
     /// The clean break, at one of two depths. By default it is local and
     /// instant: the app forgets the backend — address, registration,
     /// limits, membership — and owes it no request, so a backend that no
     /// longer answers can still be left behind, and the account there
-    /// simply stands. With the confirmation's checkbox on, the sign-in
-    /// rides `DELETE /delete-me` first and only the backend's confirmation
-    /// forgets anything: a refusal leaves the whole memory standing with
-    /// the reason beside it — the same grace every other setting here gets
-    /// — because "memory gone, account still on the books" is exactly the
-    /// half-state the checkbox exists to prevent; uncheck it to leave
-    /// without the backend's say. The Jellyfin sign-in is untouched either
-    /// way: this signs out of the backend, not the server.
+    /// simply stands. With the confirmation's checkbox on, the account's
+    /// identity rides `DELETE /delete-me` first and only the backend's
+    /// confirmation forgets anything: a refusal leaves the whole memory
+    /// standing with the reason beside it — the same grace every other
+    /// setting here gets — because "memory gone, account still on the
+    /// books" is exactly the half-state the checkbox exists to prevent;
+    /// uncheck it to leave without the backend's say. The Jellyfin sign-in
+    /// is untouched either way: this signs out of the backend, not the
+    /// server.
     private func signOut() {
         guard alsoDeletesAccount else {
-            preferences.forgetBackend()
-            addressDraft = nil
-            saveStatus = .signedOut
-            Task { await refresh() }
+            forgetBackendLocally()
             return
         }
         saveStatus = .signingOut
@@ -291,6 +415,8 @@ struct JellyJamsBackendSettingsView: View {
                 _ = try await backend.deleteAccount(try currentJellyfinAccount())
                 preferences.forgetBackend()
                 addressDraft = nil
+                pendingSignInAddress = nil
+                quickConnect = nil
                 saveStatus = .accountDeleted
                 await refresh()
             } catch {
@@ -299,19 +425,33 @@ struct JellyJamsBackendSettingsView: View {
         }
     }
 
-    /// Everything the backend needs to check this sign-in, whether it is
-    /// saving the account or deleting it: the account, its token from the
-    /// Keychain, and the server it belongs to.
+    /// The local half of a sign-out: the app forgets the backend outright,
+    /// and owes it no request — which is also the whole sign-out for the
+    /// expired-Quick-Connect pop-up, where there is no finished account to
+    /// delete, and for a backend that stopped answering. A pending flow
+    /// goes with the rest of the memory: its code has no backend to be
+    /// verified against anymore.
+    private func forgetBackendLocally() {
+        preferences.forgetBackend()
+        addressDraft = nil
+        pendingSignInAddress = nil
+        quickConnect = nil
+        saveStatus = .signedOut
+        Task { await refresh() }
+    }
+
+    /// Who the backend is talking about, whether it is starting a sign-in
+    /// flow, verifying one, or deleting the account: the signed-in user
+    /// and the server they belong to. There is no token in this anymore —
+    /// the backend earns its own through Quick Connect, and the app keeps
+    /// its Keychain to itself.
     private func currentJellyfinAccount() throws -> JellyfinAccount {
-        guard let user = session.currentUser,
-              let token = try session.currentAccessToken(), !token.isEmpty
-        else {
+        guard let user = session.currentUser else {
             throw BackendError.notSignedIn
         }
         return JellyfinAccount(
             userName: user.name,
             userID: user.id,
-            userToken: token,
             jellyfinHost: user.serverURL
         )
     }
@@ -373,7 +513,7 @@ struct JellyJamsBackendSettingsView: View {
             Text("The saved state is shown until the backend answers again.")
                 .foregroundStyle(.secondary)
         case .needsRegistration:
-            Text("The backend is answering, but it doesn't know this account yet. Sign in and press Save above to register.")
+            Text("The backend is answering, but it doesn't know this account yet. Press Sign In above, enter the code it gives you on your Jellyfin server, and press Verify when you're back.")
                 .foregroundStyle(.secondary)
         case .online:
             Text("Connected — the backend confirms what it knows about this account.")

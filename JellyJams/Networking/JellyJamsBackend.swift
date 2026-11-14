@@ -2,21 +2,21 @@ import Foundation
 
 /// The Jellyfin sign-in, as the Jelly Jams Backend needs to receive it.
 ///
-/// The backend validates these credentials against the server itself before
-/// it saves the account, so the app hands over everything it holds: the
-/// access token comes out of the Keychain at registration time rather than
-/// being stored anywhere else.
+/// The app never hands the backend its access token: registration runs
+/// through Quick Connect, where the user types a code on their Jellyfin
+/// server and the backend earns its own token from the server directly.
+/// What the backend needs is only who the account is and where its server
+/// lives.
 struct JellyfinAccount: Sendable, Equatable {
     let userName: String
     let userID: String
-    let userToken: String
     /// The base URL of the Jellyfin server, without a trailing slash.
     let jellyfinHost: URL
 }
 
-/// The backend's answer to `POST /register` — and to its undo,
-/// `DELETE /delete-me`, which answers the same shape with `saved` false to
-/// say the account is off the books.
+/// The backend's answer to `POST /register` and `GET /verify` — and to
+/// their undo, `DELETE /delete-me`, which answers the same shape with
+/// `saved` and `inProgress` false to say the account is off the books.
 ///
 /// The field names are capitalised because that is how the backend writes
 /// them; the coding keys translate. 
@@ -26,7 +26,15 @@ struct BackendRegistration: Codable, Sendable, Equatable {
     /// existing one. The backend answers 200 for a known user and 201 for a
     /// new one; both are success.
     let created: Bool
+    /// Whether the account is fully on the backend's books: Quick Connect
+    /// done, the backend's own token saved, and the features live.
     let saved: Bool
+    /// Whether a Quick Connect flow is running for this account — the code
+    /// beside it is still waiting to be typed on the Jellyfin server.
+    let inProgress: Bool
+    /// The Quick Connect code the user types on their Jellyfin server while
+    /// `inProgress` says the flow is live; empty otherwise.
+    let code: String
     /// The ending the backend gives the mixtape playlists it builds — what
     /// the app tells mixtapes apart by.
     let playlistSuffix: String
@@ -38,6 +46,8 @@ struct BackendRegistration: Codable, Sendable, Equatable {
         case user = "User"
         case created = "Created"
         case saved = "Saved"
+        case inProgress = "InProgress"
+        case code = "Code"
         case playlistSuffix = "PlaylistSuffix"
         case serverPlaylist = "ServerPlaylist"
     }
@@ -264,6 +274,16 @@ enum BackendError: LocalizedError, Sendable, Equatable {
             return "The backend refused the request (status \(status))."
         }
     }
+
+    /// Whether this is `/verify`'s 400 — "nothing is pending": the Quick
+    /// Connect flow expired before the code was typed, or no Sign In ever
+    /// ran against this backend. The sheet answers it with a local
+    /// sign-out rather than a failure line, because there is no flow left
+    /// for a Verify to retry.
+    var isQuickConnectExpired: Bool {
+        if case .rejected(status: 400, _) = self { return true }
+        return false
+    }
 }
 
 /// App-level access to the Jelly Jams Backend — the companion service for
@@ -271,9 +291,9 @@ enum BackendError: LocalizedError, Sendable, Equatable {
 /// taking bans, extending running queues, and turning free text into a
 /// queue of songs.
 ///
-/// Every endpoint but `/ping` keys off the `userID` that `/register` hands
-/// over, so registration is the seam the rest of the integration grows
-/// from — the app is not a backend account until a Save says so.
+/// Every endpoint but `/ping` keys off the signed-in account's `userID`,
+/// so registration is the seam the rest of the integration grows
+/// from — the app is not a backend account until a Verify says so.
 final class JellyJamsBackend: Sendable {
     let baseURL: URL
     private let session: URLSession
@@ -341,48 +361,66 @@ final class JellyJamsBackend: Sendable {
         return JellyJamsBackend(baseURL: url, deviceInfo: deviceInfo)
     }
 
-    /// `POST /register` — save (or refresh) this sign-in with the backend,
-    /// and get back the rules it works by, including the playlist-name
-    /// ending its mixtapes carry.
+    /// `POST /register` — start (or restart) the sign-in flow for this
+    /// account: the backend opens a Quick Connect session on the Jellyfin
+    /// server and answers with the code the user must type there.
     ///
-    /// The backend validates the token against the Jellyfin server before
-    /// storing anything, so a failure here means the sign-in was rejected
-    /// or the backend could not reach the server — never a silent half-save.
+    /// Nothing is saved by this call: the backend earns its own token
+    /// through Quick Connect while the user works on the server's web page,
+    /// and the account only reaches the books once ``verify(userID:)``
+    /// reports it saved. The code carries a short life, so a flow that goes
+    /// stale is simply restarted.
     ///
-    /// The credentials travel as form fields in the request body rather
-    /// than in the query string, so the token stays out of the URL — and
-    /// out of any access log that records one.
+    /// The name and server ride as form fields in the request body — out
+    /// of any URL that might get logged — because the backend never takes
+    /// the app's token anymore.
     func register(_ account: JellyfinAccount) async throws -> BackendRegistration {
         let data = try await perform(.post, path: "register", formFields: accountParameters(account))
         return try JSONDecoder().decode(BackendRegistration.self, from: data)
     }
 
+    /// `GET /verify` — where the sign-in flow got to.
+    ///
+    /// A 200 with `saved` true and `inProgress` false means Quick Connect
+    /// finished and the account is on the books with the backend's own
+    /// token; a 200 with `inProgress` true means the user has not typed the
+    /// code yet (or not correctly), and the answer's `code` is the one
+    /// still waiting on the server. A 400 means the flow expired — or the
+    /// user never ran a Sign In against this backend — and nothing is
+    /// pending to verify.
+    func verify(userID: String) async throws -> BackendRegistration {
+        let data = try await perform(
+            .get,
+            path: "verify",
+            queryItems: [URLQueryItem(name: "userID", value: userID)]
+        )
+        return try JSONDecoder().decode(BackendRegistration.self, from: data)
+    }
+
     /// `DELETE /delete-me` — the undo of ``register(_:)``: hand the same
-    /// sign-in back and the backend deletes the account, along with
+    /// identity back and the backend deletes the account, along with
     /// everything it holds for it — the tape recipes, the bans, the Server
-    /// Playlist membership. The credentials ride along because the backend
-    /// checks them against the Jellyfin server before deleting anything:
-    /// only the account's own sign-in can take it off the books. They travel
-    /// in a form body, as the registration's do, so the token stays out of
-    /// the URL and any access log that records one.
+    /// Playlist membership. The identity rides the query string as the
+    /// registration's form fields do; the token stays on the backend, where
+    /// Quick Connect left it, and is what the Jellyfin check reads before
+    /// anything is deleted.
     ///
     /// The answer is the registration's own shape with `saved` false, and an
     /// account the backend never had answers the same way — the state asked
     /// for already holds, so a repeated sign-out reads as the success it is
     /// rather than a failure.
     func deleteAccount(_ account: JellyfinAccount) async throws -> BackendRegistration {
-        let data = try await perform(.delete, path: "delete-me", formFields: accountParameters(account))
+        let data = try await perform(.delete, path: "delete-me", queryItems: accountParameters(account))
         return try JSONDecoder().decode(BackendRegistration.self, from: data)
     }
 
-    /// The four credentials both account endpoints ride with, as form fields
-    /// — the backend checks them against the Jellyfin server before it saves,
-    /// or deletes, anything.
+    /// The three identity fields the account endpoints ride with — the
+    /// backend knows the token already, from Quick Connect, and checks it
+    /// against the Jellyfin server before it deletes anything.
     private func accountParameters(_ account: JellyfinAccount) -> [URLQueryItem] {
         [
             URLQueryItem(name: "userName", value: account.userName),
             URLQueryItem(name: "userID", value: account.userID),
-            URLQueryItem(name: "userToken", value: account.userToken),
             URLQueryItem(name: "jellyfinHost", value: account.jellyfinHost.absoluteString),
         ]
     }
@@ -717,11 +755,10 @@ final class JellyJamsBackend: Sendable {
     /// out, with anything outside 2xx turned into a `BackendError` carrying
     /// the backend's own human-readable refusal when it bothers to send one.
     ///
-    /// The GETs and DELETEs take their input in the query string — except
-    /// `/delete-me`, which carries the account's token. Every POST is
-    /// declared with FastAPI `Form` parameters instead, as `/delete-me` is:
-    /// it reads an `application/x-www-form-urlencoded` body and ignores the
-    /// query string entirely, so that input goes in `formFields`.
+    /// The GETs and DELETEs take their input in the query string; every
+    /// POST is declared with FastAPI `Form` parameters: it reads an
+    /// `application/x-www-form-urlencoded` body and ignores the query
+    /// string entirely, so that input goes in `formFields`.
     private func perform(
         _ method: Method,
         path: String,

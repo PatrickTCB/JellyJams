@@ -15,7 +15,7 @@ final class JellyJamsBackendSettingsModel {
     /// Whether the backend can be talked to, and if so whether it knows who
     /// this device is yet. `unreachable` and `needsRegistration` both show
     /// remembered state and allow no edits; the difference is who has work
-    /// to do — the network, or the Save button above.
+    /// to do — the network, or the Sign In button above.
     enum Connection: Equatable {
         case checking
         case unreachable(reason: String)
@@ -71,8 +71,8 @@ final class JellyJamsBackendSettingsModel {
         guard let backend else {
             let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
             connection = .unreachable(reason: trimmed.isEmpty
-                ? "No backend address has been saved yet. Add one above and press Save."
-                : "The saved backend address is not valid. Correct it above and press Save.")
+                ? "No backend address has been saved yet. Add one above and press Sign In."
+                : "The saved backend address is not valid. Correct it above and press Sign In.")
             return
         }
         do {

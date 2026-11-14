@@ -2,10 +2,13 @@ import Foundation
 import XCTest
 @testable import JellyJams
 
-/// Covers the Jelly Jams Backend's `/register` — the one endpoint v1 speaks.
-/// The payload shape matters most: the backend writes its fields capitalised,
-/// and the app builds its whole Mixtapes split from one of them. A wrong key
-/// decode does not crash, it silently never turns the feature on.
+/// Covers the Jelly Jams Backend's account endpoints — `/register`, which
+/// starts a Quick Connect flow, `/verify`, which settles it, and
+/// `/delete-me`, its undo. The payload shape matters most: the backend
+/// writes its fields capitalised, and the app builds its whole sign-in
+/// around two of them — `InProgress` and `Code`. A wrong key decode does
+/// not crash, it silently strands the user in front of a sheet with no
+/// code to show.
 final class JellyJamsBackendTests: XCTestCase {
     override func setUp() {
         URLProtocolStub.handler = nil
@@ -15,11 +18,19 @@ final class JellyJamsBackendTests: XCTestCase {
         URLProtocolStub.handler = nil
     }
 
-    private static let registrationPayload = Data(
-        #"{"User":"pat","Created":true,"Saved":true,"PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8
+    /// The answer a fresh Sign In gives: nothing saved yet, a live code
+    /// waiting to be typed on the Jellyfin server.
+    private static let quickConnectPayload = Data(
+        #"{"User":"pat","Created":false,"Saved":false,"InProgress":true,"Code":"7H4KQ2","PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8
     )
 
-    private func successResponse(statusCode: Int = 201) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
+    /// The same shape once Quick Connect finished: the account is on the
+    /// books with the backend's own token, and the rules arrive with it.
+    private static let savedPayload = Data(
+        #"{"User":"pat","Created":true,"Saved":true,"InProgress":false,"Code":"","PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8
+    )
+
+    private func successResponse(statusCode: Int = 201, payload: Data? = nil) -> (URLRequest) throws -> (HTTPURLResponse, Data) {
         return { request in
             let response = try XCTUnwrap(
                 HTTPURLResponse(
@@ -29,7 +40,7 @@ final class JellyJamsBackendTests: XCTestCase {
                     headerFields: ["Content-Type": "application/json"]
                 )
             )
-            return (response, Self.registrationPayload)
+            return (response, payload ?? Self.quickConnectPayload)
         }
     }
 
@@ -37,19 +48,19 @@ final class JellyJamsBackendTests: XCTestCase {
         JellyfinAccount(
             userName: "pat",
             userID: "user-id",
-            userToken: "access-token",
             jellyfinHost: URL(string: "http://192.168.0.10:8096")!
         )
     }
 
     // MARK: - The request
 
-    /// `/register` is a POST whose credentials ride an
+    /// `/register` is a POST whose identity rides an
     /// `application/x-www-form-urlencoded` body — the backend's `Form`
-    /// parameters — with nothing in the query string, so the token never
-    /// lands in a URL. A drift here is a 422 nobody can see until settings
-    /// quietly stops working.
-    func testRegisterPostsCredentialsAsAFormBody() async throws {
+    /// parameters — with nothing in the query string. The app's access
+    /// token is not among the fields and never travels at all: the backend
+    /// earns its own through Quick Connect. A drift here is a 422 nobody
+    /// can see until Sign In quietly stops working.
+    func testRegisterPostsIdentityAsAFormBody() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
@@ -61,12 +72,12 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "POST")
         XCTAssertEqual(request.path, "/register")
-        XCTAssertNil(request.url?.query, "The credentials must not ride the URL")
+        XCTAssertNil(request.url?.query, "The identity must not ride the URL")
         XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
         XCTAssertEqual(request.formValue(for: "userName"), "pat")
         XCTAssertEqual(request.formValue(for: "userID"), "user-id")
-        XCTAssertEqual(request.formValue(for: "userToken"), "access-token")
         XCTAssertEqual(request.formValue(for: "jellyfinHost"), "http://192.168.0.10:8096")
+        XCTAssertNil(request.formValue(for: "userToken"), "The app's token never goes to the backend")
     }
 
     /// A form body has its own escaping: a bare `+` reads as a space and a
@@ -83,7 +94,6 @@ final class JellyJamsBackendTests: XCTestCase {
         let awkward = JellyfinAccount(
             userName: "Zoë & Ana+1; 100%=ok",
             userID: "user-id",
-            userToken: "access-token",
             jellyfinHost: URL(string: "http://192.168.0.10:8096")!
         )
 
@@ -92,28 +102,32 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(
             String(decoding: request.body, as: UTF8.self),
-            "userName=Zo%C3%AB+%26+Ana%2B1%3B+100%25%3Dok&userID=user-id&userToken=access-token&jellyfinHost=http%3A%2F%2F192.168.0.10%3A8096"
+            "userName=Zo%C3%AB+%26+Ana%2B1%3B+100%25%3Dok&userID=user-id&jellyfinHost=http%3A%2F%2F192.168.0.10%3A8096"
         )
         XCTAssertEqual(request.formValue(for: "userName"), "Zoë & Ana+1; 100%=ok")
     }
 
     // MARK: - The response
 
+    /// The register answer of a flow in progress is what the Quick Connect
+    /// sheet shows: the code beside the fact that nothing is saved yet.
     func testRegistrationDecodesTheCapitalisedPayload() async throws {
         URLProtocolStub.handler = successResponse()
 
         let registration = try await TestFixtures.stubbedBackend().register(account)
 
         XCTAssertEqual(registration.user, "pat")
-        XCTAssertTrue(registration.created)
-        XCTAssertTrue(registration.saved)
+        XCTAssertFalse(registration.created)
+        XCTAssertFalse(registration.saved)
+        XCTAssertTrue(registration.inProgress)
+        XCTAssertEqual(registration.code, "7H4KQ2")
         XCTAssertEqual(registration.playlistSuffix, "_automatic")
         XCTAssertEqual(registration.serverPlaylist, "Server Mix")
     }
 
     /// A known user gets 200 ("already registered"), a new one 201. Both are
     /// success with the same body — treating 200 as an error would make every
-    /// second Save in settings fail.
+    /// second Sign In in settings fail.
     func testAlreadyRegisteredAnswerOf200IsSuccess() async throws {
         URLProtocolStub.handler = successResponse(statusCode: 200)
 
@@ -172,21 +186,80 @@ final class JellyJamsBackendTests: XCTestCase {
         }
     }
 
+    // MARK: - Verify
+
+    /// `GET /verify` keys on nothing but the `userID` in the query string.
+    /// The identity is the whole conversation: the backend checks its own
+    /// Quick Connect books, not any credential the app could carry.
+    func testVerifyAsksTheFlowWithJustTheUserID() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return try self.successResponse(statusCode: 200, payload: Self.savedPayload)(request)
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().verify(userID: "user-id")
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/verify")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertTrue(request.body.isEmpty, "A verify carries no payload")
+
+        XCTAssertTrue(answer.saved)
+        XCTAssertFalse(answer.inProgress)
+        XCTAssertEqual(answer.playlistSuffix, "_automatic")
+    }
+
+    /// A flow the user has not finished (or has not finished *correctly*)
+    /// answers in progress with the code still live on the server — that
+    /// code is what the sheet re-presents, so losing it to a mis-decode
+    /// would strand the user with an empty box to copy.
+    func testVerifyCarriesTheLiveCodeWhileTheFlowRuns() async throws {
+        URLProtocolStub.handler = successResponse(statusCode: 200)
+
+        let answer = try await TestFixtures.stubbedBackend().verify(userID: "user-id")
+
+        XCTAssertTrue(answer.inProgress)
+        XCTAssertFalse(answer.saved)
+        XCTAssertEqual(answer.code, "7H4KQ2")
+    }
+
+    /// The 400 is the sheet's cue for its expired-flow pop-up and the local
+    /// sign-out behind it, so the status has to survive into the thrown
+    /// error rather than blur into "the backend refused".
+    func testVerifyOfAnExpiredFlowSurfacesTheRefusedStatus() async throws {
+        URLProtocolStub.handler = { request in
+            (
+                try emptyResponse(for: request, statusCode: 400),
+                Data(#"{"detail":"User verification does not seem to be in process for userID user-id"}"#.utf8)
+            )
+        }
+
+        do {
+            _ = try await TestFixtures.stubbedBackend().verify(userID: "user-id")
+            XCTFail("Expected a rejection")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 400, detail: "User verification does not seem to be in process for userID user-id"))
+            XCTAssertTrue(error.isQuickConnectExpired)
+        }
+    }
+
     // MARK: - Sign out
 
-    /// `DELETE /delete-me` rides with the same four credentials the
-    /// registration carries — the backend checks them against the Jellyfin
-    /// server before deleting anything — in the same form body, so the token
-    /// never lands in a URL. It answers the registration's own shape with
-    /// `Saved: false`: the account is off the books. A drift here is a 422
-    /// nobody sees until Sign Out quietly stops working.
-    func testSignOutDeletesWithTheCredentialsAsAFormBody() async throws {
+    /// `DELETE /delete-me` rides with the identity the registration
+    /// carries — the backend knows the token already, from Quick Connect,
+    /// and checks it against the Jellyfin server before deleting anything.
+    /// The fields travel in the query string; there is no token anywhere,
+    /// in the URL or in a body. A drift here is a 422 nobody sees until
+    /// Sign Out quietly stops working.
+    func testSignOutDeletesWithTheIdentityInTheQuery() async throws {
         let recorder = RequestRecorder()
         URLProtocolStub.handler = { request in
             recorder.record(request)
             return (
                 try emptyResponse(for: request, statusCode: 200),
-                Data(#"{"User":"pat","Created":false,"Saved":false,"PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8)
+                Data(#"{"User":"pat","Created":false,"Saved":false,"InProgress":false,"Code":"","PlaylistSuffix":"_automatic","ServerPlaylist":"Server Mix"}"#.utf8)
             )
         }
 
@@ -198,12 +271,12 @@ final class JellyJamsBackendTests: XCTestCase {
         let request = try XCTUnwrap(recorder.all.first)
         XCTAssertEqual(request.method, "DELETE")
         XCTAssertEqual(request.path, "/delete-me")
-        XCTAssertNil(request.url?.query, "The credentials must not ride the URL")
-        XCTAssertEqual(request.contentType, "application/x-www-form-urlencoded")
-        XCTAssertEqual(request.formValue(for: "userName"), "pat")
-        XCTAssertEqual(request.formValue(for: "userID"), "user-id")
-        XCTAssertEqual(request.formValue(for: "userToken"), "access-token")
-        XCTAssertEqual(request.formValue(for: "jellyfinHost"), "http://192.168.0.10:8096")
+        XCTAssertNil(request.contentType, "There is no form body to speak of anymore")
+        XCTAssertTrue(request.body.isEmpty)
+        XCTAssertEqual(request.serverQueryValue(for: "userName"), "pat")
+        XCTAssertEqual(request.serverQueryValue(for: "userID"), "user-id")
+        XCTAssertEqual(request.serverQueryValue(for: "jellyfinHost"), "http://192.168.0.10:8096")
+        XCTAssertNil(request.serverQueryValue(for: "userToken"), "The app's token never goes to the backend")
     }
 
     /// Credentials the backend cannot validate answer 401 with its own words,
