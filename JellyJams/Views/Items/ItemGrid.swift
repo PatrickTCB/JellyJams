@@ -31,7 +31,7 @@ struct ItemGrid: View {
                         ForEach(model.items) { item in
                             cell(for: item)
                                 .buttonStyle(.plain)
-                                .task { await model.loadMoreIfNeeded(item) }
+                                .task(id: model.settledLoads) { await model.loadMoreIfNeeded(item) }
                         }
                     }
                     .padding()

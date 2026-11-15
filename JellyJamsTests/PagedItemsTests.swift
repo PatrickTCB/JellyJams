@@ -147,6 +147,100 @@ final class PagedItemsTests: XCTestCase {
         XCTAssertEqual(counter.count, 2)
     }
 
+    /// The bottom-of-list stall: the last row's one-shot trigger can arrive
+    /// while a page is in flight, and that page is then cancelled (the row
+    /// briefly left the viewport). The load settles with nothing appended, so
+    /// the view — whose row task is keyed on `settledLoads` — asks again. That
+    /// second ask must succeed, not be swallowed.
+    func testATriggerDroppedByAnInFlightLoadIsRecoveredOnceItSettles() async throws {
+        let model = PagedItems(list: .albums, pageSize: 2)
+        var followUps = 0
+        let loader: PagedItems.PageLoader = { startIndex, _ in
+            if startIndex == 0 {
+                return BaseItemDtoQueryResult(
+                    items: [TestFixtures.item(id: "a"), TestFixtures.item(id: "b")],
+                    startIndex: 0,
+                    totalRecordCount: 6
+                )
+            }
+            followUps += 1
+            if followUps == 1 { throw URLError(.cancelled) }
+            return BaseItemDtoQueryResult(
+                items: [TestFixtures.item(id: "c"), TestFixtures.item(id: "d")],
+                startIndex: startIndex,
+                totalRecordCount: 6
+            )
+        }
+
+        await model.load(model.query, using: loader)
+        XCTAssertEqual(model.items.compactMap(\.id), ["a", "b"])
+        let settledAfterFirstPage = model.settledLoads
+
+        // The follow-up page is cancelled: nothing appended, no error, more to load.
+        await model.loadNextPage()
+        XCTAssertEqual(followUps, 1)
+        XCTAssertEqual(model.items.compactMap(\.id), ["a", "b"])
+        XCTAssertNil(model.errorMessage)
+        XCTAssertTrue(model.canLoadMore)
+        XCTAssertGreaterThan(model.settledLoads, settledAfterFirstPage,
+                             "The view re-arms its row task on this changing")
+
+        // The re-keyed row task asks again once the load has settled.
+        let lastRow = try XCTUnwrap(model.items.last)
+        await model.loadMoreIfNeeded(lastRow)
+        XCTAssertEqual(followUps, 2)
+        XCTAssertEqual(model.items.compactMap(\.id), ["a", "b", "c", "d"])
+    }
+
+    /// The counter the views key their pagination task on must advance on every
+    /// outcome — success, cancellation and failure — so a dropped trigger is
+    /// always re-armed, whatever ended the load.
+    func testSettledLoadsAdvancesOnEveryLoadOutcome() async {
+        let ok = PagedItems(list: .albums, pageSize: 2)
+        await ok.load(ok.query) { _, _ in
+            BaseItemDtoQueryResult(items: [TestFixtures.item(id: "a")], startIndex: 0, totalRecordCount: 3)
+        }
+        XCTAssertEqual(ok.settledLoads, 1)
+
+        let cancelled = PagedItems(list: .albums, pageSize: 2)
+        await cancelled.load(cancelled.query) { _, _ in throw URLError(.cancelled) }
+        XCTAssertEqual(cancelled.settledLoads, 1)
+        XCTAssertNil(cancelled.errorMessage)
+
+        let failed = PagedItems(list: .albums, pageSize: 2)
+        await failed.load(failed.query) { _, _ in throw JellyfinError.notAuthenticated }
+        XCTAssertEqual(failed.settledLoads, 1)
+        XCTAssertNotNil(failed.errorMessage)
+    }
+
+    /// A settled-but-failed page shows the Retry affordance; the last row must
+    /// not also auto-retry it, or a re-keyed task would loop on a persistent
+    /// failure.
+    func testLoadMoreDoesNotAutoRetryWhileAnErrorIsDisplayed() async throws {
+        let model = PagedItems(list: .albums, pageSize: 2)
+        let counter = CallCounter()
+        let loader: PagedItems.PageLoader = { _, _ in
+            if counter.next() == 1 {
+                return BaseItemDtoQueryResult(
+                    items: [TestFixtures.item(id: "a"), TestFixtures.item(id: "b")],
+                    startIndex: 0,
+                    totalRecordCount: 10
+                )
+            }
+            throw JellyfinError.notAuthenticated
+        }
+
+        await model.load(model.query, using: loader)
+        await model.loadNextPage()
+        XCTAssertNotNil(model.errorMessage)
+        let calls = counter.count
+
+        let lastRow = try XCTUnwrap(model.items.last)
+        await model.loadMoreIfNeeded(lastRow)
+
+        XCTAssertEqual(counter.count, calls, "A displayed error is the Retry button's job")
+    }
+
     // MARK: - Reuse and reloading
 
     func testAlreadyLoadedQueryIsNotFetchedAgain() async {

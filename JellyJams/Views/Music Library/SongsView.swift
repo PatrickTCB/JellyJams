@@ -28,7 +28,7 @@ struct SongsView: View {
                 TrackRow(track: entry.item, showArtwork: true, selectedTracks: selection.contains(entry.id) ? selected : []) {
                     player.play(items, startAt: index)
                 }
-                .task { await model.loadMoreIfNeeded(entry.item) }
+                .task(id: model.settledLoads) { await model.loadMoreIfNeeded(entry.item) }
             }
             if model.isLoading {
                 HStack { Spacer(); ProgressView(); Spacer() }

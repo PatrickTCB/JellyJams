@@ -19,6 +19,12 @@ final class PagedItems {
     private(set) var errorMessage: String?
     private(set) var total = 0
     private(set) var hasLoadedOnce = false
+    /// Bumped every time a page load settles — success, failure or cancellation.
+    /// A row keys its pagination `.task` on this so the last visible row
+    /// re-checks once a load finishes: a trigger that arrived while a load was
+    /// in flight is retried rather than lost. It only changes when a load
+    /// *ends*, so starting a load never cancels the task that started it.
+    private(set) var settledLoads = 0
 
     /// The user's sort selection, bound directly by the toolbar controls.
     /// Changing either re-keys ``query`` so the next ``load(from:)`` refetches,
@@ -104,7 +110,9 @@ final class PagedItems {
     func loadMoreIfNeeded(_ item: BaseItemDto) async {
         // Only the last visible row may trigger the next page: a row that
         // isn't the final one in the loaded window has nothing more to offer.
-        guard items.last?.id == item.id, canLoadMore, !isLoading else { return }
+        // A displayed error is left to the Retry button rather than retried
+        // automatically, so a settled-but-failed load can't loop.
+        guard items.last?.id == item.id, canLoadMore, !isLoading, errorMessage == nil else { return }
         await loadNextPage()
     }
 
@@ -166,6 +174,7 @@ final class PagedItems {
 
             isLoading = false
             hasLoadedOnce = true
+            settledLoads += 1
         } catch {
             guard requestGeneration == generation else { return }
             if error.isCancellation {
@@ -179,10 +188,12 @@ final class PagedItems {
                 // still valid, and `hasLoadedOnce` remaining false is what makes
                 // an interrupted first load retry.
                 isLoading = false
+                settledLoads += 1
             } else {
                 errorMessage = error.userFacingMessage
                 isLoading = false
                 hasLoadedOnce = true
+                settledLoads += 1
             }
         }
     }

@@ -104,7 +104,7 @@ struct FavouritesView: View {
                     TrackRow(track: entry.item, showArtwork: true, selectedTracks: songSelection.contains(entry.id) ? selected : []) {
                         player.play(items, startAt: index)
                     }
-                    .task { await songs.loadMoreIfNeeded(entry.item) }
+                    .task(id: songs.settledLoads) { await songs.loadMoreIfNeeded(entry.item) }
                 }
                 if songs.isLoading {
                     HStack { Spacer(); ProgressView(); Spacer() }
