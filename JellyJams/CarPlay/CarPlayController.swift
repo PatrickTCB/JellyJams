@@ -331,27 +331,49 @@ final class CarPlayController: NSObject {
     // MARK: - Online (favourites & library)
 
     private func pushOnlineList(title: String, query: LibraryQuery) {
-        guard session != nil else { return }
+        guard let session else { return }
+        // Page size matches the old single-fetch limit, so a library that used
+        // to fit in one batch still arrives in one batch; larger ones now get a
+        // Load more row instead of being silently truncated.
+        let model = PagedItems(list: query.list, pageSize: 500)
+        model.sortBy = query.sortBy
+        model.sortOrder = query.sortOrder
         let template = pushLoadingTemplate(title: title)
-        Task {
-            let items = await fetchOnline(query, limit: 500)
-            template.updateSections([CPListSection(items: items.map { item in
-                self.collectionItem(item) {
-                    self.pushOnlineCollection(item)
-                }
-            })])
-            template.emptyViewTitleVariants = ["Nothing here"]
-        }
+        let list = CarPlayPagedList(
+            model: model,
+            template: template,
+            repository: session.library,
+            emptyTitle: "Nothing here",
+            makeRow: { item, _ in
+                self.collectionItem(item) { self.pushOnlineCollection(item) }
+            },
+            showError: { self.showAlert($0) }
+        )
+        list.start()
     }
 
     private func pushOnlineSongs() {
-        guard session != nil else { return }
+        guard let session else { return }
+        let model = PagedItems(list: .songs, pageSize: 1000)
         let template = pushLoadingTemplate(title: "Songs")
-        Task {
-            let songs = await fetchOnline(LibraryQuery(list: .songs), limit: 1000)
-            template.updateSections([CPListSection(items: trackItems(songs))])
-            template.emptyViewTitleVariants = ["No songs"]
-        }
+        let list = CarPlayPagedList(
+            model: model,
+            template: template,
+            repository: session.library,
+            emptyTitle: "No songs",
+            makeRow: { track, index in
+                let item = CPListItem(text: track.displayName, detailText: track.subtitleArtist)
+                item.handler = { _, completion in
+                    // Read the model's items at tap time so playing a row queues
+                    // every page loaded so far, not just the batch it came from.
+                    self.play(model.items, startAt: index)
+                    completion()
+                }
+                return item
+            },
+            showError: { self.showAlert($0) }
+        )
+        list.start()
     }
 
     private func pushOnlineCollection(_ item: BaseItemDto) {
@@ -586,6 +608,96 @@ enum CarPlayArtwork {
         } catch {
             return nil
         }
+    }
+}
+
+/// Drives one paged CarPlay list.
+///
+/// CarPlay templates expose no scroll position, so there is no "reached the
+/// bottom" signal to hook — pagination is an explicit **Load more** row instead.
+/// It fetches through the same ``PagedItems`` the phone's lists use, so cursor
+/// advancement, de-duplication and end detection behave identically. Rows are
+/// rebuilt from the model's accumulated items on every page, which keeps a
+/// track row's play action pointing at the full loaded list rather than the
+/// snapshot it was created with.
+@MainActor
+final class CarPlayPagedList {
+    private let model: PagedItems
+    /// Weak: the pushed template is owned by CarPlay, and its Load more row
+    /// owns this pager — a strong reference back would form a retain cycle.
+    private weak var template: CPListTemplate?
+    private let repository: LibraryRepository
+    private let emptyTitle: String
+    private let makeRow: (BaseItemDto, Int) -> CPListItem
+    private let showError: (String) -> Void
+
+    init(
+        model: PagedItems,
+        template: CPListTemplate,
+        repository: LibraryRepository,
+        emptyTitle: String,
+        makeRow: @escaping (BaseItemDto, Int) -> CPListItem,
+        showError: @escaping (String) -> Void
+    ) {
+        self.model = model
+        self.template = template
+        self.repository = repository
+        self.emptyTitle = emptyTitle
+        self.makeRow = makeRow
+        self.showError = showError
+    }
+
+    func start() {
+        Task {
+            await model.load(from: repository)
+            rebuild()
+            reportError()
+        }
+    }
+
+    private func loadMore() {
+        guard !model.isLoading else { return }
+        Task {
+            await model.loadNextPage()
+            rebuild()
+            reportError()
+        }
+    }
+
+    private func reportError() {
+        if let message = model.errorMessage { showError(message) }
+    }
+
+    private func rebuild() {
+        guard let template else { return }
+        var rows = model.items.enumerated().map { makeRow($0.element, $0.offset) }
+        if model.canLoadMore && !model.isEmpty {
+            rows.append(loadMoreRow())
+        }
+        template.updateSections([CPListSection(items: rows)])
+        if model.isEmpty {
+            if model.errorMessage != nil {
+                template.emptyViewTitleVariants = ["Couldn’t load"]
+            } else if model.hasLoadedOnce {
+                template.emptyViewTitleVariants = [emptyTitle]
+            } else {
+                template.emptyViewTitleVariants = ["Loading…"]
+            }
+        } else {
+            template.emptyViewTitleVariants = []
+        }
+    }
+
+    private func loadMoreRow() -> CPListItem {
+        let item = CPListItem(text: "Load more", detailText: nil, image: UIImage(systemName: "ellipsis.circle"))
+        // Strong self: the row, retained by the pushed template, keeps this
+        // pager alive for as long as there is another page to ask for.
+        item.handler = { listItem, completion in
+            listItem.isEnabled = false
+            self.loadMore()
+            completion()
+        }
+        return item
     }
 }
 #endif
