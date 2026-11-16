@@ -29,7 +29,6 @@ seem kind of fun and so I will do them at some point.
 * gapless/crossfade
 * sleep timer
 * widgets
-* Quick Connect.
 
 There's no planned public Test Flight beta or anything like that. The cutting edge is and will 
 always be the Mac version released here, with the App Store version being a little more stable. 

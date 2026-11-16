@@ -4,6 +4,9 @@ enum JellyfinError: LocalizedError, Sendable, Equatable {
     case invalidServerURL
     case notAuthenticated
     case incompleteAuthenticationResponse
+    case quickConnectNotEnabled
+    case quickConnectExpired
+    case incompleteQuickConnectResponse
     case missingItemIdentifier
     case invalidMediaURL
     case emptyPlaylistName
@@ -19,6 +22,12 @@ enum JellyfinError: LocalizedError, Sendable, Equatable {
             return "You are not signed in."
         case .incompleteAuthenticationResponse:
             return "The server accepted the sign-in but did not return a complete user session."
+        case .quickConnectNotEnabled:
+            return "This server has Quick Connect turned off. Sign in with a username and password instead."
+        case .quickConnectExpired:
+            return "The Quick Connect code expired before it was approved. Start again to get a fresh code."
+        case .incompleteQuickConnectResponse:
+            return "The server started Quick Connect but did not return a code to show."
         case .missingItemIdentifier:
             return "The server returned a media item without an identifier."
         case .invalidMediaURL:

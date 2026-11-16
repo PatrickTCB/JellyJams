@@ -110,6 +110,60 @@ final class JellyfinService: Sendable {
         try await apiClient.signIn(username: username, password: password)
     }
 
+    // MARK: - Quick Connect
+
+    /// Whether the server offers Quick Connect sign-in
+    /// (`GET /QuickConnect/Enabled`). The endpoint answers a bare JSON
+    /// boolean; a server too old to know it answers 404, and any failure
+    /// reads as disabled — the caller's next step is the password form
+    /// either way.
+    func isQuickConnectEnabled() async -> Bool {
+        do {
+            let data = try await apiClient.send(Paths.getQuickConnectEnabled).value
+            return (try? JSONDecoder().decode(Bool.self, from: data)) == true
+        } catch {
+            return false
+        }
+    }
+
+    /// Starts a Quick Connect sign-in (`POST /QuickConnect/Initiate`): the
+    /// code to show the user, and the secret that polls for their approval.
+    /// A server with Quick Connect turned off refuses the initiation itself
+    /// (401), which reads as ``JellyfinError/quickConnectNotEnabled`` the
+    /// same as the enabled check saying so.
+    func initiateQuickConnect() async throws -> (secret: String, code: String) {
+        let result: JellyfinAPI.QuickConnectResult
+        do {
+            result = try await apiClient.send(Paths.initiateQuickConnect).value
+        } catch APIError.unacceptableStatusCode(401) {
+            throw JellyfinError.quickConnectNotEnabled
+        }
+        guard let secret = result.secret, let code = result.code else {
+            throw JellyfinError.incompleteQuickConnectResponse
+        }
+        return (secret, code)
+    }
+
+    /// Whether the user has approved the Quick Connect code yet
+    /// (`GET /QuickConnect/Connect`). A secret the server no longer knows —
+    /// expired, or never issued — answers 404, which reads as
+    /// ``JellyfinError/quickConnectExpired``: the code is dead, and only a
+    /// fresh initiation can revive the flow.
+    func isQuickConnectAuthenticated(secret: String) async throws -> Bool {
+        do {
+            return try await apiClient.send(Paths.getQuickConnectState(secret: secret)).value.isAuthenticated == true
+        } catch APIError.unacceptableStatusCode(404) {
+            throw JellyfinError.quickConnectExpired
+        }
+    }
+
+    /// Exchanges an approved Quick Connect secret for a user session
+    /// (`POST /Users/AuthenticateWithQuickConnect`) — the same
+    /// `AuthenticationResult` a password sign-in answers with.
+    func authenticateWithQuickConnect(secret: String) async throws -> JellyfinAPI.AuthenticationResult {
+        try await apiClient.signIn(quickConnectSecret: secret)
+    }
+
     func logout() async throws {
         try await apiClient.send(Paths.reportSessionEnded)
     }

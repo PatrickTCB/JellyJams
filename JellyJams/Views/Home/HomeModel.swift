@@ -25,12 +25,19 @@ final class HomeModel {
 
         var isEmpty: Bool { recentAlbums.isEmpty && topAlbums.isEmpty }
     }
-
+    #if os(iOS)
     /// How many tiles each Recent Music row asks for.
     static let latestLimit = 5
     /// How many mixtapes the quick links show.
     static let mixtapeLimit = 5
-
+    #else
+    /// How many tiles each Recent Music row asks for.
+    static let latestLimit = 10
+    /// How many mixtapes the quick links show.
+    static let mixtapeLimit = 10
+    #endif
+    
+    
     private(set) var latest = Latest()
     private(set) var mixtapes: [BaseItemDto] = []
     private(set) var recentHeading = RecentMusicHeading.random()
