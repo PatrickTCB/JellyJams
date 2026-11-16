@@ -335,12 +335,12 @@ struct TrackListDetail: View {
     private var header: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .bottom, spacing: 20) {
-                artwork.frame(width: 180, height: 180)
+                artwork.frame(width: 180 * ArtworkImage.sizeMultiplier, height: 180 * ArtworkImage.sizeMultiplier)
                 info(alignment: .leading)
                 Spacer(minLength: 0)
             }
             VStack(spacing: 16) {
-                artwork.frame(maxWidth: 240)
+                artwork.frame(maxWidth: 240 * ArtworkImage.sizeMultiplier)
                 info(alignment: .center)
             }
         }

@@ -98,7 +98,7 @@ struct DownloadedArtistDetail: View {
                 if !albums.isEmpty {
                     Text("Albums")
                         .font(.title2.bold())
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 20) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160 * ArtworkImage.sizeMultiplier), spacing: 16)], spacing: 20) {
                         ForEach(albums) { album in
                             NavigationLink(value: DownloadedGroupRef(album)) {
                                 DownloadedGroupCell(group: album)

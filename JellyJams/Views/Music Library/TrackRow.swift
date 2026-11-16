@@ -184,16 +184,38 @@ struct TrackRow: View {
             )
                 .frame(width: 40, height: 40)
         } else if isCurrent {
-            Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-                .font(.caption)
-                .foregroundStyle(.tint)
-                .frame(width: 24)
+            numberColumn {
+                Image(systemName: player.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+                    .font(.caption)
+                    .foregroundStyle(.tint)
+            }
         } else {
-            Text(track.indexNumber.map(String.init) ?? "–")
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 24, alignment: .center)
+            numberColumn {
+                Text(track.indexNumber.map(String.init) ?? "–")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    /// The number column's width, shared by the track number and the
+    /// now-playing icon so a track becoming current doesn't shift the row's
+    /// title. Other platforms keep the 24pt column they always had; tvOS's
+    /// larger callout stacks a two-digit number in that width, so there the
+    /// column is measured against "000" — three digits, room for the 999th
+    /// track — in the number's own font, which keeps it right at any text
+    /// size. The hidden sizer lays out but never draws; the number centred
+    /// over it is what shows.
+    private func numberColumn<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        #if os(tvOS)
+        Text("000")
+            .font(.callout.monospacedDigit())
+            .hidden()
+            .overlay { content().lineLimit(1) }
+        #else
+        content()
+            .frame(width: 24, alignment: .center)
+        #endif
     }
 
     private enum TrackAction {

@@ -312,7 +312,7 @@ struct DownloadsView: View {
         let filtered = kind == .album && preferences.showsCompleteAlbumsOnly
         let visible = filtered ? all.filter(\.isFullyDownloaded) : all
         let hidden = all.count - visible.count
-        let minCellWidth: CGFloat = tab == .artists ? 150 : 160
+        let minCellWidth: CGFloat = (tab == .artists ? 150 : 160) * ArtworkImage.sizeMultiplier
         return ScrollView {
             Section {
                 LazyVGrid(

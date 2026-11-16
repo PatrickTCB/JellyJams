@@ -118,7 +118,7 @@ struct ArtistDetailView: View {
         if !albums.isEmpty {
             Text(title)
                 .font(.title2.bold())
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 16)], spacing: 20) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160 * ArtworkImage.sizeMultiplier), spacing: 16)], spacing: 20) {
                 ForEach(albums) { album in
                     NavigationLink(value: album) {
                         ItemGridCell(item: album)

@@ -4,7 +4,7 @@ import SwiftUI
 /// Each cell navigates directly through ``ItemDetailRouter``.
 struct ItemGrid: View {
     let model: PagedItems
-    var minCellWidth: CGFloat = 160
+    var minCellWidth: CGFloat = 160 * ArtworkImage.sizeMultiplier
     var emptyMessage = "Nothing here yet"
     var emptySystemImage = "music.note"
     /// Replaces navigation as the tap action, for a grid whose items are not

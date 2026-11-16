@@ -5,7 +5,7 @@ struct ArtistsView: View {
     let model: PagedItems
 
     var body: some View {
-        ItemGrid(model: model, minCellWidth: 150, emptyMessage: "No artists", emptySystemImage: "music.mic")
+        ItemGrid(model: model, minCellWidth: 150 * ArtworkImage.sizeMultiplier, emptyMessage: "No artists", emptySystemImage: "music.mic")
             .navigationTitle("Artists")
             .toolbar {
                 ToolbarItem {

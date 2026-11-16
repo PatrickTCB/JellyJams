@@ -115,6 +115,20 @@ enum ArtworkDecoder {
 /// regardless of whether the server is reachable. Reading and decoding happen
 /// off the main actor, at the size the view is displayed at.
 struct ArtworkImage: View {
+    /// How much larger artwork lays out on tvOS than on other platforms:
+    /// twice the size, for a screen viewed from across the room rather than
+    /// at arm's length. Every width that places artwork — the item grids'
+    /// minimum cell width, the home rows' fixed tile width, the detail
+    /// headers' cover — multiplies its base by this, so the tvOS adjustment
+    /// lives here alone and other platforms keep the sizes they always had.
+    static var sizeMultiplier: CGFloat {
+        #if os(tvOS)
+        return 2
+        #else
+        return 1
+        #endif
+    }
+
     let url: URL?
     var localURL: URL? = nil
     var cornerRadius: CGFloat = 6

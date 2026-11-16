@@ -50,7 +50,7 @@ struct FavouritesView: View {
             case .albums: ItemGrid(model: albums, emptyMessage: "No favourite albums", emptySystemImage: "heart").refreshable {
                 Task { await albums.reload() }
             }
-            case .artists: ItemGrid(model: artists, minCellWidth: 150, emptyMessage: "No favourite artists", emptySystemImage: "heart").refreshable {
+            case .artists: ItemGrid(model: artists, minCellWidth: 150 * ArtworkImage.sizeMultiplier, emptyMessage: "No favourite artists", emptySystemImage: "heart").refreshable {
                 Task { await artists.reload() }
             }
             case .playlists: ItemGrid(model: playlists, emptyMessage: "No favourite playlists", emptySystemImage: "heart").refreshable {
