@@ -134,7 +134,11 @@ struct TrackListDetail: View {
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+        #if !os(tvOS)
+        // tvOS renders the navigation title as a large heading over the
+        // content — a second copy of the name the header already shows.
         .navigationTitle(headerItem.displayName)
+        #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

@@ -49,6 +49,7 @@ struct DefaultPlaybackSettingsView: View {
             .overlay { overlay }
         }
         .frame(minWidth: 380, minHeight: 420)
+        .remotePlayPause()
     }
 
     // MARK: Current selection

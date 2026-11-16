@@ -10,6 +10,7 @@ struct ArtistDetailView: View {
 
     @Environment(SessionStore.self) private var session
     @Environment(PlayerController.self) private var player
+    @Environment(PlaylistStore.self) private var playlistStore
     @State private var loader = LoadableModel(LibraryRepository.ArtistOverview())
     @State private var contentWidth: CGFloat = 0
 
@@ -26,6 +27,7 @@ struct ArtistDetailView: View {
                     onPlay: { player.play(overview.playbackSample) },
                     onShuffle: { player.play(overview.playbackSample, shuffled: true) }
                 )
+                .remoteFocusSection()
 
                 if overview.albums.isEmpty, overview.appearsOn.isEmpty, loader.isPending {
                     HStack { Spacer(); ProgressView(); Spacer() }
@@ -39,18 +41,27 @@ struct ArtistDetailView: View {
                     }
                 } else {
                     albumSection(title: "Albums", albums: overview.albums)
+                        .remoteFocusSection()
                     albumSection(title: "Appears On", albums: overview.appearsOn)
+                        .remoteFocusSection()
                     featuredSection
+                        .remoteFocusSection()
                 }
 
                 GenreChips(genres: genres)
+                    .remoteFocusSection()
 
                 SimilarItemsSection(kind: .artists, item: artist, availableWidth: contentWidth)
+                    .remoteFocusSection()
             }
             .padding()
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+        #if !os(tvOS)
+        // tvOS would render this as a large heading over the content,
+        // duplicating the name CollectionHeader already shows.
         .navigationTitle(artist.displayName)
+        #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -85,6 +96,7 @@ struct ArtistDetailView: View {
                         ItemGridCell(item: album)
                     }
                     .buttonStyle(.plain)
+                    .remotePlayAction(playAction(for: album))
                 }
             }
         }
@@ -104,6 +116,7 @@ struct ArtistDetailView: View {
                     TrackRow(track: track, tapBehavior: .play) {
                         player.play(group.tracks, startAt: index)
                     }
+                    .remotePlayAction { player.play(group.tracks, startAt: index) }
                 }
             }
         }
@@ -114,5 +127,25 @@ struct ArtistDetailView: View {
     private func featuredTitle(for album: BaseItemDto) -> String {
         guard let artist = album.subtitleAlbumArtist else { return album.displayName }
         return "\(album.displayName) - \(artist)"
+    }
+
+    /// What the Siri Remote's play/pause button does while an album tile
+    /// holds focus: start the album, the same play the context menu offers.
+    /// Failures land in the root-hosted alert, as the menu's and Instant
+    /// Mix's do.
+    private func playAction(for album: BaseItemDto) -> () -> Void {
+        {
+            Task {
+                do {
+                    let tracks = try await session.library.tracks(for: album)
+                    guard !tracks.isEmpty else {
+                        throw JellyfinError.emptyCollection(album.displayName)
+                    }
+                    player.play(tracks)
+                } catch where !error.isCancellation {
+                    playlistStore.presentActionError(error.userFacingMessage)
+                } catch {}
+            }
+        }
     }
 }

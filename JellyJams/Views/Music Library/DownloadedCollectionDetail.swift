@@ -116,7 +116,11 @@ struct DownloadedArtistDetail: View {
                 ContentUnavailableView("No downloaded albums", systemImage: "square.stack")
             }
         }
+        #if !os(tvOS)
+        // tvOS would render this as a large heading over the content,
+        // duplicating the name CollectionHeader already shows.
         .navigationTitle(artist.title)
+        #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

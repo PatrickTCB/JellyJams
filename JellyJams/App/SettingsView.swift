@@ -36,6 +36,7 @@ struct SettingsView: View {
                     }
                 }
         }
+        .remotePlayPause()
         #else
         form
             .formStyle(.grouped)

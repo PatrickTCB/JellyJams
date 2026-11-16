@@ -61,6 +61,7 @@ struct LyricsView: View {
             loader.reset()
             await load()
         }
+        .remotePlayPause()
     }
 
     @ViewBuilder private var overlay: some View {

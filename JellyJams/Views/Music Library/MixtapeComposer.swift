@@ -62,6 +62,7 @@ struct MixtapeComposer: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             }
         }
+        .remotePlayPause()
     }
 
     // MARK: - The fields

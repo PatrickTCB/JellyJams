@@ -65,6 +65,7 @@ struct QueueView: View {
             }
         }
         .frame(minWidth: 360, minHeight: 420)
+        .remotePlayPause()
     }
 
     /// Only the last few played tracks are shown; rows map their slice

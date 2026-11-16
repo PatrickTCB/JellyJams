@@ -108,5 +108,9 @@ struct RootContainerView: View {
         } message: {
             Text(bans.actionErrorMessage ?? "")
         }
+        // The Siri Remote's play/pause button, for every screen the shell
+        // pushes. Sheets are their own presentations and wear the modifier
+        // themselves — see ``remotePlayPause()``.
+        .remotePlayPause()
     }
 }

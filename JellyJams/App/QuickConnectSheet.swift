@@ -91,6 +91,7 @@ struct QuickConnectSheet: View {
             }
         }
         .frame(minWidth: 300, minHeight: 320)
+        .remotePlayPause()
     }
 
     /// The server's own Quick Connect page: Jellyfin's web UI at

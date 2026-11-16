@@ -165,6 +165,7 @@ struct JellyJamsBackendSettingsView: View {
         .environment(navigator)
         .frame(minWidth: 300, minHeight: 420, idealHeight: 800)
         .task { await refresh() }
+        .remotePlayPause()
         #if os(macOS)
         //.background(ResizableWindow())
         #endif

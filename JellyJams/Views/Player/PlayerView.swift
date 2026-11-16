@@ -52,6 +52,7 @@ struct PlayerView: View {
         .clearsInitialKeyboardFocus()
         .sheet(isPresented: $showingQueue) { QueueView() }
         .sheet(isPresented: $isPresentingLyrics) { LyricsView() }
+        .remotePlayPause()
     }
 
     private var handle: some View {

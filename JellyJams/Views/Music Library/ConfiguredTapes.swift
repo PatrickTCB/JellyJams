@@ -41,6 +41,7 @@ struct ConfiguredTapes: View {
         }
         .frame(minWidth: 380, minHeight: 420)
         .task { await load() }
+        .remotePlayPause()
     }
 
     /// Loaded recipes are a list; none yet, with a read in flight, is a
