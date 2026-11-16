@@ -670,10 +670,11 @@ final class CarPlayPagedList {
             await model.loadNextPage()
             // Advance the window only when a page actually arrived: a failed
             // load keeps the current page on screen alongside the error alert.
-            if model.items.count > previousCount {
+            let advanced = model.items.count > previousCount
+            if advanced {
                 windowStart = previousCount
             }
-            rebuild()
+            rebuild(resettingScroll: advanced)
             reportError()
         }
     }
@@ -682,7 +683,7 @@ final class CarPlayPagedList {
         if let message = model.errorMessage { showError(message) }
     }
 
-    private func rebuild() {
+    private func rebuild(resettingScroll: Bool = false) {
         guard let template else { return }
         // Only the current page is displayed — the template trims anything
         // beyond its item cap — but rows keep their index in the model's full
@@ -691,6 +692,13 @@ final class CarPlayPagedList {
         var rows = window.enumerated().map { makeRow($0.element, windowStart + $0.offset) }
         if model.canLoadMore && !window.isEmpty {
             rows.append(loadMoreRow())
+        }
+        if resettingScroll {
+            // A section update keeps the list's scroll offset, so the new page
+            // would appear where the Load more row was tapped — at the bottom.
+            // Emptying first clamps the offset back to the top; the rows go
+            // straight back in, in the same update cycle.
+            template.updateSections([])
         }
         template.updateSections([CPListSection(items: rows)])
         if window.isEmpty {
