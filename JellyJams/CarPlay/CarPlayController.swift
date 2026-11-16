@@ -332,10 +332,7 @@ final class CarPlayController: NSObject {
 
     private func pushOnlineList(title: String, query: LibraryQuery) {
         guard let session else { return }
-        // Page size matches the old single-fetch limit, so a library that used
-        // to fit in one batch still arrives in one batch; larger ones now get a
-        // Load more row instead of being silently truncated.
-        let model = PagedItems(list: query.list, pageSize: 500)
+        let model = PagedItems(list: query.list, pageSize: CarPlayPagedList.pageSize)
         model.sortBy = query.sortBy
         model.sortOrder = query.sortOrder
         let template = pushLoadingTemplate(title: title)
@@ -354,7 +351,7 @@ final class CarPlayController: NSObject {
 
     private func pushOnlineSongs() {
         guard let session else { return }
-        let model = PagedItems(list: .songs, pageSize: 1000)
+        let model = PagedItems(list: .songs, pageSize: CarPlayPagedList.pageSize)
         let template = pushLoadingTemplate(title: "Songs")
         let list = CarPlayPagedList(
             model: model,
@@ -616,12 +613,21 @@ enum CarPlayArtwork {
 /// CarPlay templates expose no scroll position, so there is no "reached the
 /// bottom" signal to hook — pagination is an explicit **Load more** row instead.
 /// It fetches through the same ``PagedItems`` the phone's lists use, so cursor
-/// advancement, de-duplication and end detection behave identically. Rows are
-/// rebuilt from the model's accumulated items on every page, which keeps a
-/// track row's play action pointing at the full loaded list rather than the
-/// snapshot it was created with.
+/// advancement, de-duplication and end detection behave identically.
+///
+/// A template only displays its first ``CPListTemplate/maximumItemCount`` rows
+/// and trims the rest, so pages *replace* the displayed rows rather than
+/// accumulate in them: each page is one slot short of the cap, leaving the last
+/// slot for the Load more row. The model still accumulates every page, and rows
+/// carry their index in that full list, so a track tap queues everything loaded
+/// so far rather than just the visible page.
 @MainActor
 final class CarPlayPagedList {
+    /// One slot short of the template's display cap: the Load more row takes
+    /// the last slot. A full page plus the row would exceed the cap, and
+    /// CarPlay trims the overflow — the row first of all.
+    static let pageSize = CPListTemplate.maximumItemCount - 1
+
     private let model: PagedItems
     /// Weak: the pushed template is owned by CarPlay, and its Load more row
     /// owns this pager — a strong reference back would form a retain cycle.
@@ -630,6 +636,8 @@ final class CarPlayPagedList {
     private let emptyTitle: String
     private let makeRow: (BaseItemDto, Int) -> CPListItem
     private let showError: (String) -> Void
+    /// Where the displayed page begins in the model's accumulated items.
+    private var windowStart = 0
 
     init(
         model: PagedItems,
@@ -657,8 +665,14 @@ final class CarPlayPagedList {
 
     private func loadMore() {
         guard !model.isLoading else { return }
+        let previousCount = model.items.count
         Task {
             await model.loadNextPage()
+            // Advance the window only when a page actually arrived: a failed
+            // load keeps the current page on screen alongside the error alert.
+            if model.items.count > previousCount {
+                windowStart = previousCount
+            }
             rebuild()
             reportError()
         }
@@ -670,12 +684,16 @@ final class CarPlayPagedList {
 
     private func rebuild() {
         guard let template else { return }
-        var rows = model.items.enumerated().map { makeRow($0.element, $0.offset) }
-        if model.canLoadMore && !model.isEmpty {
+        // Only the current page is displayed — the template trims anything
+        // beyond its item cap — but rows keep their index in the model's full
+        // list, so a track tap plays from the right place in the whole queue.
+        let window = model.items.dropFirst(windowStart)
+        var rows = window.enumerated().map { makeRow($0.element, windowStart + $0.offset) }
+        if model.canLoadMore && !window.isEmpty {
             rows.append(loadMoreRow())
         }
         template.updateSections([CPListSection(items: rows)])
-        if model.isEmpty {
+        if window.isEmpty {
             if model.errorMessage != nil {
                 template.emptyViewTitleVariants = ["Couldn’t load"]
             } else if model.hasLoadedOnce {
