@@ -73,7 +73,9 @@ struct NowPlayingBar: View {
                             .frame(width: isInline ? 28 : 36, height: isInline ? 28 : 36)
                     }
                     .buttonStyle(.plain)
-
+                    #if os(tvOS)
+                    Spacer()
+                    #endif
                     if !isInline {
                         Button { player.next() } label: {
                             Image(systemName: "forward.fill")
