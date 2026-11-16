@@ -53,6 +53,13 @@
 	<string>Td8gTuMuJbfj/n7IFetBMk6pgxRp1b6wlQt0wXBlffY=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
+	<key>TVTopShelfImage</key>
+	<dict>
+		<key>TVTopShelfPrimaryImage</key>
+		<string>Top Shelf Image</string>
+		<key>TVTopShelfPrimaryImageWide</key>
+		<string>Top Shelf Image Wide</string>
+	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

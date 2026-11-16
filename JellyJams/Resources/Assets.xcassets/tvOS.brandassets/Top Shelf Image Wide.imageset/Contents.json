@@ -1,0 +1,18 @@
+{
+  "images" : [
+    {
+      "filename" : "shelf_wide_1x.png",
+      "idiom" : "tv",
+      "scale" : "1x"
+    },
+    {
+      "filename" : "shelf_wide_2x.png",
+      "idiom" : "tv",
+      "scale" : "2x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
