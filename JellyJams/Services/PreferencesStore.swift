@@ -65,7 +65,7 @@ final class PreferencesStore {
         showsSimilarItems = true
         showsCompleteAlbumsOnly = true
         defaultPlayback = nil
-        audioNormalizationEnabled = false
+        audioNormalizationEnabled = true
     }
 
     /// Whether album and artist screens look up similar music.
@@ -210,8 +210,9 @@ final class PreferencesStore {
 
     /// Whether the app loudness-normalizes playback against the server's
     /// measured audio level, applying each track's loudness normalization gain
-    /// — or its album's — as a gain on top of the player's volume. Off by
-    /// default: normalization is a listening preference the user opts into.
+    /// — or its album's — as a gain on top of the player's volume. On by
+    /// default: a fresh install should play at a consistent loudness, and a
+    /// listener who prefers the untouched level can turn it off.
     var audioNormalizationEnabled: Bool {
         didSet { defaults.set(audioNormalizationEnabled, forKey: Key.audioNormalizationEnabled) }
     }
@@ -241,7 +242,7 @@ final class PreferencesStore {
         }
         // Off until asked for: an absent key must not switch the feature on.
         infiniteQueueEnabled = defaults.object(forKey: Key.infiniteQueueEnabled) as? Bool ?? false
-        audioNormalizationEnabled = defaults.object(forKey: Key.audioNormalizationEnabled) as? Bool ?? false
+        audioNormalizationEnabled = defaults.object(forKey: Key.audioNormalizationEnabled) as? Bool ?? true
     }
 
     /// The ending to match, or nil when there is nothing to match with.

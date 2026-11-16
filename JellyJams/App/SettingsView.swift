@@ -80,7 +80,7 @@ struct SettingsView: View {
             } header: {
                 Text("Audio")
             } footer: {
-                Text("Normalizes volume for each track using Jellyfin's data. Off by default.")
+                Text("Normalizes volume for each track using Jellyfin's data. On by default.")
             }
 
             Section {
