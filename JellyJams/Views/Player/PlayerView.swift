@@ -48,7 +48,11 @@ struct PlayerView: View {
             Spacer(minLength: 0)
         }
         .padding()
+        #if os(tvOS)
+        .frame(minWidth: 800, minHeight: 900)
+        #else
         .frame(minWidth: 360, minHeight: 520)
+        #endif
         .clearsInitialKeyboardFocus()
         .sheet(isPresented: $showingQueue) { QueueView() }
         .sheet(isPresented: $isPresentingLyrics) { LyricsView() }
