@@ -21,6 +21,11 @@ struct SimilarItemsSection: View {
     /// insets applied by the caller would also pad the invisible placeholder
     /// this shows while it has nothing, leaving a gap under the track list.
     var contentInsets = EdgeInsets()
+    /// Reports whether the row has tiles to show, so the hosting page knows
+    /// what its bottom-most focus section is — this row loads its own
+    /// contents, and a page that assumed it always rendered would aim the
+    /// remote's focus wrap at a section that isn't there.
+    var onHasContentChange: ((Bool) -> Void)?
 
     /// Enough width for five tiles to stay legible — five at roughly 125pt plus
     /// the gaps between them. A full-width iPad clears this in either
@@ -60,40 +65,47 @@ struct SimilarItemsSection: View {
     }
 
     @ViewBuilder private var content: some View {
-        if !similar.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(title)
-                    .font(.title2.bold())
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                    ForEach(similar) { suggestion in
-                        // A plain Button rather than a NavigationLink: this grid
-                        // renders inside a single `List` row on the album
-                        // screen, where a `List` gives every
-                        // NavigationLink the whole-row treatment (one collapsed
-                        // tap target, plus a disclosure chevron per tile on
-                        // iOS). ``LibraryNavigator`` pushes imperatively, which
-                        // also survives this row reloading its contents.
-                        Button {
-                            navigator.open(suggestion)
-                        } label: {
-                            ItemGridCell(item: suggestion)
+        // The group keeps the content report alive across the branches below,
+        // so a load that answers "nothing" is reported too.
+        Group {
+            if !similar.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(title)
+                        .font(.title2.bold())
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+                        ForEach(similar) { suggestion in
+                            // A plain Button rather than a NavigationLink: this grid
+                            // renders inside a single `List` row on the album
+                            // screen, where a `List` gives every
+                            // NavigationLink the whole-row treatment (one collapsed
+                            // tap target, plus a disclosure chevron per tile on
+                            // iOS). ``LibraryNavigator`` pushes imperatively, which
+                            // also survives this row reloading its contents.
+                            Button {
+                                navigator.open(suggestion)
+                            } label: {
+                                ItemGridCell(item: suggestion)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-            }
-            .padding(contentInsets)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .task(id: loadKey) { await load() }
-        } else if !loader.hasLoadedOnce {
-            // Something has to stay in the view tree to carry the task, but only
-            // until it answers. Once the server has said "nothing", this leaves
-            // entirely rather than lingering as an empty row: a zero-height view
-            // still costs a list row's separator or a stack's spacing.
-            Color.clear
-                .frame(height: 0)
-                .accessibilityHidden(true)
+                .padding(contentInsets)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .task(id: loadKey) { await load() }
+            } else if !loader.hasLoadedOnce {
+                // Something has to stay in the view tree to carry the task, but only
+                // until it answers. Once the server has said "nothing", this leaves
+                // entirely rather than lingering as an empty row: a zero-height view
+                // still costs a list row's separator or a stack's spacing.
+                Color.clear
+                    .frame(height: 0)
+                    .accessibilityHidden(true)
+                    .task(id: loadKey) { await load() }
+            }
+        }
+        .onChange(of: similar.isEmpty, initial: true) { _, empty in
+            onHasContentChange?(!empty)
         }
     }
 

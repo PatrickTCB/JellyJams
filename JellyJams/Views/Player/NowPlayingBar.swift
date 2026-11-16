@@ -74,7 +74,7 @@ struct NowPlayingBar: View {
                     }
                     .buttonStyle(.plain)
                     #if os(tvOS)
-                    Spacer()
+                    //Spacer()
                     #endif
                     if !isInline {
                         Button { player.next() } label: {
@@ -85,6 +85,9 @@ struct NowPlayingBar: View {
                         .buttonStyle(.plain)
                         .disabled(!player.canGoNext)
                     }
+                    #if os(tvOS)
+                    //Spacer()
+                    #endif
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, isInline ? 8 : 12)

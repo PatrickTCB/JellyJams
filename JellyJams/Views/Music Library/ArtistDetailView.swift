@@ -13,6 +13,11 @@ struct ArtistDetailView: View {
     @Environment(PlaylistStore.self) private var playlistStore
     @State private var loader = LoadableModel(LibraryRepository.ArtistOverview())
     @State private var contentWidth: CGFloat = 0
+    /// The remote's wrap-to-top focus target: the header's Play button.
+    @FocusState private var isTopFocused: Bool
+    /// Whether the similar row rendered tiles — it loads its own contents,
+    /// and the focus wrap needs to know what the page's bottom section is.
+    @State private var similarHasContent = false
 
     private var overview: LibraryRepository.ArtistOverview { loader.value }
 
@@ -25,7 +30,8 @@ struct ArtistDetailView: View {
                     isCircular: true,
                     canPlay: !overview.playbackSample.isEmpty,
                     onPlay: { player.play(overview.playbackSample) },
-                    onShuffle: { player.play(overview.playbackSample, shuffled: true) }
+                    onShuffle: { player.play(overview.playbackSample, shuffled: true) },
+                    topFocus: $isTopFocused
                 )
                 .remoteFocusSection()
 
@@ -40,9 +46,9 @@ struct ArtistDetailView: View {
                         return loader.errorMessage == nil
                     }
                 } else {
-                    albumSection(title: "Albums", albums: overview.albums)
+                    albumSection(title: "Albums", albums: overview.albums, isFocusBottom: focusBottom == .albums)
                         .remoteFocusSection()
-                    albumSection(title: "Appears On", albums: overview.appearsOn)
+                    albumSection(title: "Appears On", albums: overview.appearsOn, isFocusBottom: focusBottom == .appearsOn)
                         .remoteFocusSection()
                     featuredSection
                         .remoteFocusSection()
@@ -50,9 +56,16 @@ struct ArtistDetailView: View {
 
                 GenreChips(genres: genres)
                     .remoteFocusSection()
+                    .remoteFocusWrap(isEnabled: focusBottom == .genres) { isTopFocused = true }
 
-                SimilarItemsSection(kind: .artists, item: artist, availableWidth: contentWidth)
-                    .remoteFocusSection()
+                SimilarItemsSection(
+                    kind: .artists,
+                    item: artist,
+                    availableWidth: contentWidth,
+                    onHasContentChange: { similarHasContent = $0 }
+                )
+                .remoteFocusSection()
+                .remoteFocusWrap(isEnabled: focusBottom == .similar) { isTopFocused = true }
             }
             .padding()
         }
@@ -83,10 +96,23 @@ struct ArtistDetailView: View {
         await loader.load { try await session.library.artistOverview(for: artist) }
     }
 
+    /// The page's bottom-most focus section, where a down press wraps back to
+    /// the header's controls. The similar row reports whether it rendered;
+    /// the rest is known from the overview.
+    private var focusBottom: FocusBottom {
+        if similarHasContent { return .similar }
+        if !genres.isEmpty { return .genres }
+        if !overview.featuredAlbums.isEmpty { return .featured }
+        if !overview.appearsOn.isEmpty { return .appearsOn }
+        return .albums
+    }
+
+    private enum FocusBottom { case albums, appearsOn, featured, genres, similar }
+
     /// A headed album grid — "Albums" and "Appears On". Renders nothing for an
     /// empty list so sections the artist has no entries in leave no gap.
     @ViewBuilder
-    private func albumSection(title: LocalizedStringKey, albums: [BaseItemDto]) -> some View {
+    private func albumSection(title: LocalizedStringKey, albums: [BaseItemDto], isFocusBottom: Bool = false) -> some View {
         if !albums.isEmpty {
             Text(title)
                 .font(.title2.bold())
@@ -97,6 +123,7 @@ struct ArtistDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .remotePlayAction(playAction(for: album))
+                    .remoteFocusWrap(isEnabled: isFocusBottom && album.id == albums.last?.id) { isTopFocused = true }
                 }
             }
         }
@@ -117,6 +144,11 @@ struct ArtistDetailView: View {
                         player.play(group.tracks, startAt: index)
                     }
                     .remotePlayAction { player.play(group.tracks, startAt: index) }
+                    .remoteFocusWrap(
+                        isEnabled: focusBottom == .featured
+                            && group == overview.featuredAlbums.last
+                            && index == group.tracks.count - 1
+                    ) { isTopFocused = true }
                 }
             }
         }
@@ -130,9 +162,9 @@ struct ArtistDetailView: View {
     }
 
     /// What the Siri Remote's play/pause button does while an album tile
-    /// holds focus: start the album, the same play the context menu offers.
-    /// Failures land in the root-hosted alert, as the menu's and Instant
-    /// Mix's do.
+    /// holds focus and nothing is loaded: start the album, the same play the
+    /// context menu offers. Failures land in the root-hosted alert, as the
+    /// menu's and Instant Mix's do.
     private func playAction(for album: BaseItemDto) -> () -> Void {
         {
             Task {

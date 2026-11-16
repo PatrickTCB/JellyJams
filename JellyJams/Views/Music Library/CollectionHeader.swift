@@ -15,6 +15,10 @@ struct CollectionHeader: View {
     var canPlay: Bool
     var onPlay: () -> Void
     var onShuffle: () -> Void
+    /// The hosting page's wrap-to-top focus target, bound to the Play button
+    /// on tvOS so the remote's focus wrap has somewhere to land. Nil leaves
+    /// the button unbound; other platforms never read it.
+    var topFocus: FocusState<Bool>.Binding?
 
     @Environment(SessionStore.self) private var session
     @Environment(DownloadStore.self) private var downloads
@@ -49,6 +53,23 @@ struct CollectionHeader: View {
         .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
     }
 
+    @ViewBuilder private var playButton: some View {
+        let button = Button(action: onPlay) {
+            Image(systemName: "play.fill")
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(!canPlay)
+        #if os(tvOS)
+        if let topFocus {
+            button.focused(topFocus)
+        } else {
+            button
+        }
+        #else
+        button
+        #endif
+    }
+
     private func info(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 8) {
             Text(item.displayName)
@@ -61,11 +82,7 @@ struct CollectionHeader: View {
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
-                Button(action: onPlay) {
-                    Image(systemName: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canPlay)
+                playButton
 
                 Button(action: onShuffle) {
                     Image(systemName: "shuffle")

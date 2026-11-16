@@ -36,6 +36,11 @@ struct TrackListDetail: View {
     /// True while a drag's server replay is still settling, so a second
     /// drag can't race the first one's POSTs and interleave the sequences.
     @State private var isReplayingMoves = false
+    /// The remote's wrap-to-top focus target: the header's Play button.
+    @FocusState private var isTopFocused: Bool
+    /// Whether the similar row rendered tiles — it loads its own contents,
+    /// and the focus wrap needs to know what the page's bottom section is.
+    @State private var similarHasContent = false
     
     private var tracks: [BaseItemDto] {
         let raw = downloaded
@@ -67,6 +72,7 @@ struct TrackListDetail: View {
                 Section {
                     GenreChips(genres: headerItem.genreRefs)
                         .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
+                        .remoteFocusWrap(isEnabled: focusBottom == .genres) { isTopFocused = true }
                         #if !os(tvOS)
                         .listRowSeparator(.hidden)
                         #endif
@@ -82,9 +88,11 @@ struct TrackListDetail: View {
                     kind: .albums,
                     item: headerItem,
                     availableWidth: contentWidth,
-                    contentInsets: EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
+                    contentInsets: EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16),
+                    onHasContentChange: { similarHasContent = $0 }
                 )
                 .listRowInsets(EdgeInsets())
+                .remoteFocusWrap(isEnabled: focusBottom == .similar) { isTopFocused = true }
                 #if !os(tvOS)
                 .listRowSeparator(.hidden)
                 #endif
@@ -112,7 +120,12 @@ struct TrackListDetail: View {
             selection = []
             return .handled
         }
+        #if !os(tvOS)
+        // Keyboard platforms need the list itself focusable for the selection
+        // keys; on tvOS it would put the whole list ahead of the header's
+        // controls in the focus order.
         .focusable()
+        #endif
         .overlay {
             // Empty, failed and loading states sit centred over the list
             // rather than in a top row: a `ContentUnavailableView` in a List
@@ -264,12 +277,37 @@ struct TrackListDetail: View {
         TrackRow(
             track: track,
             showArtwork: showArtworkInRows,
+            tapBehavior: rowTapBehavior,
             selectedTracks: selected,
             onRemoveFromPlaylist: isEditablePlaylist ? { removeFromPlaylist(track) } : nil
         ) {
             player.play(items, startAt: index)
         }
+        .remotePlayAction { player.play(items, startAt: index) }
+        .remoteFocusWrap(isEnabled: focusBottom == .tracks && index == items.count - 1) { isTopFocused = true }
     }
+
+    /// On tvOS the single press belongs to playback: there is no selection
+    /// gesture to give it to — no edit mode, no drag, no keyboard — so rows
+    /// play on select, as the tvOS branch of ``playlistRows`` intends.
+    private var rowTapBehavior: TrackRow.TapBehavior {
+        #if os(tvOS)
+        .play
+        #else
+        .select
+        #endif
+    }
+
+    /// The page's bottom-most focus section, where a down press wraps back to
+    /// the header's controls. The similar row reports whether it rendered;
+    /// genres only exist when the item carries any.
+    private var focusBottom: FocusBottom {
+        if similarHasContent { return .similar }
+        if showsGenres && !headerItem.genreRefs.isEmpty { return .genres }
+        return .tracks
+    }
+
+    private enum FocusBottom { case tracks, genres, similar }
 
     // MARK: - Header
 
@@ -344,13 +382,7 @@ struct TrackListDetail: View {
 
     private var actions: some View {
         HStack(spacing: 12) {
-            Button {
-                player.play(tracks)
-            } label: {
-                Image(systemName: "play.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(tracks.isEmpty)
+            playButton
 
             Button {
                 player.play(tracks, shuffled: true)
@@ -366,6 +398,22 @@ struct TrackListDetail: View {
                     .buttonStyle(.bordered)
             }
         }
+    }
+
+    /// The header's Play button — the remote's wrap-to-top focus target.
+    @ViewBuilder private var playButton: some View {
+        let button = Button {
+            player.play(tracks)
+        } label: {
+            Image(systemName: "play.fill")
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(tracks.isEmpty)
+        #if os(tvOS)
+        button.focused($isTopFocused)
+        #else
+        button
+        #endif
     }
 
     private func subtitleText(_ text: String) -> some View {
