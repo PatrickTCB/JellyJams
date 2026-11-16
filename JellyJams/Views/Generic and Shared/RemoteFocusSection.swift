@@ -21,15 +21,14 @@ extension View {
     /// Wraps focus back to the top of the page when a down press would leave
     /// its bottom — the focus engine never wraps on its own.
     ///
-    /// Apply only where a down press has nowhere native to go: the page's
-    /// bottom-most section (or its last row). Elsewhere the handler would
-    /// fight the engine's own downward move. No-op on platforms without the
-    /// remote, and while `isEnabled` is false — which is how a section that
-    /// is only sometimes the bottom (genres above a similar row that may be
-    /// empty) stands down when it isn't.
-    @ViewBuilder func remoteFocusWrap(isEnabled: Bool = true, _ wrap: @escaping () -> Void) -> some View {
+    /// Attach to the focusable control itself, not a container around it:
+    /// a handler on an ancestor of the focused button does not reliably
+    /// receive the move command. Pass nil for items that aren't the page's
+    /// bottom-most — elsewhere the handler would fight the engine's own
+    /// downward move. No-op on platforms without the remote.
+    @ViewBuilder func remoteFocusWrapItem(_ wrap: (() -> Void)?) -> some View {
         #if os(tvOS)
-        if isEnabled {
+        if let wrap {
             onMoveCommand { direction in
                 if direction == .down { wrap() }
             }

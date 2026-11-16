@@ -54,18 +54,20 @@ struct ArtistDetailView: View {
                         .remoteFocusSection()
                 }
 
-                GenreChips(genres: genres)
-                    .remoteFocusSection()
-                    .remoteFocusWrap(isEnabled: focusBottom == .genres) { isTopFocused = true }
+                GenreChips(
+                    genres: genres,
+                    onWrapDown: focusBottom == .genres ? { isTopFocused = true } : nil
+                )
+                .remoteFocusSection()
 
                 SimilarItemsSection(
                     kind: .artists,
                     item: artist,
                     availableWidth: contentWidth,
-                    onHasContentChange: { similarHasContent = $0 }
+                    onHasContentChange: { similarHasContent = $0 },
+                    onWrapDown: focusBottom == .similar ? { isTopFocused = true } : nil
                 )
                 .remoteFocusSection()
-                .remoteFocusWrap(isEnabled: focusBottom == .similar) { isTopFocused = true }
             }
             .padding()
         }
@@ -123,7 +125,7 @@ struct ArtistDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .remotePlayAction(playAction(for: album))
-                    .remoteFocusWrap(isEnabled: isFocusBottom && album.id == albums.last?.id) { isTopFocused = true }
+                    .remoteFocusWrapItem(isFocusBottom && album.id == albums.last?.id ? { isTopFocused = true } : nil)
                 }
             }
         }
@@ -140,15 +142,17 @@ struct ArtistDetailView: View {
                 Text(featuredTitle(for: group.album))
                     .font(.title2.bold())
                 ForEach(Array(group.tracks.enumerated()), id: \.element.id) { index, track in
-                    TrackRow(track: track, tapBehavior: .play) {
+                    TrackRow(
+                        track: track,
+                        tapBehavior: .play,
+                        onWrapDown: focusBottom == .featured
+                            && group == overview.featuredAlbums.last
+                            && index == group.tracks.count - 1
+                            ? { isTopFocused = true } : nil
+                    ) {
                         player.play(group.tracks, startAt: index)
                     }
                     .remotePlayAction { player.play(group.tracks, startAt: index) }
-                    .remoteFocusWrap(
-                        isEnabled: focusBottom == .featured
-                            && group == overview.featuredAlbums.last
-                            && index == group.tracks.count - 1
-                    ) { isTopFocused = true }
                 }
             }
         }

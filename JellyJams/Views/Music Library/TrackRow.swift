@@ -23,6 +23,9 @@ struct TrackRow: View {
     /// Set by playlist detail views to expose "Remove from Playlist" in the
     /// context menu and (on iOS) trailing swipe actions.
     var onRemoveFromPlaylist: (() -> Void)?
+    /// The remote's wrap-to-top action, attached to the row's play button
+    /// while this is the hosting page's bottom-most row; nil leaves it plain.
+    var onWrapDown: (() -> Void)?
     var onPlay: () -> Void
 
     /// How the row answers a tap. `.select` (the default) gives the single
@@ -135,6 +138,7 @@ struct TrackRow: View {
     private var playButton: some View {
         Button(action: onPlay) { rowLabel }
             .buttonStyle(.plain)
+            .remoteFocusWrapItem(onWrapDown)
     }
 
     private var rowLabel: some View {

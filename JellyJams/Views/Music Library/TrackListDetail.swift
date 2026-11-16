@@ -58,6 +58,10 @@ struct TrackListDetail: View {
         List(selection: $selection) {
             Section {
                 header
+                    // One focus unit for the remote: entering and leaving the
+                    // header goes through its full-width frame rather than
+                    // the narrow frame of whichever control holds focus.
+                    .remoteFocusSection()
                     .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
                     #if !os(tvOS)
                     .listRowSeparator(.hidden)
@@ -70,12 +74,14 @@ struct TrackListDetail: View {
 
             if showsGenres {
                 Section {
-                    GenreChips(genres: headerItem.genreRefs)
-                        .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
-                        .remoteFocusWrap(isEnabled: focusBottom == .genres) { isTopFocused = true }
-                        #if !os(tvOS)
-                        .listRowSeparator(.hidden)
-                        #endif
+                    GenreChips(
+                        genres: headerItem.genreRefs,
+                        onWrapDown: focusBottom == .genres ? { isTopFocused = true } : nil
+                    )
+                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16))
+                    #if !os(tvOS)
+                    .listRowSeparator(.hidden)
+                    #endif
                 }
             }
 
@@ -89,10 +95,10 @@ struct TrackListDetail: View {
                     item: headerItem,
                     availableWidth: contentWidth,
                     contentInsets: EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16),
-                    onHasContentChange: { similarHasContent = $0 }
+                    onHasContentChange: { similarHasContent = $0 },
+                    onWrapDown: focusBottom == .similar ? { isTopFocused = true } : nil
                 )
                 .listRowInsets(EdgeInsets())
-                .remoteFocusWrap(isEnabled: focusBottom == .similar) { isTopFocused = true }
                 #if !os(tvOS)
                 .listRowSeparator(.hidden)
                 #endif
@@ -163,6 +169,9 @@ struct TrackListDetail: View {
                 ToolbarItem { EditButton() }
             }
             #endif
+            #if !os(tvOS)
+            // On tvOS these live in the header's action row instead — the
+            // remote cannot reach toolbar items from the list's focus.
             ToolbarItem { FavouriteButton(item: headerItem) }
             ToolbarItem { DownloadButton(item: headerItem) }
             if downloaded && headerItem.itemType == .playlist {
@@ -185,6 +194,7 @@ struct TrackListDetail: View {
                         : "Connect to your server to check this playlist for new songs")
                 }
             }
+            #endif
             if !selectedTracks.isEmpty {
                 ToolbarItem { TrackSelectionMenu(tracks: selectedTracks) }
             }
@@ -198,7 +208,18 @@ struct TrackListDetail: View {
         }
         .task(id: headerItem.id) { await reload() }
         .refreshableWhenAvailable(!downloaded) { await reload() }
-        .refreshToolbarItem(isAvailable: !downloaded) { await reload() }
+        .refreshToolbarItem(isAvailable: showsRefreshToolbarItem) { await reload() }
+    }
+
+    /// The toolbar Refresh button stays off tvOS: the remote cannot reach
+    /// toolbar items from the list, so the header's action row carries the
+    /// refresh instead.
+    private var showsRefreshToolbarItem: Bool {
+        #if os(tvOS)
+        false
+        #else
+        !downloaded
+        #endif
     }
 
     // MARK: - Track rows
@@ -279,12 +300,12 @@ struct TrackListDetail: View {
             showArtwork: showArtworkInRows,
             tapBehavior: rowTapBehavior,
             selectedTracks: selected,
-            onRemoveFromPlaylist: isEditablePlaylist ? { removeFromPlaylist(track) } : nil
+            onRemoveFromPlaylist: isEditablePlaylist ? { removeFromPlaylist(track) } : nil,
+            onWrapDown: focusBottom == .tracks && index == items.count - 1 ? { isTopFocused = true } : nil
         ) {
             player.play(items, startAt: index)
         }
         .remotePlayAction { player.play(items, startAt: index) }
-        .remoteFocusWrap(isEnabled: focusBottom == .tracks && index == items.count - 1) { isTopFocused = true }
     }
 
     /// On tvOS the single press belongs to playback: there is no selection
@@ -397,6 +418,39 @@ struct TrackListDetail: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.bordered)
             }
+            #if os(tvOS)
+            // The top bar's actions live here on tvOS: toolbar items sit in a
+            // focus environment the remote cannot reach from the list, so
+            // they join the header's controls, where left/right finds them —
+            // the same arrangement the artist page's header uses.
+            FavouriteButton(item: headerItem)
+            DownloadButton(item: headerItem)
+            if !downloaded {
+                Button {
+                    Task { await reload() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .help("Refresh")
+            }
+            if downloaded && headerItem.itemType == .playlist {
+                Button {
+                    downloads.refreshPlaylist(headerItem.id ?? "")
+                } label: {
+                    if downloads.isBusy(headerItem) {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(!session.serverReachable || downloads.isBusy(headerItem))
+                .help(session.serverReachable
+                    ? "Check this playlist for new songs"
+                    : "Connect to your server to check this playlist for new songs")
+            }
+            #endif
         }
     }
 

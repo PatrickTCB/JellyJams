@@ -7,6 +7,9 @@ import SwiftUI
 /// unconditionally.
 struct GenreChips: View {
     let genres: [GenreRef]
+    /// The remote's wrap-to-top action, attached to each chip while this is
+    /// the hosting page's bottom-most section; nil leaves them plain.
+    var onWrapDown: (() -> Void)?
     @Environment(LibraryNavigator.self) private var navigator
 
     var body: some View {
@@ -28,6 +31,7 @@ struct GenreChips: View {
                             chip(genre.name)
                         }
                         .buttonStyle(.plain)
+                        .remoteFocusWrapItem(onWrapDown)
                         .accessibilityLabel("Browse \(genre.name)")
                     }
                 }

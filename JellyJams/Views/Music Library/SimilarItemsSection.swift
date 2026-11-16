@@ -26,6 +26,9 @@ struct SimilarItemsSection: View {
     /// contents, and a page that assumed it always rendered would aim the
     /// remote's focus wrap at a section that isn't there.
     var onHasContentChange: ((Bool) -> Void)?
+    /// The remote's wrap-to-top action, attached to each tile while this is
+    /// the hosting page's bottom-most section; nil leaves them plain.
+    var onWrapDown: (() -> Void)?
 
     /// Enough width for five tiles to stay legible — five at roughly 125pt plus
     /// the gaps between them. A full-width iPad clears this in either
@@ -87,6 +90,7 @@ struct SimilarItemsSection: View {
                                 ItemGridCell(item: suggestion)
                             }
                             .buttonStyle(.plain)
+                            .remoteFocusWrapItem(onWrapDown)
                         }
                     }
                 }
