@@ -26,18 +26,18 @@ extension AudioEntity.AudioSearchQuery: IntentValueQuery {
         switch input.criteria {
         case .searchQuery(let query):
             let found = try await SiriAudioSearch.search(matching: query, client: client)
-            if found.isEmpty, let fallback = await TextToTunesPlaylist.fallbackEntity(for: query) {
+            if found.isEmpty, let fallback = await TextToTunesPlaylist.fallbackCandidate(for: query) {
                 // Nothing in the library answers these words, so they read
                 // as a description rather than a name: the Text to Tunes
                 // sentinel takes them to the backend at play time.
-                return [fallback]
+                return [AudioEntity(candidate: fallback)]
             }
-            return found
+            return found.map(AudioEntity.init(candidate:))
         case .unspecified:
             // The sentinel stands in for whatever the user configured as
             // their default playback; `SiriPlayback` swaps it at play time.
             let setting = await AppServices.shared.preferences.defaultPlayback
-            return [.playlist(DefaultPlaybackPlaylist.entity(setting: setting))]
+            return [AudioEntity(candidate: DefaultPlaybackPlaylist.candidate(setting: setting))]
         case .url:
             return []
         @unknown default:

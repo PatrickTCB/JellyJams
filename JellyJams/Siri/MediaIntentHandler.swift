@@ -1,14 +1,6 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import Foundation
 import Intents
-
-/// A resolved library candidate, in `Sendable` terms.
-private struct Candidate: Sendable {
-    let id: String
-    let title: String
-    let type: INMediaItemType
-    let artworkURL: URL?
-}
 
 /// Bridges an ObjC completion block into a `Task`. Siri invokes these blocks
 /// exactly once and never touches them afterwards, so the one-shot hand-off
@@ -21,7 +13,14 @@ private struct OneShot<Argument>: @unchecked Sendable {
 private enum Resolution {
     case loginRequired
     case noMatch
-    case items([Candidate])
+    case items([SiriCandidate])
+}
+
+/// The outcome of a one-shot spoken request, for the surfaces that answer
+/// the request themselves rather than through Siri's own dialogs.
+enum SiriRequestOutcome: Sendable, Equatable {
+    case success
+    case failure(String)
 }
 
 /// Classic-Siri handling for media playback requests (the SiriKit Media
@@ -29,15 +28,60 @@ private enum Resolution {
 /// Intelligence: the "play music" app picker and free-form "Play Whiplash by
 /// Architects in Jelly Jams" routing both come from `INPlayMediaIntent`.
 ///
-/// The Apple-Intelligence-only machinery lives in the App Intents audio
-/// schema (``PlayAudioIntent``); this handler mirrors it for classic Siri
-/// and reuses the exact same search and playback pipeline
-/// (``SiriAudioSearch``, ``SiriPlayback``), so both paths stay in sync.
+/// On iOS the app handles these in-app (see ``AppDelegate``); the
+/// Apple-Intelligence-only machinery lives in the App Intents audio schema
+/// (``PlayAudioIntent``). On tvOS neither exists — in-app intent handling is
+/// iOS-only and the audio schema is unavailable there — so a lightweight
+/// Intents extension (the JellyJamsSiri target) resolves a pass-through item
+/// and hands the request to the app as a user activity, which arrives at
+/// ``play(_:)`` below. All paths reuse the exact same search and playback
+/// pipeline (``SiriAudioSearch``, ``SiriPlayback``), so they stay in sync.
 ///
 /// The Intent types are not `Sendable`, so the actor-isolated resolution
 /// works on `Sendable` snapshots only and the intent-facing objects are
 /// built back on the caller's side.
 final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
+
+    // MARK: One-shot requests (tvOS)
+
+    /// Answers a whole spoken request in one call: resolve it against the
+    /// library, then play the best match. This is the tvOS entry point —
+    /// the extension foregrounds the app with the request and the app does
+    /// the work in its own process, where the session and player live.
+    ///
+    /// A request carrying a real library identifier (a donated interaction,
+    /// say) plays it directly; the extension's pass-through identifiers and
+    /// search-bearing requests resolve fresh.
+    @MainActor
+    static func play(_ request: SiriMediaRequest) async -> SiriRequestOutcome {
+        if let identifier = request.concreteIdentifier {
+            return await outcome(of: performHandle(identifier: identifier))
+        }
+        switch await resolve(mediaType: request.mediaType, name: request.name, artist: request.artist) {
+        case .loginRequired:
+            return .failure(Self.message(for: .notSignedIn))
+        case .noMatch:
+            return .failure(Self.message(for: .noMatch(request.name ?? request.artist ?? "")))
+        case .items(let candidates):
+            return await outcome(of: performHandle(identifier: candidates.first?.id))
+        }
+    }
+
+    @MainActor
+    private static func outcome(of code: INPlayMediaIntentResponseCode) -> SiriRequestOutcome {
+        switch code {
+        case .success:
+            return .success
+        case .failureRequiringAppLaunch:
+            return .failure(message(for: .notSignedIn))
+        default:
+            return .failure(message(for: .itemUnavailable))
+        }
+    }
+
+    private static func message(for error: SiriIntentError) -> String {
+        String(localized: error.localizedStringResource)
+    }
 
     // MARK: Resolution
 
@@ -63,7 +107,7 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
     }
 
     /// Maps the request's ``INMediaSearch`` onto library candidates:
-    /// qualified requests go straight to the matching entity query,
+    /// qualified requests go straight to the matching kind's search,
     /// everything else flows through the shared mixed-kind search (which
     /// handles the "Title by Artist" split). An empty result array tells
     /// Siri nothing matched; `.loginRequired` covers the signed-out state.
@@ -74,7 +118,7 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
             return .loginRequired
         }
 
-        let candidates: [Candidate]
+        let candidates: [SiriCandidate]
         do {
             candidates = try await Self.libraryCandidates(mediaType: mediaType, name: name, artist: artist, client: client)
         } catch {
@@ -92,9 +136,9 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
         artist: String?,
         client: JellyfinService,
         limit: Int = 6
-    ) async throws -> [Candidate] {
-        let found: [AudioEntity] = try await Self.found(mediaType: mediaType, name: name, artist: artist, client: client)
-        return found.prefix(limit).map(\.candidate)
+    ) async throws -> [SiriCandidate] {
+        let found = try await Self.found(mediaType: mediaType, name: name, artist: artist, client: client)
+        return Array(found.prefix(limit))
     }
 
     @MainActor
@@ -103,21 +147,28 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
         name: String?,
         artist: String?,
         client: JellyfinService
-    ) async throws -> [AudioEntity] {
+    ) async throws -> [SiriCandidate] {
         switch mediaType {
         case .playlist:
-            return try await PlaylistQuery().entities(matching: name ?? "").map(AudioEntity.playlist)
+            var found = try await SiriAudioSearch.search(kind: .playlist, matching: name ?? "", client: client)
+            // "Play my favourites" names the synthetic playlist rather than
+            // a server one — the same nicety the playlist picker offers.
+            let phrase = name ?? ""
+            if phrase.localizedCaseInsensitiveContains("favourite") || phrase.localizedCaseInsensitiveContains("favorite") {
+                found.insert(FavouriteSongsPlaylist.candidate(), at: 0)
+            }
+            return found
         case .album:
-            return try await AlbumQuery().entities(matching: name ?? "").map(AudioEntity.album)
+            return try await SiriAudioSearch.search(kind: .album, matching: name ?? "", client: client)
         case .artist:
-            return try await ArtistQuery().entities(matching: artist ?? name ?? "").map(AudioEntity.artist)
+            return try await SiriAudioSearch.search(kind: .artist, matching: artist ?? name ?? "", client: client)
         case .song:
-            return try await SongQuery().entities(matching: Self.titleQuery(name, artist: artist)).map(AudioEntity.song)
+            return try await SiriAudioSearch.search(kind: .song, matching: Self.titleQuery(name, artist: artist), client: client)
         default:
             if let name {
                 let phrase = Self.titleQuery(name, artist: artist)
                 let found = try await SiriAudioSearch.search(matching: phrase, client: client)
-                if found.isEmpty, let fallback = TextToTunesPlaylist.fallbackEntity(for: phrase) {
+                if found.isEmpty, let fallback = TextToTunesPlaylist.fallbackCandidate(for: phrase) {
                     // The library has nothing for these free-form words, so
                     // they read as a description rather than a name — the
                     // Text to Tunes sentinel takes them to the backend. A
@@ -128,12 +179,12 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
                 return found
             }
             if let artist {
-                return try await ArtistQuery().entities(matching: artist).map(AudioEntity.artist)
+                return try await SiriAudioSearch.search(kind: .artist, matching: artist, client: client)
             }
             // "Play some music" with nothing named: the default-playback
             // sentinel, matching the audio schema's unspecified request.
             let setting = AppServices.shared.preferences.defaultPlayback
-            return [.playlist(DefaultPlaybackPlaylist.entity(setting: setting))]
+            return [DefaultPlaybackPlaylist.candidate(setting: setting)]
         }
     }
 
@@ -172,9 +223,9 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
         }
 
         do {
-            let entity = try await Self.entity(identifier: identifier, client: client)
+            let candidate = try await Self.candidate(identifier: identifier, client: client)
             _ = try await SiriPlayback.play(
-                entity,
+                candidate,
                 shuffleRequested: false,
                 queueLocation: nil,
                 player: services.player,
@@ -186,41 +237,40 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
         }
     }
 
-    /// Turns the resolved media item's identifier back into a full
-    /// ``AudioEntity``, rehydrating from the server so playback sees a fresh
-    /// item. The synthetic playlists pass through untouched —
-    /// ``SiriPlayback`` applies the user's setting when it sees the default
-    /// id, and decodes the phrase when it sees the Text to Tunes prefix. A
-    /// missing or unresolvable identifier falls back to the favourites
-    /// shuffle, which covers open-ended requests that skip resolution
-    /// entirely.
+    /// Turns a resolved identifier back into a full ``SiriCandidate``,
+    /// rehydrating from the server so playback sees a fresh item. The
+    /// synthetic playlists pass through untouched — ``SiriPlayback`` applies
+    /// the user's setting when it sees the default id, and decodes the
+    /// phrase when it sees the Text to Tunes prefix. A missing or
+    /// unresolvable identifier falls back to the favourites shuffle, which
+    /// covers open-ended requests that skip resolution entirely.
     @MainActor
-    private static func entity(identifier: String?, client: JellyfinService) async throws -> AudioEntity {
+    private static func candidate(identifier: String?, client: JellyfinService) async throws -> SiriCandidate {
         if identifier == DefaultPlaybackPlaylist.id {
-            return .playlist(DefaultPlaybackPlaylist.entity(setting: AppServices.shared.preferences.defaultPlayback))
+            return DefaultPlaybackPlaylist.candidate(setting: AppServices.shared.preferences.defaultPlayback)
         }
         if let identifier, let phrase = TextToTunesPlaylist.query(in: identifier) {
-            return .playlist(TextToTunesPlaylist.entity(query: phrase))
+            return TextToTunesPlaylist.candidate(query: phrase)
         }
         guard let identifier,
               identifier != FavouriteSongsPlaylist.id,
               let item = try await client.item(byId: identifier)
         else {
-            return .playlist(FavouriteSongsPlaylist.entity())
+            return FavouriteSongsPlaylist.candidate()
         }
 
         let artwork = client.artworkURL(for: item, size: 600)
         if item.itemType == .audio {
-            return .song(SongEntity(item: item, artworkURL: artwork))
+            return SiriCandidate(item: item, kind: .song, artworkURL: artwork)
         }
         if item.itemType == .musicAlbum {
-            return .album(AlbumEntity(item: item, artworkURL: artwork))
+            return SiriCandidate(item: item, kind: .album, artworkURL: artwork)
         }
         if item.itemType == .musicArtist {
-            return .artist(ArtistEntity(item: item, artworkURL: artwork))
+            return SiriCandidate(item: item, kind: .artist, artworkURL: artwork)
         }
         if item.itemType == .playlist {
-            return .playlist(PlaylistEntity(item: item, artworkURL: artwork))
+            return SiriCandidate(item: item, kind: .playlist, artworkURL: artwork)
         }
         throw SiriIntentError.itemUnavailable
     }
@@ -243,27 +293,27 @@ extension MediaIntentHandler {
 
 // MARK: - Conversions
 
-private extension AudioEntity {
-    /// The `Sendable` stand-in for this entity.
-    var candidate: Candidate {
-        switch self {
-        case .song(let song):
-            .init(id: song.id, title: song.title, type: .song, artworkURL: song.artworkURL)
-        case .album(let album):
-            .init(id: album.id, title: album.title, type: .album, artworkURL: album.artworkURL)
-        case .artist(let artist):
-            .init(id: artist.id, title: artist.name, type: .artist, artworkURL: artist.artworkURL)
-        case .playlist(let playlist):
-            .init(id: playlist.id, title: playlist.title, type: .playlist, artworkURL: playlist.artworkURL)
-        }
-    }
-}
-
-private extension Candidate {
+extension SiriCandidate {
     /// The SiriKit-facing stand-in, carrying the same identifier back out of
     /// the intent on handle.
     var mediaItem: INMediaItem {
-        INMediaItem(identifier: id, title: title, type: type, artwork: artworkURL.flatMap { INImage(url: $0) })
+        INMediaItem(
+            identifier: id,
+            title: title,
+            type: kind.mediaItemType,
+            artwork: artworkURL.flatMap { INImage(url: $0) }
+        )
+    }
+}
+
+private extension SiriCandidate.Kind {
+    var mediaItemType: INMediaItemType {
+        switch self {
+        case .song: .song
+        case .album: .album
+        case .artist: .artist
+        case .playlist: .playlist
+        }
     }
 }
 #endif

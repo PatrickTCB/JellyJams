@@ -47,9 +47,11 @@ struct MainShellView: View {
             .onChange(of: preferences.isMixtapesActive) { _, active in
                 if !active, selection == .mixtapes { selection = .albums }
             }
-            #if os(iOS)
+            #if !os(macOS)
             // Asked here, once someone is signed in: Siri permission is only
             // worth granting when there is a library for Siri to play from.
+            // tvOS needs it as much as iOS — the SiriKit Media domain is the
+            // only playback path there.
             .task { MediaIntentHandler.requestAuthorizationIfNeeded() }
             #endif
     }

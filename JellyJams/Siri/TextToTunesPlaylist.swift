@@ -1,4 +1,4 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import Foundation
 
 /// The pseudo-playlist that hands a free-text request the library could not
@@ -26,10 +26,6 @@ enum TextToTunesPlaylist {
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
     )
 
-    static func entity(query: String) -> PlaylistEntity {
-        PlaylistEntity(id: id(query: query), title: query)
-    }
-
     static func id(query: String) -> String {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: unreserved) ?? query
         return idPrefix + encoded
@@ -44,16 +40,26 @@ enum TextToTunesPlaylist {
         return encoded.removingPercentEncoding ?? encoded
     }
 
-    /// The whole fallback decision, consulted the same way from both Siri
-    /// paths: words the library could not answer go to the backend — but
+    static func candidate(query: String) -> SiriCandidate {
+        SiriCandidate(id: id(query: query), kind: .playlist, title: query)
+    }
+
+    /// The whole fallback decision, consulted the same way from every Siri
+    /// path: words the library could not answer go to the backend — but
     /// only when there are words worth sending and a backend to send them
     /// to. Otherwise there is nothing to fall back to, and the request
     /// fails the way it always has.
     @MainActor
-    static func fallbackEntity(for query: String) -> AudioEntity? {
+    static func fallbackCandidate(for query: String) -> SiriCandidate? {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, TextToTunes.currentDestination() != nil else { return nil }
-        return .playlist(entity(query: trimmed))
+        return candidate(query: trimmed)
     }
+
+    #if os(iOS)
+    static func entity(query: String) -> PlaylistEntity {
+        PlaylistEntity(id: id(query: query), title: query)
+    }
+    #endif
 }
 #endif

@@ -24,5 +24,13 @@ enum QueueInsertionLocation: String {
         .next: DisplayRepresentation(title: "Next"),
         .tail: DisplayRepresentation(title: "Last"),
     ]
+
+    /// The schema-free form the shared playback pipeline takes.
+    var siriLocation: SiriQueueLocation {
+        switch self {
+        case .next: .next
+        case .tail: .tail
+        }
+    }
 }
 #endif

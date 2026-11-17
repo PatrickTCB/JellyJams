@@ -119,9 +119,9 @@ extension SongQuery: EntityStringQuery {
         // split instead of a literal search for the whole phrase, then keep
         // only the songs — the other kinds belong to their own play intents.
         let candidates = try await SiriAudioSearch.search(matching: string, client: client)
-        let songs = candidates.compactMap { entity -> SongEntity? in
-            if case .song(let song) = entity { return song }
-            return nil
+        let songs = candidates.compactMap { candidate -> SongEntity? in
+            guard candidate.kind == .song, let item = candidate.item else { return nil }
+            return SongEntity(item: item, artworkURL: candidate.artworkURL)
         }
         return Array(songs.prefix(10))
     }

@@ -37,6 +37,8 @@ targets:
       - package: JellyfinAPI
       - package: Sparkle
         destinationFilters: [macOS]
+      - target: JellyJamsSiri
+        destinationFilters: [tvOS]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: net.aseriesoftubes.JellyJams
@@ -67,6 +69,28 @@ targets:
         "CODE_SIGN_ENTITLEMENTS[sdk=iphone*]": JellyJams/JellyJams.entitlements
         "CODE_SIGN_ENTITLEMENTS[sdk=appletv*]": JellyJams/JellyJams.tvOS.entitlements
         "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "$(inherited) @executable_path/../Frameworks"
+
+  JellyJamsSiri:
+    type: app-extension
+    supportedDestinations: [tvOS]
+    sources:
+      - path: JellyJamsSiri
+      # The hand-off contract between the extension and the app, compiled
+      # into both. The app target picks it up through its synced folder.
+      - path: JellyJams/Siri/SiriMediaRequest.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.aseriesoftubes.JellyJams.Siri
+        PRODUCT_NAME: JellyJamsSiri
+        # The App Store requires an extension's version to match its app's.
+        MARKETING_VERSION: "2.1.10"
+        CURRENT_PROJECT_VERSION: "92"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: JellyJamsSiri/Info.plist
+        CODE_SIGN_ENTITLEMENTS: JellyJamsSiri/JellyJamsSiri.entitlements
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "3"
+        SKIP_INSTALL: YES
 
   JellyJamsTests:
     type: bundle.unit-test

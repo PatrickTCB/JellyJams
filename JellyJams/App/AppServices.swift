@@ -156,6 +156,11 @@ final class AppServices {
             Task {
                 await session.checkServerReachability()
                 player.restorePlaybackState()
+                #if os(iOS) || os(tvOS)
+                // Classic Siri's app selection weighs the published library
+                // context; refresh it now there is a library to describe.
+                await SiriMediaUserContext.publish(client: client)
+                #endif
             }
         } else {
             player.clearQueue()
@@ -169,6 +174,9 @@ final class AppServices {
             favourites.configure(client: nil)
             pinnedItems.configure(accountKey: nil)
             libraryCache.clear()
+            #if os(iOS) || os(tvOS)
+            Task { await SiriMediaUserContext.publish(client: nil) }
+            #endif
         }
     }
 

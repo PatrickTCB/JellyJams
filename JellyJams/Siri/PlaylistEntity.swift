@@ -86,27 +86,6 @@ extension PlaylistEntity: Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-// MARK: - Favourite songs pseudo-playlist
-
-/// The favourites shuffle, as a playlist Siri and Shortcuts can pick.
-///
-/// It has no server-side counterpart: ``SiriPlayback`` recognises the id and
-/// plays a shuffle of the user's favourite songs (all songs when nothing is
-/// favourited). Encoding this as a real entity means the behaviour survives
-/// the system's identifier-based rehydration, which would strip any in-memory
-/// marker. Open-ended requests now resolve through
-/// ``DefaultPlaybackPlaylist`` instead; this remains what an unset default
-/// plays, an explicit choice in the Shortcuts pickers, and the classic-Siri
-/// handler's fallback for a missing or unresolvable identifier.
-enum FavouriteSongsPlaylist {
-    static let id = "jellyjams.favourite-songs"
-    static let title = "Favourite Songs"
-
-    static func entity() -> PlaylistEntity {
-        PlaylistEntity(id: id)
-    }
-}
-
 // MARK: - PlaylistQuery
 
 /// Rehydrates playlist entities from the server when Siri asks for a

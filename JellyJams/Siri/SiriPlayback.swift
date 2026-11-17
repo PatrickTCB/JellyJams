@@ -1,12 +1,14 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import AppIntents
 import Foundation
 
-/// Shared queue-building for the audio intents: one entity in, one
-/// `PlayerController` call out, with the app's play semantics.
+/// Shared queue-building for every Siri play path: one candidate in, one
+/// `PlayerController` call out, with the app's play semantics. The audio
+/// schema's intents, the classic-Siri handler and the tvOS activity path
+/// all funnel through here.
 enum SiriPlayback {
 
-    /// Resolves the entity to tracks and starts them on `player`.
+    /// Resolves the candidate to tracks and starts them on `player`.
     ///
     /// Songs play alone, albums and playlists play from their first track,
     /// and an artist shuffles their whole catalogue. The
@@ -18,10 +20,10 @@ enum SiriPlayback {
     /// Returns what is now playing, for the caller's dialog.
     @MainActor
     static func play(
-        _ entity: AudioEntity,
+        _ candidate: SiriCandidate,
         shuffleRequested: Bool,
         repeatRequested: Bool = false,
-        queueLocation: QueueInsertionLocation?,
+        queueLocation: SiriQueueLocation?,
         player: PlayerController,
         client: JellyfinService
     ) async throws -> String {
@@ -33,30 +35,30 @@ enum SiriPlayback {
         var repeatOverride: RepeatMode?
         var nowPlaying: String
         if repeatRequested { repeatOverride = .repeatAll }
-        switch entity {
-        case .song(let song):
-            guard let item = try await client.item(byId: song.id) else {
+        switch candidate.kind {
+        case .song:
+            guard let item = try await client.item(byId: candidate.id) else {
                 throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
             }
             tracks = [item]
-            nowPlaying = "\(song.title) by \(song.artistName)"
-        case .album(let album):
-            guard let item = try await client.item(byId: album.id) else {
+            nowPlaying = candidate.subtitle.map { "\(candidate.title) by \($0)" } ?? candidate.title
+        case .album:
+            guard let item = try await client.item(byId: candidate.id) else {
                 throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
             }
             tracks = try await client.tracks(for: item)
-            nowPlaying = album.title
-        case .artist(let artist):
-            guard let item = try await client.item(byId: artist.id) else {
+            nowPlaying = candidate.title
+        case .artist:
+            guard let item = try await client.item(byId: candidate.id) else {
                 throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
             }
             // "Play <artist>" means "shuffle their catalogue", not an
             // alphabetical run-through.
             tracks = try await client.tracks(for: item)
             alwaysShuffle = true
-            nowPlaying = artist.name
-        case .playlist(let playlist):
-            if let phrase = TextToTunesPlaylist.query(in: playlist.id) {
+            nowPlaying = candidate.title
+        case .playlist:
+            if let phrase = TextToTunesPlaylist.query(in: candidate.id) {
                 // The Text to Tunes fallback: these words found nothing in
                 // the library, so the backend picks the songs instead — the
                 // sheet's own pipeline, played like any other queue. Every
@@ -78,8 +80,7 @@ enum SiriPlayback {
                 } catch {
                     throw AppIntentError(wrapping: SiriIntentError.noMatch(phrase))
                 }
-                nowPlaying = phrase
-            } else if playlist.id == DefaultPlaybackPlaylist.id {
+            } else if candidate.id == DefaultPlaybackPlaylist.id {
                 let setting = AppServices.shared.preferences.defaultPlayback
                 let resolved = try await DefaultPlaybackResolver.resolve(setting: setting, client: client)
                 tracks = resolved.tracks
@@ -87,15 +88,15 @@ enum SiriPlayback {
                 // The setting supplies repeat only when the request didn't
                 // ask for its own.
                 if !repeatRequested { repeatOverride = resolved.repeatMode }
-            } else if playlist.id == FavouriteSongsPlaylist.id {
+            } else if candidate.id == FavouriteSongsPlaylist.id {
                 tracks = try await PlayerController.fallbackQueue(client: client)
             } else {
-                guard let item = try await client.item(byId: playlist.id) else {
+                guard let item = try await client.item(byId: candidate.id) else {
                     throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
                 }
                 tracks = try await client.tracks(for: item)
             }
-            nowPlaying = playlist.title
+            nowPlaying = candidate.title
         }
         guard !tracks.isEmpty else {
             throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)

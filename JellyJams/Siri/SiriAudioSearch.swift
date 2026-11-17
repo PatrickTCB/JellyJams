@@ -1,17 +1,19 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import Foundation
 
 /// The Jellyfin-side search behind Siri's audio requests.
 ///
 /// Siri delivers a free-form phrase ("Whiplash by Architects"); this maps it
 /// onto library queries and ranks the candidates. ``AudioSearchQuery``,
-/// ``SongQuery`` and the classic-Siri handler share the pipeline, so the
-/// free-form voice paths all resolve through the same code.
+/// ``SongQuery`` and the classic-Siri handler share the pipeline on iOS, and
+/// the tvOS activity path shares it too, so every voice path resolves
+/// through the same code. Results are schema-free ``SiriCandidate`` values;
+/// the iOS schema layer maps them onto its entities at the edge.
 enum SiriAudioSearch {
 
     /// Candidates for a spoken or typed query, best matches first: songs,
     /// then albums, then artists, then playlists.
-    static func search(matching query: String, client: JellyfinService) async throws -> [AudioEntity] {
+    static func search(matching query: String, client: JellyfinService) async throws -> [SiriCandidate] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
@@ -41,13 +43,45 @@ enum SiriAudioSearch {
         return try await generalSearch(term: trimmed, client: client)
     }
 
+    /// Candidates of one kind for a request the media type already
+    /// qualified ("Play album …", "Play songs by …"). Songs keep the mixed
+    /// search's "Title by Artist" split; the other kinds search their own
+    /// corner of the library directly, the way the schema entity queries
+    /// do for the Shortcuts pickers.
+    static func search(
+        kind: SiriCandidate.Kind,
+        matching query: String,
+        client: JellyfinService
+    ) async throws -> [SiriCandidate] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        switch kind {
+        case .song:
+            return try await search(matching: trimmed, client: client).filter { $0.kind == .song }
+        case .album:
+            let result = try await client.getItems(
+                includeItemTypes: [.musicAlbum], recursive: true, searchTerm: trimmed, limit: 10
+            )
+            return (result.items ?? []).map { SiriCandidate(item: $0, kind: .album, artworkURL: client.artworkURL(for: $0, size: 600)) }
+        case .artist:
+            let result = try await client.getAlbumArtists(searchTerm: trimmed, limit: 10)
+            return (result.items ?? []).map { SiriCandidate(item: $0, kind: .artist, artworkURL: client.artworkURL(for: $0, size: 600)) }
+        case .playlist:
+            let result = try await client.getItems(
+                includeItemTypes: [.playlist], mediaTypes: [.audio], recursive: true, searchTerm: trimmed, limit: 10
+            )
+            return (result.items ?? []).map { SiriCandidate(item: $0, kind: .playlist, artworkURL: client.artworkURL(for: $0, size: 600)) }
+        }
+    }
+
     /// Songs and albums matching a title within a specific artist's work,
     /// with the artist itself as a further candidate.
     private static func targetedSearch(
         title: String,
         artist: String,
         client: JellyfinService
-    ) async throws -> [AudioEntity]? {
+    ) async throws -> [SiriCandidate]? {
         let artists = try await client.getAlbumArtists(searchTerm: artist, limit: 5).items ?? []
         let artistIds = artists.compactMap(\.id)
         guard !artistIds.isEmpty else { return nil }
@@ -68,20 +102,20 @@ enum SiriAudioSearch {
         )
         let (songItems, albumItems) = try await (songs, albums)
 
-        let songEntities: [AudioEntity] = (songItems.items ?? []).map {
-            .song(SongEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600)))
+        let songCandidates: [SiriCandidate] = (songItems.items ?? []).map {
+            SiriCandidate(item: $0, kind: .song, artworkURL: client.artworkURL(for: $0, size: 600))
         }
-        let albumEntities: [AudioEntity] = (albumItems.items ?? []).map {
-            .album(AlbumEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600)))
+        let albumCandidates: [SiriCandidate] = (albumItems.items ?? []).map {
+            SiriCandidate(item: $0, kind: .album, artworkURL: client.artworkURL(for: $0, size: 600))
         }
-        let artistEntities: [AudioEntity] = artists.map {
-            .artist(ArtistEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600)))
+        let artistCandidates: [SiriCandidate] = artists.map {
+            SiriCandidate(item: $0, kind: .artist, artworkURL: client.artworkURL(for: $0, size: 600))
         }
-        return songEntities + albumEntities + artistEntities
+        return songCandidates + albumCandidates + artistCandidates
     }
 
     /// A literal search across every playable kind, songs first.
-    private static func generalSearch(term: String, client: JellyfinService) async throws -> [AudioEntity] {
+    private static func generalSearch(term: String, client: JellyfinService) async throws -> [SiriCandidate] {
         async let songs = client.getItems(
             includeItemTypes: [.audio], recursive: true, searchTerm: term, limit: 20
         )
@@ -94,10 +128,10 @@ enum SiriAudioSearch {
         )
         let (songItems, albumItems, artistItems, playlistItems) = try await (songs, albums, artists, playlists)
 
-        return (songItems.items ?? []).map { .song(SongEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600))) }
-            + (albumItems.items ?? []).map { .album(AlbumEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600))) }
-            + (artistItems.items ?? []).map { .artist(ArtistEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600))) }
-            + (playlistItems.items ?? []).map { .playlist(PlaylistEntity(item: $0, artworkURL: client.artworkURL(for: $0, size: 600))) }
+        return (songItems.items ?? []).map { SiriCandidate(item: $0, kind: .song, artworkURL: client.artworkURL(for: $0, size: 600)) }
+            + (albumItems.items ?? []).map { SiriCandidate(item: $0, kind: .album, artworkURL: client.artworkURL(for: $0, size: 600)) }
+            + (artistItems.items ?? []).map { SiriCandidate(item: $0, kind: .artist, artworkURL: client.artworkURL(for: $0, size: 600)) }
+            + (playlistItems.items ?? []).map { SiriCandidate(item: $0, kind: .playlist, artworkURL: client.artworkURL(for: $0, size: 600)) }
     }
 }
 #endif

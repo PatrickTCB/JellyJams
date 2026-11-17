@@ -112,5 +112,11 @@ struct RootContainerView: View {
         // pushes. Sheets are their own presentations and wear the modifier
         // themselves — see ``remotePlayPause()``.
         .remotePlayPause()
+        #if os(tvOS)
+        // Classic Siri's playback hand-offs from the JellyJamsSiri extension
+        // land here, whichever screen is showing — including the login
+        // screen, where a signed-out request reports itself.
+        .siriPlaybackRequests()
+        #endif
     }
 }

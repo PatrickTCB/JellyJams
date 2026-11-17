@@ -1,12 +1,12 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import XCTest
 @testable import JellyJams
 
 /// ``SiriAudioSearch`` turns a spoken or typed phrase into ranked library
 /// matches. These tests exercise the "Title by Artist" splitting and its
 /// fallbacks purely through the stubbed network layer — no SiriKit
-/// invocation is involved, so they run fine on the iOS Simulator (and
-/// therefore via Command+U in Xcode, or `xcodebuild test` with an iOS
+/// invocation is involved, so they run fine on the iOS and tvOS Simulators
+/// (and therefore via Command+U in Xcode, or `xcodebuild test` with a
 /// Simulator destination).
 final class SiriAudioSearchTests: XCTestCase {
     override func tearDown() {
@@ -14,17 +14,9 @@ final class SiriAudioSearchTests: XCTestCase {
         super.tearDown()
     }
 
-    /// Extracts a stable "kind:id" summary from the results, since
-    /// ``AudioEntity`` has no synthesized `Equatable` conformance of its own.
-    private func summarize(_ entities: [AudioEntity]) -> [String] {
-        entities.map { entity in
-            switch entity {
-            case .song(let song): "song:\(song.id)"
-            case .album(let album): "album:\(album.id)"
-            case .artist(let artist): "artist:\(artist.id)"
-            case .playlist(let playlist): "playlist:\(playlist.id)"
-            }
-        }
+    /// Extracts a stable "kind:id" summary from the results.
+    private func summarize(_ candidates: [SiriCandidate]) -> [String] {
+        candidates.map { "\($0.kind.rawValue):\($0.id)" }
     }
 
     /// Routes `/Items` (and `/Items` via `getAlbumArtists`) requests to
@@ -155,8 +147,108 @@ final class SiriAudioSearchTests: XCTestCase {
 
         XCTAssertEqual(summarize(results), ["song:title-only-match"])
     }
+
+    // MARK: Typed searches
+
+    func testTypedSongSearchKeepsTheTitleByArtistSplitAndOnlySongs() async throws {
+        installStub { request in
+            if request.values(for: "includeItemTypes").first == "MusicArtist" {
+                return itemsPayload([(id: "architects-id", type: "MusicArtist")])
+            }
+            if request.values(for: "includeItemTypes").first == "Audio" {
+                XCTAssertEqual(request.values(for: "artistIds"), ["architects-id"])
+                XCTAssertEqual(request.value(for: "searchTerm"), "Whiplash")
+                return itemsPayload([(id: "whiplash-song", type: "Audio")])
+            }
+            if request.values(for: "includeItemTypes").first == "MusicAlbum" {
+                return itemsPayload([(id: "whiplash-album", type: "MusicAlbum")])
+            }
+            return emptyItemsPayload
+        }
+
+        let results = try await SiriAudioSearch.search(
+            kind: .song,
+            matching: "Whiplash by Architects",
+            client: TestFixtures.stubbedClient()
+        )
+
+        XCTAssertEqual(
+            summarize(results),
+            ["song:whiplash-song"],
+            "A typed song request keeps the split but drops the other kinds"
+        )
+    }
+
+    func testTypedAlbumSearchQueriesAlbumsDirectly() async throws {
+        installStub { request in
+            guard request.values(for: "includeItemTypes").first == "MusicAlbum",
+                  request.value(for: "searchTerm") == "For All Kings" else {
+                return emptyItemsPayload
+            }
+            return itemsPayload([(id: "album-1", type: "MusicAlbum")])
+        }
+
+        let results = try await SiriAudioSearch.search(
+            kind: .album,
+            matching: "For All Kings",
+            client: TestFixtures.stubbedClient()
+        )
+
+        XCTAssertEqual(summarize(results), ["album:album-1"])
+    }
+
+    func testTypedArtistSearchQueriesArtistsDirectly() async throws {
+        installStub { request in
+            guard request.values(for: "includeItemTypes").first == "MusicArtist",
+                  request.value(for: "searchTerm") == "Architects" else {
+                return emptyItemsPayload
+            }
+            return itemsPayload([(id: "artist-1", type: "MusicArtist")])
+        }
+
+        let results = try await SiriAudioSearch.search(
+            kind: .artist,
+            matching: "Architects",
+            client: TestFixtures.stubbedClient()
+        )
+
+        XCTAssertEqual(summarize(results), ["artist:artist-1"])
+    }
+
+    func testTypedPlaylistSearchQueriesAudioPlaylistsDirectly() async throws {
+        installStub { request in
+            guard request.values(for: "includeItemTypes").first == "Playlist",
+                  request.values(for: "mediaTypes").first == "Audio",
+                  request.value(for: "searchTerm") == "Top 40" else {
+                return emptyItemsPayload
+            }
+            return itemsPayload([(id: "playlist-1", type: "Playlist")])
+        }
+
+        let results = try await SiriAudioSearch.search(
+            kind: .playlist,
+            matching: "Top 40",
+            client: TestFixtures.stubbedClient()
+        )
+
+        XCTAssertEqual(summarize(results), ["playlist:playlist-1"])
+    }
+
+    func testTypedSearchWithAnEmptyQueryReturnsNoResultsAndMakesNoRequests() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let results = try await SiriAudioSearch.search(kind: .album, matching: "   ", client: TestFixtures.stubbedClient())
+
+        XCTAssertTrue(results.isEmpty)
+        XCTAssertTrue(recorder.all.isEmpty, "A blank query should short-circuit before any request is made")
+    }
 }
 
+#if os(iOS)
 /// The artists a song or album entity carries are entities Shortcuts can pass
 /// on — to "Play Artist", say — so they must name real library artists.
 final class SiriEntityArtistTests: XCTestCase {
@@ -193,4 +285,5 @@ final class SiriEntityArtistTests: XCTestCase {
         XCTAssertEqual(album.artists.map(\.id), ["artist-1"])
     }
 }
-#endif
+#endif // os(iOS)
+#endif // os(iOS) || os(tvOS)

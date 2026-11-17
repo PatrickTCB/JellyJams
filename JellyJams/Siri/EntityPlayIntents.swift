@@ -141,7 +141,7 @@ private func playReplacingQueue(_ entity: AudioEntity) async throws {
     }
 
     _ = try await SiriPlayback.play(
-        entity,
+        entity.candidate,
         shuffleRequested: false,
         queueLocation: nil,
         player: services.player,

@@ -39,7 +39,7 @@ struct PlayDefaultMusicIntent: AppIntent, AudioPlaybackIntent {
         // same default-playback resolution serves Siri and the system play
         // button.
         _ = try await SiriPlayback.play(
-            .playlist(DefaultPlaybackPlaylist.entity(setting: services.preferences.defaultPlayback)),
+            DefaultPlaybackPlaylist.candidate(setting: services.preferences.defaultPlayback),
             shuffleRequested: false,
             queueLocation: nil,
             player: services.player,
