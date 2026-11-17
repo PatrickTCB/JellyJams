@@ -98,18 +98,7 @@ struct NowPlayingBar: View {
                     }
                 }
             }
-            #if os(tvOS)
-            .background {
-                if isDocked {
-                    RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-                        .fill(.regularMaterial)
-                }
-            }
-            // Inset from the window edges so the rounded corners show — the
-            // bar floats as a card rather than running edge to edge.
-            .padding(.horizontal, 24)
-            .padding(.bottom, 12)
-            #else
+            #if !os(tvOS)
             .background { if isDocked { Rectangle().fill(.bar) } }
             #endif
         }
