@@ -1,6 +1,9 @@
 import SwiftUI
 import MediaPlayer
 import AVKit
+#if os(tvOS)
+import UIKit
+#endif
 
 /// The full-screen "Now Playing" view: large artwork, scrubber, transport, and
 /// shuffle/repeat controls, plus access to the queue.
@@ -18,6 +21,46 @@ struct PlayerView: View {
     @State private var isPresentingLyrics = false
 
     var body: some View {
+        #if os(tvOS)
+        HStack(spacing: 24) {
+            Spacer(minLength: 0)
+
+            let currentItem = player.currentItem
+            // A downloaded track's cover comes from disk, never from the server.
+            let localArtworkURL = currentItem.flatMap(downloads.localArtworkURL(for:))
+            ArtworkImage(url: currentItem.flatMap { session.library.artworkURL(for: $0, size: 800) }, localURL: localArtworkURL, cornerRadius: 12)
+                .frame(maxWidth: 720, maxHeight: 720)
+                .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
+                .padding(.horizontal)
+
+            VStack(spacing: 6) {
+                handle
+                Text(player.currentItem?.displayName ?? "Not Playing")
+                    .font(.title2.bold())
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                if let artist = player.currentItem?.subtitleArtist {
+                    Text(artist).font(.title3).foregroundStyle(.secondary).lineLimit(1)
+                }
+                scrubber
+                transport
+                secondaryControls
+            }
+            .padding(.horizontal)
+
+            Spacer(minLength: 0)
+        }
+        // The cover's own backdrop is translucent on tvOS; an opaque surface
+        // filling the whole screen keeps the shell from showing through the
+        // player. tvOS has no UIColor.systemBackground, so the dynamic
+        // provider stands in for it — following the TV's light/dark appearance.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
+                .ignoresSafeArea()
+        )
+        .remotePlayPause()
+        #else
         VStack(spacing: 24) {
             handle
             Spacer(minLength: 0)
@@ -48,15 +91,11 @@ struct PlayerView: View {
             Spacer(minLength: 0)
         }
         .padding()
-        #if os(tvOS)
-        .frame(minWidth: 800, minHeight: 900)
-        #else
         .frame(minWidth: 360, minHeight: 520)
-        #endif
         .clearsInitialKeyboardFocus()
         .sheet(isPresented: $showingQueue) { QueueView() }
         .sheet(isPresented: $isPresentingLyrics) { LyricsView() }
-        .remotePlayPause()
+        #endif
     }
 
     private var handle: some View {
