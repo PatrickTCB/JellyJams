@@ -59,36 +59,35 @@ struct FavouritesView: View {
             }
         }
         .navigationTitle("Favourites")
+        .tvScrollingBar(title: "Favourites") { tabActions }
         .toolbar {
-            switch tab {
-            case .songs:
-                ToolbarItem {
-                    Button { player.play(songs.items, shuffled: true) } label: {
-                        Label("Shuffle", systemImage: "shuffle")
-                    }
-                    .disabled(songs.isEmpty)
-                }
-                if !selectedSongs.isEmpty {
-                    ToolbarItem { TrackSelectionMenu(tracks: selectedSongs) }
-                }
-                ToolbarItem {
-                    SortMenu(sortBy: $songs.sortBy, sortOrder: $songs.sortOrder, options: songs.sortOptions)
-                }
-            case .albums:
-                ToolbarItem {
-                    SortMenu(sortBy: $albums.sortBy, sortOrder: $albums.sortOrder, options: albums.sortOptions)
-                }
-            case .artists:
-                ToolbarItem {
-                    SortMenu(sortBy: $artists.sortBy, sortOrder: $artists.sortOrder, options: artists.sortOptions)
-                }
-            default:
-                ToolbarItemGroup {}
-            }
+            ToolbarItemGroup { tabActions }
         }
         .refreshToolbarItem { await current.reload() }
         .task(id: current.query) { await current.load(from: session.library) }
         .refreshable { await current.reload() }
+    }
+
+    /// The selected tab's actions, shared by the system toolbar and the
+    /// tvOS scrolling bar.
+    @ViewBuilder private var tabActions: some View {
+        switch tab {
+        case .songs:
+            Button { player.play(songs.items, shuffled: true) } label: {
+                Label("Shuffle", systemImage: "shuffle")
+            }
+            .disabled(songs.isEmpty)
+            if !selectedSongs.isEmpty {
+                TrackSelectionMenu(tracks: selectedSongs)
+            }
+            SortMenu(sortBy: $songs.sortBy, sortOrder: $songs.sortOrder, options: songs.sortOptions)
+        case .albums:
+            SortMenu(sortBy: $albums.sortBy, sortOrder: $albums.sortOrder, options: albums.sortOptions)
+        case .artists:
+            SortMenu(sortBy: $artists.sortBy, sortOrder: $artists.sortOrder, options: artists.sortOptions)
+        default:
+            EmptyView()
+        }
     }
 
     @ViewBuilder
@@ -99,6 +98,7 @@ struct FavouritesView: View {
         let items = songs.items
         let selected = selectedSongs
         List(selection: $songSelection) {
+            TVScrollingBarSlot()
             Section {
                 ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                     TrackRow(track: entry.item, showArtwork: true, selectedTracks: songSelection.contains(entry.id) ? selected : []) {

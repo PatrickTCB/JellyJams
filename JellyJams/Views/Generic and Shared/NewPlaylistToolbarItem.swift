@@ -14,19 +14,19 @@ private struct NewPlaylistModifier: ViewModifier {
     @State private var errorMessage: String?
 
     func body(content: Content) -> some View {
-        content
-            .toolbar {
-                ToolbarItem {
-                    Button {
-                        isPresenting = true
-                    } label: {
-                        Label("New Playlist", systemImage: "plus")
-                    }
-                    #if !os(tvOS)
-                    .keyboardShortcut("n", modifiers: .command)
-                    #endif
-                }
+        let toolbared = content.toolbar {
+            ToolbarItem {
+                newPlaylistButton
             }
+        }
+        #if os(tvOS)
+        // tvOS browsing screens hide the system bar; their scrolling bar
+        // renders the button from here. The alerts stay attached either way.
+        let placed = toolbared.environment(\.tvBarNewPlaylist, AnyView(newPlaylistButton))
+        #else
+        let placed = toolbared
+        #endif
+        return placed
             .alert("New Playlist", isPresented: $isPresenting) {
                 TextField("Name", text: $name)
                 Button("Cancel", role: .cancel) { name = "" }
@@ -49,6 +49,17 @@ private struct NewPlaylistModifier: ViewModifier {
             } message: {
                 Text(errorMessage ?? "")
             }
+    }
+
+    private var newPlaylistButton: some View {
+        Button {
+            isPresenting = true
+        } label: {
+            Label("New Playlist", systemImage: "plus")
+        }
+        #if !os(tvOS)
+        .keyboardShortcut("n", modifiers: .command)
+        #endif
     }
 
     private func create(named playlistName: String) {

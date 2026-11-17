@@ -13,6 +13,7 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 28) {
+                TVScrollingBarSlot()
                 if !pinnedItems.entries.isEmpty {
                     PinnedItemsSection(entries: pinnedItems.entries)
                 }
@@ -27,6 +28,7 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .navigationTitle("Home")
+        .tvScrollingBar(title: "Home")
         .refreshable { await load() }
         .refreshToolbarItem { await load() }
         // Re-runs on appear and whenever the mixtape rule itself changes, so

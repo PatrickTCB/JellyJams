@@ -188,72 +188,10 @@ struct DownloadsView: View {
             }
         }
         .navigationTitle("Downloads")
+        .tvScrollingBar(title: "Downloads") { tabActions }
         .downloadsBrowsing()
         .toolbar {
-            if tab == .albums {
-                // A filtered grid says so with a filled glyph, and the toggle
-                // that turns it off lives in the menu it opens.
-                ToolbarItem(placement: .automatic) {
-                    Menu {
-                        Toggle("Complete Albums Only", isOn: Bindable(preferences).showsCompleteAlbumsOnly)
-                    } label: {
-                        Image(systemName: preferences.showsCompleteAlbumsOnly
-                                ? "line.3.horizontal.decrease.circle.fill"
-                                : "line.3.horizontal.decrease.circle")
-                    }
-                    .help("Filter the downloaded albums by what is fully on disk")
-                    .accessibilityLabel("Album filter")
-                }
-            }
-            ToolbarItem(placement: .automatic) {
-                Button(role: .destructive) { confirmingDeleteAll = true } label: {
-                    Label("Delete All", systemImage: "trash")
-                }
-                // Deliberately not disabled while downloads run: deleting
-                // everything cancels them, so a stuck batch is a reason to
-                // reach for this, not a reason to grey it out.
-                .disabled(downloads.batches.isEmpty
-                          && downloads.entries.isEmpty && downloads.playlists.isEmpty)
-            }
-            if tab == .songs, !selectedSongs.isEmpty {
-                ToolbarItem { TrackSelectionMenu(tracks: selectedSongs) }
-            }
-            if tab == .songs {
-                ToolbarItem(placement: .automatic) {
-                    SortMenu(sortBy: $songSort, sortOrder: $songSortOrder, options: songSortOptions)
-                }
-            }
-            if tab == .albums {
-                ToolbarItem(placement: .automatic) {
-                    SortMenu(sortBy: $albumSort, sortOrder: $albumSortOrder, options: albumSortOptions)
-                }
-            }
-            if tab == .artists {
-                // A downloaded artist's picture is a snapshot: one saved
-                // before the server's current picture stays old until
-                // refreshed. This is the same pass sign-in runs — filling in
-                // missing pictures, reclaiming ones whose artist is no longer
-                // downloaded — and, like the offline playlist's refresh, a
-                // deliberate, online-only action.
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        downloads.refreshArtistArtwork()
-                    } label: {
-                        if downloads.isSyncingArtistArtwork {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(!session.serverReachable || downloads.isSyncingArtistArtwork)
-                    .help(session.serverReachable
-                        ? "Refresh downloaded artist artwork"
-                        : "Connect to your server to refresh downloaded artist artwork")
-                }
-                ToolbarItem(placement: .automatic) {
-                    SortMenu(sortBy: $artistSort, sortOrder: $artistSortOrder, options: artistSortOptions)
-                }
-            }
+            ToolbarItemGroup(placement: .automatic) { tabActions }
         }
         .alert("Delete all downloaded music?", isPresented: $confirmingDeleteAll) {
             Button("Delete All Downloads", role: .destructive) { downloads.removeAll() }
@@ -265,6 +203,63 @@ struct DownloadsView: View {
         }
     }
 
+    /// The selected tab's actions, shared by the system toolbar and the
+    /// tvOS scrolling bar.
+    @ViewBuilder private var tabActions: some View {
+        if tab == .albums {
+            // A filtered grid says so with a filled glyph, and the toggle
+            // that turns it off lives in the menu it opens.
+            Menu {
+                Toggle("Complete Albums Only", isOn: Bindable(preferences).showsCompleteAlbumsOnly)
+            } label: {
+                Image(systemName: preferences.showsCompleteAlbumsOnly
+                        ? "line.3.horizontal.decrease.circle.fill"
+                        : "line.3.horizontal.decrease.circle")
+            }
+            .help("Filter the downloaded albums by what is fully on disk")
+            .accessibilityLabel("Album filter")
+        }
+        Button(role: .destructive) { confirmingDeleteAll = true } label: {
+            Label("Delete All", systemImage: "trash")
+        }
+        // Deliberately not disabled while downloads run: deleting
+        // everything cancels them, so a stuck batch is a reason to
+        // reach for this, not a reason to grey it out.
+        .disabled(downloads.batches.isEmpty
+                  && downloads.entries.isEmpty && downloads.playlists.isEmpty)
+        if tab == .songs, !selectedSongs.isEmpty {
+            TrackSelectionMenu(tracks: selectedSongs)
+        }
+        if tab == .songs {
+            SortMenu(sortBy: $songSort, sortOrder: $songSortOrder, options: songSortOptions)
+        }
+        if tab == .albums {
+            SortMenu(sortBy: $albumSort, sortOrder: $albumSortOrder, options: albumSortOptions)
+        }
+        if tab == .artists {
+            // A downloaded artist's picture is a snapshot: one saved
+            // before the server's current picture stays old until
+            // refreshed. This is the same pass sign-in runs — filling in
+            // missing pictures, reclaiming ones whose artist is no longer
+            // downloaded — and, like the offline playlist's refresh, a
+            // deliberate, online-only action.
+            Button {
+                downloads.refreshArtistArtwork()
+            } label: {
+                if downloads.isSyncingArtistArtwork {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .disabled(!session.serverReachable || downloads.isSyncingArtistArtwork)
+            .help(session.serverReachable
+                ? "Refresh downloaded artist artwork"
+                : "Connect to your server to refresh downloaded artist artwork")
+            SortMenu(sortBy: $artistSort, sortOrder: $artistSortOrder, options: artistSortOptions)
+        }
+    }
+
     @ViewBuilder
     private var songsList: some View {
         // Resolved once; `songs` re-derives the downloaded list and
@@ -273,6 +268,7 @@ struct DownloadsView: View {
         let tracks = songs
         let selected = selectedSongs
         List(selection: $songSelection) {
+            TVScrollingBarSlot()
             Section {
                 ForEach(TrackEntry.rows(tracks)) { entry in
                     TrackRow(track: entry.item, showArtwork: true, selectedTracks: songSelection.contains(entry.id) ? selected : []) {
@@ -314,6 +310,7 @@ struct DownloadsView: View {
         let hidden = all.count - visible.count
         let minCellWidth: CGFloat = (tab == .artists ? 150 : 160) * ArtworkImage.sizeMultiplier
         return ScrollView {
+            TVScrollingBarSlot()
             Section {
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: minCellWidth), spacing: 16)],
@@ -371,6 +368,7 @@ struct DownloadsView: View {
     private var playlistsList: some View {
         let playlists = downloads.groups(kind: .playlist)
         return List {
+            TVScrollingBarSlot()
             Section {
                 ForEach(playlists) { group in
                     DownloadedItemRow(group: group)

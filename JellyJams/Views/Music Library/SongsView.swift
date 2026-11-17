@@ -21,6 +21,7 @@ struct SongsView: View {
         let items = model.items
         let selected = selectedTracks
         List(selection: $selection) {
+            TVScrollingBarSlot()
             // Rows keyed by a non-optional id matching the selection type:
             // Jellyfin's ids are optional, and a String?-keyed row never
             // matches a Set<String> selection.
@@ -53,6 +54,11 @@ struct SongsView: View {
         }
         .focusable()
         .navigationTitle("Songs")
+        .tvScrollingBar(title: "Songs") {
+            selectionMenu
+            shuffleButton
+            sortMenu
+        }
         .overlay {
             if let error = model.errorMessage, model.isEmpty {
                 LoadFailureOverlay(title: "Couldn’t Load Songs", message: error) {
@@ -65,22 +71,36 @@ struct SongsView: View {
         }
         .toolbar {
             if !selectedTracks.isEmpty {
-                ToolbarItem { TrackSelectionMenu(tracks: selectedTracks) }
+                ToolbarItem { selectionMenu }
             }
             ToolbarItem {
-                Button {
-                    player.play(model.items, shuffled: true)
-                } label: {
-                    Label("Shuffle", systemImage: "shuffle")
-                }
-                .disabled(model.isEmpty)
+                shuffleButton
             }
             ToolbarItem {
-                SortMenu(sortBy: $model.sortBy, sortOrder: $model.sortOrder, options: model.sortOptions)
+                sortMenu
             }
         }
         .refreshToolbarItem { await model.reload() }
         .task(id: model.query) { await model.load(from: session.library) }
         .refreshable { await model.reload() }
+    }
+
+    @ViewBuilder private var selectionMenu: some View {
+        if !selectedTracks.isEmpty {
+            TrackSelectionMenu(tracks: selectedTracks)
+        }
+    }
+
+    private var shuffleButton: some View {
+        Button {
+            player.play(model.items, shuffled: true)
+        } label: {
+            Label("Shuffle", systemImage: "shuffle")
+        }
+        .disabled(model.isEmpty)
+    }
+
+    private var sortMenu: some View {
+        SortMenu(sortBy: $model.sortBy, sortOrder: $model.sortOrder, options: model.sortOptions)
     }
 }

@@ -17,7 +17,7 @@ private struct RefreshToolbarModifier: ViewModifier {
     #endif
 
     func body(content: Content) -> some View {
-        content.toolbar {
+        let toolbared = content.toolbar {
             if showsButton {
                 ToolbarItem {
                     Button {
@@ -31,6 +31,13 @@ private struct RefreshToolbarModifier: ViewModifier {
                 }
             }
         }
+        #if os(tvOS)
+        // tvOS browsing screens hide the system bar; their scrolling bar
+        // renders the refresh action from here instead.
+        return toolbared.environment(\.tvBarRefresh, isAvailable ? refresh : nil)
+        #else
+        return toolbared
+        #endif
     }
 }
 

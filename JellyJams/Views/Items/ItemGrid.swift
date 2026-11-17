@@ -16,6 +16,7 @@ struct ItemGrid: View {
 
     var body: some View {
         ScrollView {
+            TVScrollingBarSlot()
             if let error = model.errorMessage, model.isEmpty {
                 LoadFailureOverlay(message: error) {
                     await model.reload()

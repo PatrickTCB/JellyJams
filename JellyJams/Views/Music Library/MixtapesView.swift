@@ -41,6 +41,10 @@ struct MixtapesView: View {
             title: mixtapeName
         )
         .navigationTitle(LibrarySection.mixtapes.title)
+        .tvScrollingBar(title: LibrarySection.mixtapes.title) {
+            configuredTapesButton
+            newMixtapeButton
+        }
         .refreshToolbarItem { await model.reload() }
         .toolbar {
             // The backend's own controls, beside the playlists they manage:
@@ -48,23 +52,31 @@ struct MixtapesView: View {
             // the plus last, as on Playlists, with the tape list to its
             // left.
             ToolbarItem {
-                Button { isShowingConfiguredTapes = true } label: {
-                    Label("Configured Tapes", systemImage: "recordingtape.circle")
-                }
+                configuredTapesButton
             }
             ToolbarItem {
-                Button { isComposingTape = true } label: {
-                    Label("New Mixtape", systemImage: "plus")
-                }
-                #if !os(tvOS)
-                .keyboardShortcut("n", modifiers: .command)
-                #endif
+                newMixtapeButton
             }
         }
         .sheet(isPresented: $isComposingTape) { MixtapeComposer() }
         .sheet(isPresented: $isShowingConfiguredTapes) { ConfiguredTapes() }
         .task(id: query) { await model.load(query, from: session.library) }
         .refreshable { Task { await model.reload() } }
+    }
+
+    private var configuredTapesButton: some View {
+        Button { isShowingConfiguredTapes = true } label: {
+            Label("Configured Tapes", systemImage: "recordingtape.circle")
+        }
+    }
+
+    private var newMixtapeButton: some View {
+        Button { isComposingTape = true } label: {
+            Label("New Mixtape", systemImage: "plus")
+        }
+        #if !os(tvOS)
+        .keyboardShortcut("n", modifiers: .command)
+        #endif
     }
 
     /// A mixtape is called by its own name. The ending that identifies it as
