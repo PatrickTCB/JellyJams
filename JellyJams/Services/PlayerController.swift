@@ -168,7 +168,7 @@ final class PlayerController {
     /// delivered. This flag only moves when something *asks* for a state
     /// change, which is what "was it playing before the call?" has to mean.
     @ObservationIgnored private var isPlaybackRequested = false
-    #if os(iOS)
+    #if os(iOS) || os(tvOS)
     @ObservationIgnored private var sessionInactiveObserver: NSObjectProtocol?
     @ObservationIgnored private var resumptionObserver: NSObjectProtocol?
     @ObservationIgnored private var routeChangeObserver: NSObjectProtocol?
@@ -448,7 +448,7 @@ final class PlayerController {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let failedToEndObserver { NotificationCenter.default.removeObserver(failedToEndObserver) }
-        #if os(iOS)
+        #if os(iOS) || os(tvOS)
         if let sessionInactiveObserver { NotificationCenter.default.removeObserver(sessionInactiveObserver) }
         if let resumptionObserver { NotificationCenter.default.removeObserver(resumptionObserver) }
         if let routeChangeObserver { NotificationCenter.default.removeObserver(routeChangeObserver) }
@@ -1130,8 +1130,13 @@ final class PlayerController {
     /// The category only takes effect on activation, so setting it up front is
     /// free. Activation is the part that silences whatever else is playing,
     /// which is why it is deferred to ``activateAudioSession()``.
+    ///
+    /// On tvOS the non-mixable `.playback` category is also what qualifies the
+    /// app as a Now Playing app: with the `audio` background mode declared, it
+    /// lets playback continue under the screen saver and the idle-time Now
+    /// Playing overlay, and populates Control Centre's Now Playing tile.
     private func prepareAudioSession() {
-        #if os(iOS)
+        #if os(iOS) || os(tvOS)
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         } catch {
@@ -1151,7 +1156,7 @@ final class PlayerController {
     /// actions doesn't each re-request the session while the first request is
     /// still in flight, and it is restored only if activation fails.
     private func activateAudioSession() {
-        #if os(iOS)
+        #if os(iOS) || os(tvOS)
         guard !isAudioSessionActive else { return }
         isAudioSessionActive = true
         audioSessionQueue.async {
@@ -1172,7 +1177,7 @@ final class PlayerController {
     /// Only on a full stop. A pause keeps the session, so resuming is instant
     /// and doesn't interrupt anything that filled the silence.
     private func deactivateAudioSession() {
-        #if os(iOS)
+        #if os(iOS) || os(tvOS)
         guard isAudioSessionActive else { return }
         isAudioSessionActive = false
         audioSessionQueue.async {
@@ -1185,15 +1190,20 @@ final class PlayerController {
         #endif
     }
 
-    /// Watches for the two ways playback stops without anyone touching this
-    /// app's controls: an interruption (a phone call, another app taking the
-    /// session) and an output route disappearing (headphones unplugged).
+    /// Watches for the ways playback stops without anyone touching this
+    /// app's controls: an interruption (a phone call or another app taking
+    /// the session on iOS; another app starting playback on tvOS) and, on
+    /// iOS, an output route disappearing (headphones unplugged).
     ///
     /// Without these the transport goes on claiming to play silence after a
     /// call, and pulling headphones out sends the music to the built-in speaker
     /// at whatever volume it happened to be.
+    ///
+    /// The route-change pause stays iOS-only: on tvOS a route change is a
+    /// deliberate output switch made from Control Centre — TV speakers to
+    /// HomePod, say — which must keep playing, not pause.
     private func setupAudioSessionObservers() {
-        #if os(iOS)
+        #if os(iOS) || os(tvOS)
         let center = NotificationCenter.default
         let session = AVAudioSession.sharedInstance()
 
@@ -1231,6 +1241,7 @@ final class PlayerController {
             }
         }
 
+        #if os(iOS)
         routeChangeObserver = center.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: session,
@@ -1246,9 +1257,10 @@ final class PlayerController {
             }
         }
         #endif
+        #endif
     }
 
-    #if os(iOS)
+    #if os(iOS) || os(tvOS)
     /// The system has already stopped our audio and taken the session away, so
     /// this only catches the published state up with what the user can hear.
     private func handleInterruptionBegan() {
@@ -1270,7 +1282,9 @@ final class PlayerController {
         guard shouldRestart, currentItem != nil else { return }
         resume()
     }
+    #endif
 
+    #if os(iOS)
     /// Headphones or a Bluetooth device went away. `AVAudioSession` has already
     /// rerouted to the built-in speaker, so pause instead of playing the user's
     /// music out loud to the room.
