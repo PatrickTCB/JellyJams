@@ -33,7 +33,14 @@ struct MainShellView: View {
 
     var body: some View {
         settingsHost
+            #if os(tvOS)
+            // The player owns the whole screen on TV, like the Music app's
+            // Now Playing screen — a sheet would leave it a card over the
+            // shell. The remote's Menu button dismisses the cover.
+            .fullScreenCover(isPresented: Bindable(playerPresentation).isShowingPlayer) { PlayerView() }
+            #else
             .sheet(isPresented: Bindable(playerPresentation).isShowingPlayer) { PlayerView() }
+            #endif
             // Hosted here rather than by the toolbar button that raises it,
             // for the settings sheet's own reason: a sheet owned by a
             // toolbar item dies with the tab bar teardown on iOS.
