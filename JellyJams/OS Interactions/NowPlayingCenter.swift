@@ -22,7 +22,13 @@ struct RemoteCommandHandlers: Sendable {
 }
 
 /// Bridges playback state to `MPNowPlayingInfoCenter` and wires up
-/// `MPRemoteCommandCenter`. Works on both macOS and iOS.
+/// `MPRemoteCommandCenter`. Works on macOS, iOS and tvOS.
+///
+/// On tvOS this is what populates Control Centre's Now Playing tile and the
+/// full-screen overlay the system presents after a while idle; together with
+/// the non-mixable playback audio session (see ``PlayerController``) and the
+/// `audio` background mode, it is what lets music keep playing under the
+/// screen saver exactly like the Music app.
 ///
 /// Updated when playback *changes* — play, pause, seek, a new track, the
 /// queue, shuffle, repeat — never on a clock tick: the system works out the
@@ -129,6 +135,12 @@ final class NowPlayingCenter {
             MPMediaItemPropertyTitle: item.displayName,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            // tvOS classifies the Now Playing card by media type: Control
+            // Centre's tile and the idle-time overlay both read it, and the
+            // legacy key is what Continuity reads to publish the iPhone
+            // lock-screen card. Harmless on the other platforms.
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
+            MPMediaItemPropertyMediaType: MPMediaType.music.rawValue,
         ]
         if let artist = item.subtitleArtist { info[MPMediaItemPropertyArtist] = artist }
         if let album = item.album { info[MPMediaItemPropertyAlbumTitle] = album }
@@ -143,7 +155,9 @@ final class NowPlayingCenter {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         #if os(macOS)
         // macOS alone reads this, and its remote controls rely on it being
-        // set whenever playback starts or stops.
+        // set whenever playback starts or stops. tvOS reserves the setter
+        // behind a private MediaRemote entitlement and infers the state from
+        // the playback rate instead; iOS never needed it.
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         #endif
 
