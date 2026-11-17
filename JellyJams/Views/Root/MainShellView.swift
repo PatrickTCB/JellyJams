@@ -15,6 +15,7 @@ struct MainShellView: View {
     /// hosted above the tabs in ``body``, like the player and settings ones.
     @State private var isPresentingTextToTunes = false
     @Environment(SessionStore.self) private var session
+    @Environment(PlayerController.self) private var player
     @Environment(PlayerPresentation.self) private var playerPresentation
     @Environment(DownloadStore.self) private var downloads
     @Environment(PreferencesStore.self) private var preferences
@@ -54,6 +55,18 @@ struct MainShellView: View {
             .onChange(of: preferences.isMixtapesActive) { _, active in
                 if !active, selection == .mixtapes { selection = .albums }
             }
+            #if os(tvOS)
+            // A playback session starting from nothing opens the player;
+            // one starting while a session is already running keeps the
+            // current screen — the listener is already listening. Track
+            // changes and queue swaps never cross this transition, so they
+            // never interrupt whatever is on screen.
+            .onChange(of: player.currentItem == nil) { wasEmpty, isEmpty in
+                if wasEmpty && !isEmpty {
+                    playerPresentation.isShowingPlayer = true
+                }
+            }
+            #endif
             #if !os(macOS)
             // Asked here, once someone is signed in: Siri permission is only
             // worth granting when there is a library for Siri to play from.
@@ -183,6 +196,11 @@ struct MainShellView: View {
     /// One sidebar tab: the section's root wrapped in its own navigation stack.
     /// On iOS the mini player rides the tab bar accessory applied to the whole
     /// layout; on macOS the shell docks the bar below the tab view.
+    ///
+    /// On tvOS the system bar is hidden once, statically — toggling it from
+    /// scroll geometry deadlocks the focus-driven scroll engine — and the
+    /// section's scrolling bar (``TVScrollingBarSlot``) carries its contents
+    /// instead. The shell's own actions ride the environment channel into it.
     @ViewBuilder private func sectionTab(_ section: LibrarySection) -> some View {
         let content = LibraryNavigationStack {
             SectionRootView(section: section)
@@ -197,8 +215,24 @@ struct MainShellView: View {
                     ToolbarItem(placement: .primaryAction) { AccountMenu() }
                 }
         }
+        #if os(tvOS)
         content
+            // Search keeps its bar: the .searchable field lives in it.
+            .toolbarVisibility(section == .search ? .visible : .hidden, for: .navigationBar)
+            .environment(\.tvShellBarActions, AnyView(shellBarActions(for: section)))
+        #else
+        content
+        #endif
     }
+
+    #if os(tvOS)
+    @ViewBuilder private func shellBarActions(for section: LibrarySection) -> some View {
+        if section == .home, preferences.isMixtapesActive {
+            textToTunesButton
+        }
+        AccountMenu()
+    }
+    #endif
 
     /// The Home toolbar's Text to Tunes button: it raises the sheet hosted
     /// above the tabs rather than owning one itself.
