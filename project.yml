@@ -87,6 +87,11 @@ targets:
         CURRENT_PROJECT_VERSION: "92"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: JellyJamsSiri/Info.plist
+        # The extension's entitlements are deliberately empty. The portal
+        # rejects com.apple.developer.siri for this App ID ("not found and
+        # could not be included in profile"), and tvOS grants Siri access
+        # without it — do not re-add the key. The app target keeps its own
+        # Siri entitlement; its App ID supports it.
         CODE_SIGN_ENTITLEMENTS: JellyJamsSiri/JellyJamsSiri.entitlements
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "3"
