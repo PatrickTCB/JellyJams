@@ -28,6 +28,9 @@ struct LibraryRepository: Sendable {
     private static let searchArtistLimit = 12
     private static let searchAlbumLimit = 20
     private static let searchSongLimit = 40
+    /// How many lyric matches a search asks the backend for. They lead the
+    /// results, so a handful is a highlight, not a second song list.
+    private static let searchLyricLimit = 3
     /// How many matched genres feed the search fold-in. Searching "rock" can
     /// match Rock, Punk Rock and Rock & Roll; beyond a handful the extra ids
     /// lengthen the request without meaningfully changing what is shown.
@@ -418,12 +421,31 @@ struct LibraryRepository: Sendable {
     // MARK: - Search
 
     struct SearchResults: Sendable, Equatable {
+        /// Songs the backend matched by their lyrics, best match first —
+        /// shown above the name-matched songs, and taken out of them so a
+        /// song matching both ways appears once. Empty when no backend is
+        /// configured, or its lyric search came back empty or failed.
+        var lyricMatches: [BaseItemDto] = []
         var genres: [BaseItemDto] = []
         var artists: [BaseItemDto] = []
         var albums: [BaseItemDto] = []
         var songs: [BaseItemDto] = []
 
-        var isEmpty: Bool { genres.isEmpty && artists.isEmpty && albums.isEmpty && songs.isEmpty }
+        var isEmpty: Bool {
+            lyricMatches.isEmpty && genres.isEmpty && artists.isEmpty && albums.isEmpty && songs.isEmpty
+        }
+
+        /// Places lyric matches above the songs and takes them out of the
+        /// song list: a song that matched by both lyrics and name is shown
+        /// once, where it matched best.
+        mutating func foldInLyricMatches(_ matches: [BaseItemDto]) {
+            lyricMatches = matches
+            let matchedIds = Set(matches.compactMap(\.id))
+            songs.removeAll { song in
+                guard let id = song.id else { return false }
+                return matchedIds.contains(id)
+            }
+        }
     }
 
     /// Searches genres, artists, albums and songs concurrently, then folds the
@@ -433,7 +455,12 @@ struct LibraryRepository: Sendable {
     /// "shoegaze" matches no track title, but the user plainly meant the music.
     /// It needs a second round trip because the genres a term matches aren't
     /// known until the first one returns.
-    func search(term: String) async throws -> SearchResults {
+    ///
+    /// When a backend destination is handed over, its lyric search runs beside
+    /// the Jellyfin queries and the matches it picks lead the results. That
+    /// side is a silent extra — any failure there leaves the Jellyfin answer
+    /// standing rather than failing the search.
+    func search(term: String, lyricSearch destination: BackendDestination? = nil) async throws -> SearchResults {
         let client = try requireClient()
 
         async let genresResult = client.getGenres(
@@ -456,6 +483,7 @@ struct LibraryRepository: Sendable {
             searchTerm: term,
             limit: Self.searchSongLimit
         )
+        async let lyricMatches = Self.lyricMatches(term: term, destination: destination, client: client)
 
         let results = try await (genresResult, artistsResult, albumsResult, songsResult)
         var found = SearchResults(
@@ -468,38 +496,69 @@ struct LibraryRepository: Sendable {
         // `getGenres` validates that every item carries an id, so matched
         // genres can always be filtered by id.
         let genreIds = Array(found.genres.compactMap(\.id).prefix(Self.searchGenreFoldIn))
-        guard !genreIds.isEmpty else { return found }
+        if !genreIds.isEmpty {
+            async let taggedAlbums = client.getItems(
+                includeItemTypes: [.musicAlbum],
+                recursive: true,
+                sortBy: .sortName,
+                sortOrder: .ascending,
+                genreIds: genreIds,
+                limit: Self.searchAlbumLimit
+            )
+            async let taggedSongs = client.getItems(
+                includeItemTypes: [.audio],
+                recursive: true,
+                sortBy: .random,
+                genreIds: genreIds,
+                limit: Self.searchSongLimit
+            )
 
-        async let taggedAlbums = client.getItems(
-            includeItemTypes: [.musicAlbum],
-            recursive: true,
-            sortBy: .sortName,
-            sortOrder: .ascending,
-            genreIds: genreIds,
-            limit: Self.searchAlbumLimit
-        )
-        async let taggedSongs = client.getItems(
-            includeItemTypes: [.audio],
-            recursive: true,
-            sortBy: .random,
-            genreIds: genreIds,
-            limit: Self.searchSongLimit
-        )
+            let tagged = try await (taggedAlbums, taggedSongs)
+            // Name matches lead: someone typing an exact album title wants it first,
+            // even when the title also happens to be a genre.
+            found.albums = Self.merged(
+                found.albums,
+                tagged.0.items ?? [],
+                limit: Self.searchAlbumLimit
+            )
+            found.songs = Self.merged(
+                found.songs,
+                tagged.1.items ?? [],
+                limit: Self.searchSongLimit
+            )
+        }
 
-        let tagged = try await (taggedAlbums, taggedSongs)
-        // Name matches lead: someone typing an exact album title wants it first,
-        // even when the title also happens to be a genre.
-        found.albums = Self.merged(
-            found.albums,
-            tagged.0.items ?? [],
-            limit: Self.searchAlbumLimit
-        )
-        found.songs = Self.merged(
-            found.songs,
-            tagged.1.items ?? [],
-            limit: Self.searchSongLimit
-        )
+        // After the fold-in, so a genre-tagged song that also matched by
+        // lyrics is deduplicated too.
+        found.foldInLyricMatches(await lyricMatches)
         return found
+    }
+
+    /// The lyric side of a search: the backend's picks resolved into whole
+    /// tracks, in the order it matched them — or nothing at all.
+    ///
+    /// Silent by design: lyric matches are an extra, so no backend, an
+    /// unreachable one, a refusal, or picks the server no longer knows all
+    /// read as "no lyric matches" rather than a failed search. Ids are
+    /// resolved exactly like a queue extension — the backend never sends
+    /// whole items.
+    private static func lyricMatches(
+        term: String,
+        destination: BackendDestination?,
+        client: JellyfinService
+    ) async -> [BaseItemDto] {
+        guard let destination else { return [] }
+        do {
+            let answer = try await destination.backend.lyricSearch(
+                userID: destination.userID,
+                query: term,
+                limit: Self.searchLyricLimit
+            )
+            guard !answer.matchingTrackIDs.isEmpty else { return [] }
+            return try await client.tracks(byIds: answer.matchingTrackIDs)
+        } catch {
+            return []
+        }
     }
 
     /// Appends `additional` to `primary`, skipping items already present and
