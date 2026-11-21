@@ -30,23 +30,14 @@ enum TextToTunes {
         case noneResolvable
     }
 
-    /// The backend and the account to speak as — every endpoint but `/ping`
-    /// keys off the registered `userID`, so a request needs both halves.
-    struct Destination: Sendable {
-        let backend: JellyJamsBackend
-        let userID: String
-    }
+    /// The backend and the account to speak as — the pair every backend
+    /// pick needs, shared with lyric search under its own name.
+    typealias Destination = BackendDestination
 
     /// The destination the given settings describe — nil when there is no
-    /// backend address to talk to, or no signed-in user to speak as. The
-    /// state is taken as inputs rather than read from the app's graph, so
-    /// a view can pass the environment it is already holding and a test
-    /// can pass whatever it likes.
+    /// backend address to talk to, or no signed-in user to speak as.
     static func destination(address: String, deviceInfo: DeviceInfo, userID: String?) -> Destination? {
-        guard let backend = JellyJamsBackend.configured(address: address, deviceInfo: deviceInfo),
-              let userID
-        else { return nil }
-        return Destination(backend: backend, userID: userID)
+        Destination(address: address, deviceInfo: deviceInfo, userID: userID)
     }
 
     /// The destination as `AppServices` currently knows it. Siri has no
