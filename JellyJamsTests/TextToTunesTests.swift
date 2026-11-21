@@ -120,6 +120,113 @@ final class TextToTunesTests: XCTestCase {
     }
 }
 
+// MARK: - The lyric sibling
+
+/// ``LyricSearch`` is the lyric sibling of the Text to Tunes pipeline: a
+/// remembered line out to `GET /lyric-search`, resolved matches back. The
+/// search screen and Siri's lyric-match intent share it, so its contract —
+/// the line and limit riding the query, the backend's order kept, empty
+/// answers at either end — is exercised here once for both.
+final class LyricSearchTests: XCTestCase {
+    override func tearDown() {
+        URLProtocolStub.handler = nil
+        super.tearDown()
+    }
+
+    private func destination() -> BackendDestination {
+        BackendDestination(backend: TestFixtures.stubbedBackend(), userID: "user-id")
+    }
+
+    /// The line and limit ride the query string, and the matches come back
+    /// as whole tracks in the backend's order — even though the Jellyfin
+    /// server answered its ids query in its own order. Siri asks for one.
+    func testTracksSendsTheLineAndLimitAndReturnsTheMatchesInOrder() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            guard request.url?.path == "/lyric-search" else {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([(id: "x1", type: "Audio"), (id: "x2", type: "Audio")]))
+            }
+            return (try emptyResponse(for: request, statusCode: 200), Data(#"{"MatchingTrackIDs":["x2","x1"],"Count":2}"#.utf8))
+        }
+
+        let tracks = try await LyricSearch.tracks(
+            query: "when the rush kicks in I must get out",
+            limit: LyricSearch.bestMatchLimit,
+            destination: destination(),
+            client: TestFixtures.stubbedClient()
+        )
+
+        let search = try XCTUnwrap(recorder.all.first { $0.path == "/lyric-search" })
+        XCTAssertEqual(search.value(for: "userID"), "user-id")
+        XCTAssertEqual(search.value(for: "query"), "when the rush kicks in I must get out")
+        XCTAssertEqual(search.value(for: "limit"), "1")
+        XCTAssertEqual(tracks.map(\.id), ["x2", "x1"], "The backend's match order is kept")
+    }
+
+    func testTracksAreEmptyWhenTheBackendMatchesNothing() async throws {
+        URLProtocolStub.handler = { request in
+            (try emptyResponse(for: request, statusCode: 200), Data(#"{"MatchingTrackIDs":[],"Count":0}"#.utf8))
+        }
+
+        let tracks = try await LyricSearch.tracks(
+            query: "words no song has",
+            limit: 1,
+            destination: destination(),
+            client: TestFixtures.stubbedClient()
+        )
+
+        XCTAssertTrue(tracks.isEmpty)
+    }
+
+    func testTracksAreEmptyWhenNoneOfTheMatchesResolveOnTheServer() async throws {
+        URLProtocolStub.handler = { request in
+            guard request.url?.path == "/lyric-search" else {
+                return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+            }
+            return (try emptyResponse(for: request, statusCode: 200), Data(#"{"MatchingTrackIDs":["gone-1"],"Count":1}"#.utf8))
+        }
+
+        let tracks = try await LyricSearch.tracks(
+            query: "anything",
+            limit: 1,
+            destination: destination(),
+            client: TestFixtures.stubbedClient()
+        )
+
+        XCTAssertTrue(tracks.isEmpty)
+    }
+
+    /// A refusal keeps its own voice: the pipeline wraps nothing, and a
+    /// backend `422` travels onward as the `BackendError` that explains it
+    /// — the search screen swallows it, Siri words it as "nothing matched".
+    func testTracksPropagatesABackendRefusalUnwrapped() async throws {
+        URLProtocolStub.handler = { request in
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 422,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"detail":"query too long"}"#.utf8))
+        }
+
+        do {
+            _ = try await LyricSearch.tracks(
+                query: "whatever",
+                limit: 1,
+                destination: destination(),
+                client: TestFixtures.stubbedClient()
+            )
+            XCTFail("Expected the refusal to surface")
+        } catch let error as BackendError {
+            XCTAssertEqual(error, .rejected(status: 422, detail: "query too long"))
+        }
+    }
+}
+
 // MARK: - The Siri sentinel
 
 #if os(iOS)

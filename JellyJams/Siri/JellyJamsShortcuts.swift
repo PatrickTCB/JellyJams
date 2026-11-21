@@ -21,6 +21,10 @@ import AppIntents
 /// requests the library cannot match, through the ``TextToTunesPlaylist``
 /// fallback.
 ///
+/// A remembered lyric line — "Play the song that goes …" — binds to
+/// ``PlayLyricMatchIntent``, which plays the one song the backend's lyric
+/// search matches best.
+///
 /// ``PlayAudioIntent`` carries the schema-backed request and deliberately has
 /// no phrases: its `audioEntity` is a `@UnionValue`, which phrases cannot
 /// interpolate, so a phrase would leave the parameter unfilled and make Siri
@@ -72,6 +76,23 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
             shortTitle: "Text to Tunes",
             systemImageName: "sparkles"
          )
+
+         // A remembered lyric line: the words go to the backend's lyric
+         // search, which names the one song they belong to. Like Text to
+         // Tunes, the placeholder takes any spoken words, and the phrases
+         // cannot be conditioned on a configured backend — the intent
+         // itself refuses without one, see ``PlayLyricMatchIntent``.
+         AppShortcut(
+             intent: PlayLyricMatchIntent(),
+             phrases: [
+                  "Play the song that goes \(\.$lyrics) in \(AppShortcutPhraseToken.applicationName)",
+                  "Play the song that goes \(\.$lyrics) using \(AppShortcutPhraseToken.applicationName)",
+                  "Play the song with the lyrics \(\.$lyrics) in \(AppShortcutPhraseToken.applicationName)",
+                  "Play the song with the lyrics \(\.$lyrics) using \(AppShortcutPhraseToken.applicationName)",
+              ],
+             shortTitle: "Play Lyric Match",
+             systemImageName: "text.quote"
+          )
 
          // Named-item plays; the spoken placeholder binds to the entity's
         // `EntityStringQuery` through the `\(self.$x)` parameter form.

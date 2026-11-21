@@ -539,26 +539,21 @@ struct LibraryRepository: Sendable {
     ///
     /// Silent by design: lyric matches are an extra, so no backend, an
     /// unreachable one, a refusal, or picks the server no longer knows all
-    /// read as "no lyric matches" rather than a failed search. Ids are
-    /// resolved exactly like a queue extension — the backend never sends
-    /// whole items.
+    /// read as "no lyric matches" rather than a failed search. The round
+    /// trip itself is ``LyricSearch``'s, the same one Siri's lyric-match
+    /// intent runs; only the silence is this screen's.
     private static func lyricMatches(
         term: String,
         destination: BackendDestination?,
         client: JellyfinService
     ) async -> [BaseItemDto] {
         guard let destination else { return [] }
-        do {
-            let answer = try await destination.backend.lyricSearch(
-                userID: destination.userID,
-                query: term,
-                limit: Self.searchLyricLimit
-            )
-            guard !answer.matchingTrackIDs.isEmpty else { return [] }
-            return try await client.tracks(byIds: answer.matchingTrackIDs)
-        } catch {
-            return []
-        }
+        return (try? await LyricSearch.tracks(
+            query: term,
+            limit: Self.searchLyricLimit,
+            destination: destination,
+            client: client
+        )) ?? []
     }
 
     /// Appends `additional` to `primary`, skipping items already present and

@@ -44,12 +44,7 @@ enum TextToTunes {
     /// environment to read, which is what this is for.
     @MainActor
     static func currentDestination() -> Destination? {
-        let services = AppServices.shared
-        return destination(
-            address: services.preferences.jellyJamsBackendAddress,
-            deviceInfo: services.session.deviceInfo,
-            userID: services.session.currentUser?.id
-        )
+        Destination.current()
     }
 
     /// `description` to `GET /text-to-tunes`, the picks resolved through

@@ -296,6 +296,18 @@ struct BackendDestination: Sendable {
         else { return nil }
         self.init(backend: backend, userID: userID)
     }
+
+    /// The destination as `AppServices` currently knows it. Siri has no
+    /// environment to read, which is what this is for.
+    @MainActor
+    static func current() -> BackendDestination? {
+        let services = AppServices.shared
+        return BackendDestination(
+            address: services.preferences.jellyJamsBackendAddress,
+            deviceInfo: services.session.deviceInfo,
+            userID: services.session.currentUser?.id
+        )
+    }
 }
 
 enum BackendError: LocalizedError, Sendable, Equatable {

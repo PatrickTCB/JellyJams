@@ -122,9 +122,9 @@ enum SiriIntentError: Error {
     case notSignedIn
     case noMatch(String)
     case itemUnavailable
-    /// Text to Tunes is a Jelly Jams Backend feature, and the backend is
-    /// optional — a request for it with no backend configured is a setup
-    /// gap, not a sign-in gap.
+    /// Text to Tunes and lyric matches are Jelly Jams Backend features, and
+    /// the backend is optional — a request for one with no backend
+    /// configured is a setup gap, not a sign-in gap.
     case backendUnavailable
 }
 
@@ -149,7 +149,7 @@ extension SiriIntentError: CustomLocalizedStringResourceConvertible {
         case .backendUnavailable:
             LocalizedStringResource(
                 "That feature needs the Jelly Jams Backend. Set it up in the Jelly Jams settings first.",
-                comment: "Spoken when a Text to Tunes request arrives with no Jelly Jams Backend configured."
+                comment: "Spoken when a Text to Tunes or lyric match request arrives with no Jelly Jams Backend configured."
             )
         }
     }
