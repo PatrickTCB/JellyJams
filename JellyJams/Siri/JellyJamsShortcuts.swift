@@ -81,6 +81,9 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
                  "Play \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
                  "Play song \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
                  "Play the song \(\.$song) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play \(\.$song) using \(AppShortcutPhraseToken.applicationName)",
+                 "Play song \(\.$song) using \(AppShortcutPhraseToken.applicationName)",
+                 "Play the song \(\.$song) using \(AppShortcutPhraseToken.applicationName)",
              ],
             shortTitle: "Play Song",
             systemImageName: "music.note"
@@ -91,6 +94,8 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
             phrases: [
                  "Play album \(\.$album) in \(AppShortcutPhraseToken.applicationName)",
                  "Play the album \(\.$album) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play album \(\.$album) using \(AppShortcutPhraseToken.applicationName)",
+                 "Play the album \(\.$album) using \(AppShortcutPhraseToken.applicationName)",
              ],
             shortTitle: "Play Album",
             systemImageName: "music.note.square.stack"
@@ -101,6 +106,8 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
             phrases: [
                  "Play music by \(\.$artist) in \(AppShortcutPhraseToken.applicationName)",
                  "Play songs by \(\.$artist) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play music by \(\.$artist) using \(AppShortcutPhraseToken.applicationName)",
+                 "Play songs by \(\.$artist) using \(AppShortcutPhraseToken.applicationName)",
              ],
             shortTitle: "Play Artist",
             systemImageName: "music.mic"
@@ -112,6 +119,9 @@ struct JellyJamsShortcuts: AppShortcutsProvider {
                  "Play my playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
                  "Play my \(\.$playlist) playlist in \(AppShortcutPhraseToken.applicationName)",
                  "Play playlist \(\.$playlist) in \(AppShortcutPhraseToken.applicationName)",
+                 "Play my playlist \(\.$playlist) using \(AppShortcutPhraseToken.applicationName)",
+                 "Play my \(\.$playlist) playlist using \(AppShortcutPhraseToken.applicationName)",
+                 "Play playlist \(\.$playlist) using \(AppShortcutPhraseToken.applicationName)",
              ],
             shortTitle: "Play Playlist",
             systemImageName: "music.note.list"
