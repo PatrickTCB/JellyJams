@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchView: View {
     @Environment(SessionStore.self) private var session
     @Environment(PlayerController.self) private var player
+    @Environment(PreferencesStore.self) private var preferences
 
     @State private var query = ""
     @State private var loader = LoadableModel(LibraryRepository.SearchResults())
@@ -11,6 +12,21 @@ struct SearchView: View {
 
     var body: some View {
         List {
+            if !results.lyricMatches.isEmpty {
+                Section {
+                    ForEach(Array(results.lyricMatches.enumerated()), id: \.element.id) { index, song in
+                        // Whole-row taps, like the songs below — see the note
+                        // there for why this List keeps no selection model.
+                        TrackRow(track: song, showArtwork: true, tapBehavior: .play) {
+                            player.play(results.lyricMatches, startAt: index)
+                        }
+                    }
+                } header: {
+                    Text("Lyric Matches")
+                } footer: {
+                    Text("Songs with lyrics matching your search.")
+                }
+            }
             if !results.songs.isEmpty {
                 Section("Songs") {
                     ForEach(Array(results.songs.enumerated()), id: \.element.id) { index, song in
@@ -93,7 +109,22 @@ struct SearchView: View {
         }
         guard !Task.isCancelled, currentTerm == term else { return }
 
-        await loader.load { try await session.library.search(term: term) }
+        await loader.load {
+            try await session.library.search(term: term, lyricSearch: lyricSearchDestination)
+        }
+    }
+
+    /// The backend to ask for lyric matches beside the Jellyfin results —
+    /// nil when no backend is configured or nobody is signed in, which is
+    /// every search that runs on Jellyfin alone. A configured backend's
+    /// lyric matches join the results silently: no switch to turn on, and
+    /// a backend that cannot answer simply adds nothing.
+    private var lyricSearchDestination: BackendDestination? {
+        BackendDestination(
+            address: preferences.jellyJamsBackendAddress,
+            deviceInfo: session.deviceInfo,
+            userID: session.currentUser?.id
+        )
     }
 
     private var currentTerm: String {
