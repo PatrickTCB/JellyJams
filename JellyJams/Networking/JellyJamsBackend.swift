@@ -256,6 +256,48 @@ struct BackendExtendedQueue: Decodable, Sendable, Equatable {
     }
 }
 
+/// The backend's answer to `GET /lyric-search`: the ids of the songs whose
+/// lyrics match the term, best match first, and how many that is.
+///
+/// Like ``BackendExtendedQueue``, the field names are capitalised because
+/// that is how the backend writes them, and `Count` always agrees with the
+/// list beside it — the app reads the list and treats the count as
+/// confirmation, not as a second source of truth.
+struct BackendLyricSearch: Decodable, Sendable, Equatable {
+    let matchingTrackIDs: [String]
+    let count: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case matchingTrackIDs = "MatchingTrackIDs"
+        case count = "Count"
+    }
+}
+
+/// The backend and the account to speak as — every endpoint but `/ping`
+/// keys off the registered `userID`, so a request needs both halves.
+///
+/// The state is taken as inputs rather than read from the app's graph, so
+/// a view can pass the environment it is already holding and a test can
+/// pass whatever it likes.
+struct BackendDestination: Sendable {
+    let backend: JellyJamsBackend
+    let userID: String
+
+    init(backend: JellyJamsBackend, userID: String) {
+        self.backend = backend
+        self.userID = userID
+    }
+
+    /// The destination the given settings describe — nil when there is no
+    /// backend address to talk to, or no signed-in user to speak as.
+    init?(address: String, deviceInfo: DeviceInfo, userID: String?) {
+        guard let backend = JellyJamsBackend.configured(address: address, deviceInfo: deviceInfo),
+              let userID
+        else { return nil }
+        self.init(backend: backend, userID: userID)
+    }
+}
+
 enum BackendError: LocalizedError, Sendable, Equatable {
     case invalidServerURL
     case notSignedIn
@@ -290,8 +332,8 @@ enum BackendError: LocalizedError, Sendable, Equatable {
 
 /// App-level access to the Jelly Jams Backend — the companion service for
 /// the app, whose features so far are building Mixtapes, the Server Plalist,
-/// taking bans, extending running queues, and turning free text into a
-/// queue of songs.
+/// taking bans, extending running queues, turning free text into a queue of
+/// songs, and matching songs by their lyrics.
 ///
 /// Every endpoint but `/ping` keys off the signed-in account's `userID`,
 /// so registration is the seam the rest of the integration grows
@@ -704,6 +746,28 @@ final class JellyJamsBackend: Sendable {
             ]
         )
         return try JSONDecoder().decode(BackendExtendedQueue.self, from: data)
+    }
+
+    // MARK: - Lyric search
+
+    /// `GET /lyric-search` — the songs whose lyrics match a search term,
+    /// best match first.
+    ///
+    /// The term travels verbatim as the `query` parameter, and `limit` caps
+    /// how many songs the backend returns. The answer is ids only — like the
+    /// queue-extension endpoints — resolved through the user's own Jellyfin
+    /// server by the caller.
+    func lyricSearch(userID: String, query: String, limit: Int) async throws -> BackendLyricSearch {
+        let data = try await perform(
+            .get,
+            path: "lyric-search",
+            queryItems: [
+                URLQueryItem(name: "userID", value: userID),
+                URLQueryItem(name: "query", value: query),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ]
+        )
+        return try JSONDecoder().decode(BackendLyricSearch.self, from: data)
     }
 
     // MARK: - The request plumbing
