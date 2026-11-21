@@ -23,7 +23,11 @@ import AppIntents
 ///
 /// A remembered lyric line — "Play the song that goes …" — binds to
 /// ``PlayLyricMatchIntent``, which plays the one song the backend's lyric
-/// search matches best.
+/// search matches best. Siri does not always pick that phrase, though:
+/// the same words fit the plain song phrases and the SiriKit Media
+/// domain, so every path that receives them recognises the lyric markers
+/// and resolves them to the ``LyricMatchPlaylist`` sentinel instead of a
+/// library miss — whichever door Siri picks leads to the same search.
 ///
 /// ``PlayAudioIntent`` carries the schema-backed request and deliberately has
 /// no phrases: its `audioEntity` is a `@UnionValue`, which phrases cannot

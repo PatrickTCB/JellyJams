@@ -293,3 +293,127 @@ final class TextToTunesPlaylistTests: XCTestCase {
     }
 }
 #endif
+
+// MARK: - The lyric sentinel
+
+#if os(iOS) || os(tvOS)
+/// ``LyricMatchPlaylist`` is the lyric sibling of the Text to Tunes
+/// sentinel: whichever Siri surface claims "Play the song that goes …",
+/// the line has to survive the identifier round trip, and the markers
+/// that give a lyric request away have to be recognised in the spans the
+/// other play templates deliver.
+final class LyricMatchPlaylistTests: XCTestCase {
+    func testTheLineSurvivesTheRoundTripThroughAnIdentifier() {
+        for line in [
+            "when the rush kicks in I must get out",
+            "Hello from the other side",
+            "80s metal & power ballads",
+            "a line with a slash / in the words",
+            "100% über-crust, mostly instrumental",
+            // Another sentinel's id arriving as spoken words: encoded, it
+            // can never be mistaken for the plain one.
+            DefaultPlaybackPlaylist.id,
+            TextToTunesPlaylist.id(query: "high energy rock"),
+            LyricMatchPlaylist.idPrefix,
+        ] {
+            XCTAssertEqual(
+                LyricMatchPlaylist.query(in: LyricMatchPlaylist.id(query: line)),
+                line,
+                "Round trip of '\(line)'"
+            )
+        }
+    }
+
+    func testOrdinaryIdentifiersCarryNoLine() {
+        XCTAssertNil(LyricMatchPlaylist.query(in: "0f8fad5b-d9cb-469f-a165-70867728950e"))
+        XCTAssertNil(LyricMatchPlaylist.query(in: DefaultPlaybackPlaylist.id))
+        XCTAssertNil(LyricMatchPlaylist.query(in: FavouriteSongsPlaylist.id))
+        XCTAssertNil(LyricMatchPlaylist.query(in: TextToTunesPlaylist.id(query: "high energy rock")))
+        XCTAssertNil(LyricMatchPlaylist.query(in: ""))
+    }
+
+    func testAMalformedEscapeStillYieldsItsWords() {
+        // Only `id(query:)` mints these ids, but a hand-corrupted one should
+        // lose its escapes, not the request.
+        XCTAssertEqual(
+            LyricMatchPlaylist.query(in: LyricMatchPlaylist.idPrefix + "50%zz rock"),
+            "50%zz rock"
+        )
+    }
+
+    /// The markers are the tails of the lyric App Shortcut phrases; when
+    /// Siri binds the request to a different play template they ride in at
+    /// the front of the parameter, and the line behind them is what the
+    /// backend needs — without the marker words.
+    func testTheMarkersGiveTheLineAway() {
+        let line = "when the rush kicks in I must get out"
+        for span in [
+            "that goes \(line)",
+            "That Goes \(line)",
+            "that goes like \(line)",
+            "goes like \(line)",
+            "with the lyrics \(line)",
+            "with lyrics \(line)",
+            "  that goes \(line)  ",
+        ] {
+            XCTAssertEqual(LyricMatchPlaylist.phrase(in: span), line, "Marker reading of '\(span)'")
+        }
+    }
+
+    func testOrdinaryNamesCarryNoMarkers() {
+        XCTAssertNil(LyricMatchPlaylist.phrase(in: "Whiplash by Architects"))
+        XCTAssertNil(LyricMatchPlaylist.phrase(in: "The Song That Goes On"))
+        XCTAssertNil(LyricMatchPlaylist.phrase(in: "the song that goes hello"))
+        XCTAssertNil(LyricMatchPlaylist.phrase(in: "that goes"))
+        XCTAssertNil(LyricMatchPlaylist.phrase(in: "that goes   "))
+        XCTAssertNil(LyricMatchPlaylist.phrase(in: ""))
+    }
+
+    func testTheSentinelIsASongNamedForItsLineAndNothingOnTheServer() {
+        let candidate = LyricMatchPlaylist.candidate(query: "hello from the other side")
+        XCTAssertEqual(candidate.id, LyricMatchPlaylist.id(query: "hello from the other side"))
+        XCTAssertEqual(candidate.kind, .song, "A remembered line names one song")
+        XCTAssertEqual(candidate.title, "hello from the other side")
+        XCTAssertNil(candidate.item, "The sentinel has no server counterpart until the backend answers")
+    }
+}
+#endif
+
+#if os(iOS)
+/// A lyric request that Siri bound to the plain song phrase arrives at
+/// ``SongQuery`` as a "name" starting with the marker words. It must
+/// resolve to the sentinel without a library search — a miss here is
+/// what makes Siri say "I can't do that using Jelly Jams" before any
+/// intent runs.
+final class LyricMatchSongQueryTests: XCTestCase {
+    override func tearDown() {
+        URLProtocolStub.handler = nil
+        super.tearDown()
+    }
+
+    func testAMarkedSpanResolvesToTheSentinelWithoutAServer() async throws {
+        URLProtocolStub.handler = { request in
+            XCTFail("A lyric span must not reach the library: \(request.url!)")
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let entities = try await SongQuery().entities(matching: "that goes when the rush kicks in I must get out")
+        XCTAssertEqual(entities.map(\.id), [LyricMatchPlaylist.id(query: "when the rush kicks in I must get out")])
+    }
+
+    /// The system rehydrates entities by id between resolution and play;
+    /// the sentinel has to resolve without a server, exactly like the
+    /// synthetic playlists do.
+    func testRehydrationResolvesTheSentinelWithoutAServer() async throws {
+        URLProtocolStub.handler = { request in
+            XCTFail("The sentinel must not reach the network: \(request.url!)")
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let sentinelID = LyricMatchPlaylist.id(query: "when the rush kicks in I must get out")
+        let entities = try await SongQuery().entities(for: [sentinelID])
+        XCTAssertEqual(entities.map(\.id), [sentinelID])
+        XCTAssertEqual(entities.first?.title, "when the rush kicks in I must get out")
+    }
+}
+#endif

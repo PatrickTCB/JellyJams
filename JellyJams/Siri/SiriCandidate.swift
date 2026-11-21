@@ -13,8 +13,9 @@ import JellyfinAPI
 ///
 /// The server ``item`` snapshot rides along so the schema layer can rebuild
 /// its entities without another round-trip; it is nil only for the synthetic
-/// playlists (the favourites shuffle, the default-playback sentinel and the
-/// Text to Tunes fallback), whose meaning lives in the identifier.
+/// items (the favourites shuffle, the default-playback sentinel, the Text to
+/// Tunes fallback and the lyric-match sentinel), whose meaning lives in the
+/// identifier.
 struct SiriCandidate: Sendable, Equatable {
     enum Kind: String, Sendable, CaseIterable {
         case song, album, artist, playlist

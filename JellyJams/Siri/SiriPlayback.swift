@@ -35,68 +35,98 @@ enum SiriPlayback {
         var repeatOverride: RepeatMode?
         var nowPlaying: String
         if repeatRequested { repeatOverride = .repeatAll }
-        switch candidate.kind {
-        case .song:
-            guard let item = try await client.item(byId: candidate.id) else {
-                throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
+        if let phrase = LyricMatchPlaylist.query(in: candidate.id) {
+            // A remembered lyric line, arrived through whichever Siri
+            // surface claimed the request: the backend's lyric search
+            // names the one song it belongs to, and only the best match
+            // plays — the same contract as ``PlayLyricMatchIntent``. The
+            // id is checked before the kind because the line can ride in
+            // as a song (a song phrase bound it) or as a playlist-shaped
+            // fallback (the classic-Siri path). Every failure along the
+            // way reads as "nothing matched", because to the listener
+            // that is what happened.
+            guard let destination = BackendDestination.current() else {
+                throw AppIntentError(wrapping: SiriIntentError.backendUnavailable)
             }
-            tracks = [item]
-            nowPlaying = candidate.subtitle.map { "\(candidate.title) by \($0)" } ?? candidate.title
-        case .album:
-            guard let item = try await client.item(byId: candidate.id) else {
-                throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
-            }
-            tracks = try await client.tracks(for: item)
-            nowPlaying = candidate.title
-        case .artist:
-            guard let item = try await client.item(byId: candidate.id) else {
-                throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
-            }
-            // "Play <artist>" means "shuffle their catalogue", not an
-            // alphabetical run-through.
-            tracks = try await client.tracks(for: item)
-            alwaysShuffle = true
-            nowPlaying = candidate.title
-        case .playlist:
-            if let phrase = TextToTunesPlaylist.query(in: candidate.id) {
-                // The Text to Tunes fallback: these words found nothing in
-                // the library, so the backend picks the songs instead — the
-                // sheet's own pipeline, played like any other queue. Every
-                // failure along the way reads as "nothing matched", because
-                // to the listener that is what happened.
-                // The fallback hinges on a configured backend (resolution
-                // offered the sentinel on that gate); a destination that
-                // went away since says so, rather than pretending it searched.
-                guard let destination = TextToTunes.currentDestination() else {
-                    throw AppIntentError(wrapping: SiriIntentError.backendUnavailable)
-                }
-                do {
-                    tracks = try await TextToTunes.tracks(
-                        description: phrase,
-                        limit: TextToTunes.defaultSongLimit,
-                        destination: destination,
-                        client: client
-                    )
-                } catch {
+            do {
+                let matches = try await LyricSearch.tracks(
+                    query: phrase,
+                    limit: LyricSearch.bestMatchLimit,
+                    destination: destination,
+                    client: client
+                )
+                guard let best = matches.first else {
                     throw AppIntentError(wrapping: SiriIntentError.noMatch(phrase))
                 }
-            } else if candidate.id == DefaultPlaybackPlaylist.id {
-                let setting = AppServices.shared.preferences.defaultPlayback
-                let resolved = try await DefaultPlaybackResolver.resolve(setting: setting, client: client)
-                tracks = resolved.tracks
-                alwaysShuffle = resolved.shuffled
-                // The setting supplies repeat only when the request didn't
-                // ask for its own.
-                if !repeatRequested { repeatOverride = resolved.repeatMode }
-            } else if candidate.id == FavouriteSongsPlaylist.id {
-                tracks = try await PlayerController.fallbackQueue(client: client)
-            } else {
+                tracks = [best]
+                nowPlaying = best.displayName
+            } catch {
+                throw AppIntentError(wrapping: SiriIntentError.noMatch(phrase))
+            }
+        } else {
+            switch candidate.kind {
+            case .song:
+                guard let item = try await client.item(byId: candidate.id) else {
+                    throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
+                }
+                tracks = [item]
+                nowPlaying = candidate.subtitle.map { "\(candidate.title) by \($0)" } ?? candidate.title
+            case .album:
                 guard let item = try await client.item(byId: candidate.id) else {
                     throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
                 }
                 tracks = try await client.tracks(for: item)
+                nowPlaying = candidate.title
+            case .artist:
+                guard let item = try await client.item(byId: candidate.id) else {
+                    throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
+                }
+                // "Play <artist>" means "shuffle their catalogue", not an
+                // alphabetical run-through.
+                tracks = try await client.tracks(for: item)
+                alwaysShuffle = true
+                nowPlaying = candidate.title
+            case .playlist:
+                if let phrase = TextToTunesPlaylist.query(in: candidate.id) {
+                    // The Text to Tunes fallback: these words found nothing in
+                    // the library, so the backend picks the songs instead — the
+                    // sheet's own pipeline, played like any other queue. Every
+                    // failure along the way reads as "nothing matched", because
+                    // to the listener that is what happened.
+                    // The fallback hinges on a configured backend (resolution
+                    // offered the sentinel on that gate); a destination that
+                    // went away since says so, rather than pretending it searched.
+                    guard let destination = TextToTunes.currentDestination() else {
+                        throw AppIntentError(wrapping: SiriIntentError.backendUnavailable)
+                    }
+                    do {
+                        tracks = try await TextToTunes.tracks(
+                            description: phrase,
+                            limit: TextToTunes.defaultSongLimit,
+                            destination: destination,
+                            client: client
+                        )
+                    } catch {
+                        throw AppIntentError(wrapping: SiriIntentError.noMatch(phrase))
+                    }
+                } else if candidate.id == DefaultPlaybackPlaylist.id {
+                    let setting = AppServices.shared.preferences.defaultPlayback
+                    let resolved = try await DefaultPlaybackResolver.resolve(setting: setting, client: client)
+                    tracks = resolved.tracks
+                    alwaysShuffle = resolved.shuffled
+                    // The setting supplies repeat only when the request didn't
+                    // ask for its own.
+                    if !repeatRequested { repeatOverride = resolved.repeatMode }
+                } else if candidate.id == FavouriteSongsPlaylist.id {
+                    tracks = try await PlayerController.fallbackQueue(client: client)
+                } else {
+                    guard let item = try await client.item(byId: candidate.id) else {
+                        throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)
+                    }
+                    tracks = try await client.tracks(for: item)
+                }
+                nowPlaying = candidate.title
             }
-            nowPlaying = candidate.title
         }
         guard !tracks.isEmpty else {
             throw AppIntentError(wrapping: SiriIntentError.itemUnavailable)

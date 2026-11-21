@@ -25,6 +25,12 @@ extension AudioEntity.AudioSearchQuery: IntentValueQuery {
 
         switch input.criteria {
         case .searchQuery(let query):
+            if let line = LyricMatchPlaylist.phrase(in: query),
+               let fallback = await LyricMatchPlaylist.fallbackCandidate(for: line) {
+                // A remembered lyric line, not a name: the lyric sentinel
+                // takes it to the backend's lyric search at play time.
+                return [AudioEntity(candidate: fallback)]
+            }
             let found = try await SiriAudioSearch.search(matching: query, client: client)
             if found.isEmpty, let fallback = await TextToTunesPlaylist.fallbackCandidate(for: query) {
                 // Nothing in the library answers these words, so they read

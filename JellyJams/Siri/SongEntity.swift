@@ -75,16 +75,20 @@ extension SongEntity: Hashable {
 // MARK: - SongQuery
 
 /// Rehydrates song entities from the server when Siri asks for a previously
-/// resolved track (disambiguation picks, Shortcuts runs).
+/// resolved track (disambiguation picks, Shortcuts runs). The lyric-match
+/// sentinel resolves without a server, exactly like the synthetic playlists.
 struct SongQuery {}
 
 extension SongQuery: EntityQuery {
     func entities(for identifiers: [SongEntity.ID]) async throws -> [SongEntity] {
-        let client = await AppServices.shared.session.client
-        guard let client else { return [] }
         var entities: [SongEntity] = []
+        let client = await AppServices.shared.session.client
         for id in identifiers {
-            if let item = try await client.item(byId: id), item.itemType == .audio {
+            if let phrase = LyricMatchPlaylist.query(in: id) {
+                entities.append(LyricMatchPlaylist.songEntity(query: phrase))
+                continue
+            }
+            if let client, let item = try await client.item(byId: id), item.itemType == .audio {
                 entities.append(SongEntity(item: item, artworkURL: client.artworkURL(for: item, size: 600)))
             }
         }
@@ -111,6 +115,15 @@ extension SongQuery: EntityQuery {
 
 extension SongQuery: EntityStringQuery {
     func entities(matching string: String) async throws -> [SongEntity] {
+        // A remembered lyric line is not a name: when Siri binds "Play
+        // the song that goes …" to the plain song phrase instead of the
+        // lyric one, the markers ride in at the front of the span.
+        // Recognise them here so the misroute still reaches the backend's
+        // lyric search at play time, instead of dying as a library miss
+        // Siri cannot resolve ("I can't do that using Jelly Jams").
+        if let line = LyricMatchPlaylist.phrase(in: string) {
+            return [LyricMatchPlaylist.songEntity(query: line)]
+        }
         let client = await AppServices.shared.session.client
         guard let client else { return [] }
         // Spoken phrase parameters arrive here (e.g. "Whiplash by

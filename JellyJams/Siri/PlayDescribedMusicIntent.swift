@@ -115,6 +115,20 @@ struct PlayDescribedMusicIntent: AppIntent, AudioPlaybackIntent {
         guard !phrase.isEmpty, songCount >= 1 else {
             throw AppIntentError(wrapping: SiriIntentError.noMatch(description.id))
         }
+        // Siri's generalisation is not a whitelist: a remembered lyric
+        // line sometimes binds here instead of to the lyric shortcut.
+        // The markers give it away, and the shared pipeline's lyric
+        // branch is the right endpoint for it.
+        if let line = LyricMatchPlaylist.phrase(in: phrase) {
+            _ = try await SiriPlayback.play(
+                LyricMatchPlaylist.candidate(query: line),
+                shuffleRequested: false,
+                queueLocation: nil,
+                player: services.player,
+                client: client
+            )
+            return .result()
+        }
         guard let destination = TextToTunes.currentDestination() else {
             // Signed in to Jellyfin but no backend address — the feature
             // this request is for does not exist on this install.

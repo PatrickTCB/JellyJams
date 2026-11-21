@@ -148,6 +148,12 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
         artist: String?,
         client: JellyfinService
     ) async throws -> [SiriCandidate] {
+        // A remembered lyric line ("that goes …", "with the lyrics …") is
+        // not a name: the markers ride along when Siri binds the request
+        // to a play template, and only the backend's lyric search can
+        // answer them — so they go straight to the lyric sentinel, ahead
+        // of any library search.
+        let lyricLine = name.flatMap(LyricMatchPlaylist.phrase(in:))
         switch mediaType {
         case .playlist:
             var found = try await SiriAudioSearch.search(kind: .playlist, matching: name ?? "", client: client)
@@ -163,9 +169,15 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
         case .artist:
             return try await SiriAudioSearch.search(kind: .artist, matching: artist ?? name ?? "", client: client)
         case .song:
+            if let lyricLine, let fallback = LyricMatchPlaylist.fallbackCandidate(for: lyricLine) {
+                return [fallback]
+            }
             return try await SiriAudioSearch.search(kind: .song, matching: Self.titleQuery(name, artist: artist), client: client)
         default:
             if let name {
+                if let lyricLine, let fallback = LyricMatchPlaylist.fallbackCandidate(for: lyricLine) {
+                    return [fallback]
+                }
                 let phrase = Self.titleQuery(name, artist: artist)
                 let found = try await SiriAudioSearch.search(matching: phrase, client: client)
                 if found.isEmpty, let fallback = TextToTunesPlaylist.fallbackCandidate(for: phrase) {
@@ -239,11 +251,12 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
 
     /// Turns a resolved identifier back into a full ``SiriCandidate``,
     /// rehydrating from the server so playback sees a fresh item. The
-    /// synthetic playlists pass through untouched — ``SiriPlayback`` applies
-    /// the user's setting when it sees the default id, and decodes the
-    /// phrase when it sees the Text to Tunes prefix. A missing or
-    /// unresolvable identifier falls back to the favourites shuffle, which
-    /// covers open-ended requests that skip resolution entirely.
+    /// synthetic items pass through untouched — ``SiriPlayback`` applies
+    /// the user's setting when it sees the default id, decodes the phrase
+    /// when it sees the Text to Tunes prefix, and decodes the lyric line
+    /// when it sees the lyric-match prefix. A missing or unresolvable
+    /// identifier falls back to the favourites shuffle, which covers
+    /// open-ended requests that skip resolution entirely.
     @MainActor
     private static func candidate(identifier: String?, client: JellyfinService) async throws -> SiriCandidate {
         if identifier == DefaultPlaybackPlaylist.id {
@@ -251,6 +264,9 @@ final class MediaIntentHandler: NSObject, INPlayMediaIntentHandling {
         }
         if let identifier, let phrase = TextToTunesPlaylist.query(in: identifier) {
             return TextToTunesPlaylist.candidate(query: phrase)
+        }
+        if let identifier, let phrase = LyricMatchPlaylist.query(in: identifier) {
+            return LyricMatchPlaylist.candidate(query: phrase)
         }
         guard let identifier,
               identifier != FavouriteSongsPlaylist.id,
