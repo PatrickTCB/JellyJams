@@ -460,6 +460,186 @@ final class LibraryRepositoryTests: XCTestCase {
         XCTAssertFalse(results.isEmpty)
     }
 
+    // MARK: - Search lyric matches
+
+    /// With a backend configured, the term goes to `/lyric-search` beside
+    /// the Jellyfin queries, capped at three songs, and the picks come back
+    /// as whole tracks in the backend's match order — even though the
+    /// Jellyfin server answered its ids query in its own order.
+    func testSearchAsksTheBackendForLyricMatchesBesideTheJellyfinQueries() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            let recorded = RecordedRequest(request)
+            if recorded.path == "/lyric-search" {
+                return (try emptyResponse(for: request, statusCode: 200), self.lyricSearchPayload(["lyric-1", "lyric-2"]))
+            }
+            if !recorded.values(for: "ids").isEmpty {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("lyric-2", "Audio"), ("lyric-1", "Audio")]))
+            }
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let results = try await TestFixtures.stubbedRepository()
+            .search(term: "hello darkness", lyricSearch: lyricDestination)
+
+        let lyricRequest = try XCTUnwrap(recorder.all.first { $0.path == "/lyric-search" })
+        XCTAssertEqual(lyricRequest.method, "GET")
+        XCTAssertEqual(lyricRequest.value(for: "userID"), "user-id")
+        XCTAssertEqual(lyricRequest.value(for: "query"), "hello darkness")
+        XCTAssertEqual(lyricRequest.value(for: "limit"), "3")
+        XCTAssertEqual(results.lyricMatches.compactMap(\.id), ["lyric-1", "lyric-2"], "The backend's match order leads")
+    }
+
+    /// Lyric matches are the top result, and a song that matched by both
+    /// lyrics and name is shown once — where it matched best.
+    func testLyricMatchesLeadTheSongsAndAppearOnlyOnce() async throws {
+        URLProtocolStub.handler = { request in
+            let recorded = RecordedRequest(request)
+            if recorded.path == "/lyric-search" {
+                return (try emptyResponse(for: request, statusCode: 200), self.lyricSearchPayload(["song-1", "lyric-1"]))
+            }
+            if !recorded.values(for: "ids").isEmpty {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("song-1", "Audio"), ("lyric-1", "Audio")]))
+            }
+            if recorded.values(for: "includeItemTypes") == ["Audio"] {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("song-1", "Audio"), ("song-2", "Audio")]))
+            }
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let results = try await TestFixtures.stubbedRepository()
+            .search(term: "x", lyricSearch: lyricDestination)
+
+        XCTAssertEqual(results.lyricMatches.compactMap(\.id), ["song-1", "lyric-1"])
+        XCTAssertEqual(results.songs.compactMap(\.id), ["song-2"])
+    }
+
+    /// No backend configured is the ordinary search: nothing is asked of
+    /// any backend, and the results carry no lyric section.
+    func testSearchWithoutABackendNeverAsksForLyricMatches() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let results = try await TestFixtures.stubbedRepository().search(term: "portishead")
+
+        XCTAssertTrue(recorder.all.allSatisfy { $0.path != "/lyric-search" })
+        XCTAssertTrue(results.lyricMatches.isEmpty)
+    }
+
+    /// The lyric side is a silent extra: a backend that cannot answer must
+    /// not cost the user the Jellyfin results they would have had anyway.
+    func testAFailedLyricSearchLeavesTheJellyfinResultsStanding() async throws {
+        URLProtocolStub.handler = { request in
+            let recorded = RecordedRequest(request)
+            if recorded.path == "/lyric-search" {
+                return (try emptyResponse(for: request, statusCode: 500), Data())
+            }
+            if recorded.values(for: "includeItemTypes") == ["Audio"] {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("song-1", "Audio")]))
+            }
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let results = try await TestFixtures.stubbedRepository()
+            .search(term: "x", lyricSearch: lyricDestination)
+
+        XCTAssertEqual(results.songs.compactMap(\.id), ["song-1"])
+        XCTAssertTrue(results.lyricMatches.isEmpty)
+    }
+
+    func testEmptyLyricPicksCostNoResolutionRequest() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { [recorder] request in
+            recorder.record(request)
+            let payload = RecordedRequest(request).path == "/lyric-search"
+                ? self.lyricSearchPayload([])
+                : emptyItemsPayload
+            return (try emptyResponse(for: request, statusCode: 200), payload)
+        }
+
+        let results = try await TestFixtures.stubbedRepository()
+            .search(term: "x", lyricSearch: lyricDestination)
+
+        XCTAssertTrue(results.lyricMatches.isEmpty)
+        XCTAssertTrue(recorder.all.allSatisfy { $0.values(for: "ids").isEmpty }, "Nothing picked is nothing to resolve")
+    }
+
+    /// One dead pick should not cost the whole answer — the same rule
+    /// queue extensions resolve by.
+    func testLyricPicksTheServerNoLongerKnowsAreDropped() async throws {
+        URLProtocolStub.handler = { request in
+            let recorded = RecordedRequest(request)
+            if recorded.path == "/lyric-search" {
+                return (try emptyResponse(for: request, statusCode: 200), self.lyricSearchPayload(["gone-1", "lyric-1"]))
+            }
+            if !recorded.values(for: "ids").isEmpty {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("lyric-1", "Audio")]))
+            }
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let results = try await TestFixtures.stubbedRepository()
+            .search(term: "x", lyricSearch: lyricDestination)
+
+        XCTAssertEqual(results.lyricMatches.compactMap(\.id), ["lyric-1"])
+    }
+
+    /// The dedup runs after the genre fold-in, so a genre-tagged song that
+    /// also matched by lyrics is deduplicated too.
+    func testLyricMatchesAreDeduplicatedAgainstGenreFoldedSongsToo() async throws {
+        URLProtocolStub.handler = { request in
+            let recorded = RecordedRequest(request)
+            if recorded.path == "/lyric-search" {
+                return (try emptyResponse(for: request, statusCode: 200), self.lyricSearchPayload(["tagged-1"]))
+            }
+            if !recorded.values(for: "ids").isEmpty {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("tagged-1", "Audio")]))
+            }
+            if recorded.path == "/jellyfin/Genres" {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("genre-1", "MusicGenre")]))
+            }
+            if !recorded.values(for: "genreIds").isEmpty, recorded.values(for: "includeItemTypes") == ["Audio"] {
+                return (try emptyResponse(for: request, statusCode: 200), itemsPayload([("tagged-1", "Audio"), ("tagged-2", "Audio")]))
+            }
+            return (try emptyResponse(for: request, statusCode: 200), emptyItemsPayload)
+        }
+
+        let results = try await TestFixtures.stubbedRepository()
+            .search(term: "shoegaze", lyricSearch: lyricDestination)
+
+        XCTAssertEqual(results.lyricMatches.compactMap(\.id), ["tagged-1"])
+        XCTAssertEqual(results.songs.compactMap(\.id), ["tagged-2"])
+    }
+
+    /// A term that matches only lyrics still has something to show.
+    func testSearchResultsWithOnlyLyricMatchesAreNotEmpty() {
+        let results = LibraryRepository.SearchResults(
+            lyricMatches: [TestFixtures.item(id: "lyric-1")]
+        )
+
+        XCTAssertFalse(results.isEmpty)
+    }
+
+    func testFoldingInLyricMatchesLeavesUnmatchedAndUnidentifiedSongsAlone() {
+        var results = LibraryRepository.SearchResults(
+            songs: [
+                TestFixtures.item(id: "song-1"),
+                TestFixtures.item(id: "song-2"),
+                BaseItemDto(name: "No ID", type: .audio)
+            ]
+        )
+
+        results.foldInLyricMatches([TestFixtures.item(id: "song-2")])
+
+        XCTAssertEqual(results.lyricMatches.compactMap(\.id), ["song-2"])
+        XCTAssertEqual(results.songs.compactMap(\.id), ["song-1"])
+        XCTAssertEqual(results.songs.count, 2, "A song without an id cannot be a duplicate")
+    }
+
     // MARK: - Genre contents
 
     /// One recursive request for both kinds, so the screen costs a single
@@ -797,6 +977,18 @@ final class LibraryRepositoryTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// A backend destination for the lyric side of a search, pointed at the
+    /// stub loader like every other backend test.
+    private var lyricDestination: BackendDestination {
+        BackendDestination(backend: TestFixtures.stubbedBackend(), userID: "user-id")
+    }
+
+    /// A `/lyric-search` body in the backend's own shape.
+    private func lyricSearchPayload(_ ids: [String]) -> Data {
+        let encoded = ids.map { "\"\($0)\"" }.joined(separator: ",")
+        return Data(#"{"MatchingTrackIDs":[\#(encoded)],"Count":\#(ids.count)}"#.utf8)
+    }
 
     /// Serves one page of playlists named after the given strings.
     private func stubPlaylists(_ names: [String]) {

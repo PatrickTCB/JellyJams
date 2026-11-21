@@ -1082,4 +1082,42 @@ final class JellyJamsBackendTests: XCTestCase {
         XCTAssertEqual(answer.newTrackIDs, ["x1", "x2"])
         XCTAssertEqual(answer.count, 2)
     }
+
+    // MARK: - Lyric search
+
+    /// `/lyric-search` is a GET whose term and song cap ride the query
+    /// string, answered with the ids of the songs whose lyrics match, best
+    /// match first. A drift on either side is a failure the search screen
+    /// swallows silently — lyric matches would simply stop appearing.
+    func testLyricSearchSendsTheQueryAndLimitAndReadsTheMatches() async throws {
+        let recorder = RequestRecorder()
+        URLProtocolStub.handler = { request in
+            recorder.record(request)
+            let response = try XCTUnwrap(
+                HTTPURLResponse(
+                    url: try XCTUnwrap(request.url),
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"MatchingTrackIDs":["lyric-1","lyric-2"],"Count":2}"#.utf8))
+        }
+
+        let answer = try await TestFixtures.stubbedBackend().lyricSearch(
+            userID: "user-id",
+            query: "hello darkness my old friend",
+            limit: 3
+        )
+
+        let request = try XCTUnwrap(recorder.all.first)
+        XCTAssertEqual(request.method, "GET")
+        XCTAssertEqual(request.path, "/lyric-search")
+        XCTAssertEqual(request.value(for: "userID"), "user-id")
+        XCTAssertEqual(request.value(for: "query"), "hello darkness my old friend")
+        XCTAssertEqual(request.value(for: "limit"), "3")
+        XCTAssertTrue(request.body.isEmpty)
+        XCTAssertEqual(answer.matchingTrackIDs, ["lyric-1", "lyric-2"])
+        XCTAssertEqual(answer.count, 2)
+    }
 }
