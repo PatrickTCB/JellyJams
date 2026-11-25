@@ -163,7 +163,12 @@ struct JellyJamsBackendSettingsView: View {
             }
         }
         .environment(navigator)
+        #if os(tvOS)
+        .frame(minWidth:1280, idealWidth: 1920, minHeight: 720, idealHeight: 1080)
+        .padding()
+        #else
         .frame(minWidth: 300, minHeight: 420, idealHeight: 800)
+        #endif
         .task { await refresh() }
         .remotePlayPause()
         #if os(macOS)
