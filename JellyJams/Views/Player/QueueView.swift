@@ -64,7 +64,11 @@ struct QueueView: View {
                 }
             }
         }
+        #if os(tvOS)
+        .frame(minWidth:1280, idealWidth: 1920, minHeight: 720, idealHeight: 1080)
+        #else
         .frame(minWidth: 360, minHeight: 420)
+        #endif
         .remotePlayPause()
     }
 
