@@ -21,9 +21,10 @@ struct PlayerView: View {
     @State private var isPresentingLyrics = false
     #if os(tvOS)
     /// Whether the scrubber row holds the remote's focus, so it can show a
-    /// highlight while left/right seeks through the track.
+    /// highlight and so leaving the row mid-scrub commits the pending seek.
     @FocusState private var isScrubberFocused: Bool
-    /// How far each left/right press seeks while the scrubber holds focus.
+    /// How far each left/right press moves the playhead while the scrubber
+    /// holds focus.
     private static let remoteSeekStep: Double = 10
     #endif
 
@@ -134,14 +135,54 @@ struct PlayerView: View {
     }
 
     private var scrubber: some View {
+        #if os(tvOS)
+        // tvOS has no Slider, so the bar is a focusable button that stands in
+        // for one: select grabs the playhead (scrub mode), left/right moves it,
+        // and select again releases it into a seek — the remote's analogue of
+        // dragging the iOS slider. Outside scrub mode, left/right is a quick
+        // skip. The system Now Playing overlay still offers its own scrubbing.
+        Button {
+            if isScrubbing {
+                player.seek(to: scrubTime)
+                isScrubbing = false
+            } else {
+                scrubTime = clock.currentTime
+                isScrubbing = true
+            }
+        } label: {
+            VStack(spacing: 4) {
+                ProgressView(value: isScrubbing ? scrubTime : clock.currentTime, total: max(clock.duration, 0.1))
+                    .frame(maxWidth: .infinity)
+                    .tint(isScrubbing ? Color.white : Color.accentColor)
+                scrubberTimes
+            }
+            .padding(.horizontal)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.quaternary)
+                .opacity(isScrubberFocused ? 1 : 0)
+        )
+        .focused($isScrubberFocused)
+        .onMoveCommand { direction in
+            switch direction {
+            case .left: moveScrubber(by: -Self.remoteSeekStep)
+            case .right: moveScrubber(by: Self.remoteSeekStep)
+            default: break
+            }
+        }
+        // Leaving the row mid-scrub commits the pending position, like letting
+        // go of the slider.
+        .onChange(of: isScrubberFocused) { _, focused in
+            if !focused, isScrubbing {
+                player.seek(to: scrubTime)
+                isScrubbing = false
+            }
+        }
+        .remoteFocusSection()
+        #else
         VStack(spacing: 4) {
-            #if os(tvOS)
-            // tvOS has no Slider. The bar is a focusable row of its own:
-            // left/right on the remote seeks while it holds focus, and the
-            // system Now Playing overlay still offers its own scrubbing.
-            ProgressView(value: clock.currentTime, total: max(clock.duration, 0.1))
-                .frame(maxWidth: .infinity)
-            #else
             Slider(
                 value: Binding(
                     get: { isScrubbing ? scrubTime : clock.currentTime },
@@ -158,34 +199,36 @@ struct PlayerView: View {
                     }
                 }
             )
-            #endif
-            HStack {
-                Text(Format.duration(isScrubbing ? scrubTime : clock.currentTime))
-                Spacer()
-                Text(Format.duration(clock.duration))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+            scrubberTimes
         }
         .padding(.horizontal)
-        #if os(tvOS)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.quaternary)
-                .opacity(isScrubberFocused ? 1 : 0)
-        )
-        .focusable()
-        .focused($isScrubberFocused)
-        .onMoveCommand { direction in
-            switch direction {
-            case .left: player.seek(to: clock.currentTime - Self.remoteSeekStep)
-            case .right: player.seek(to: clock.currentTime + Self.remoteSeekStep)
-            default: break
-            }
-        }
-        #endif
         .remoteFocusSection()
+        #endif
     }
+
+    /// The elapsed/total readout under the bar. While scrubbing it names the
+    /// pending position, not the clock's.
+    private var scrubberTimes: some View {
+        HStack {
+            Text(Format.duration(isScrubbing ? scrubTime : clock.currentTime))
+            Spacer()
+            Text(Format.duration(clock.duration))
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+    }
+
+    #if os(tvOS)
+    /// A left/right press on the focused scrubber: while scrubbing it moves the
+    /// pending playhead (committed on release); otherwise it seeks at once.
+    private func moveScrubber(by delta: Double) {
+        if isScrubbing {
+            scrubTime = max(0, min(scrubTime + delta, clock.duration))
+        } else {
+            player.seek(to: clock.currentTime + delta)
+        }
+    }
+    #endif
 
     private var transport: some View {
         HStack(spacing: 40) {
