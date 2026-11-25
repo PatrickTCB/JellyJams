@@ -19,6 +19,13 @@ struct PlayerView: View {
     @State private var scrubTime: Double = 0
     @State private var showingQueue = false
     @State private var isPresentingLyrics = false
+    #if os(tvOS)
+    /// Whether the scrubber row holds the remote's focus, so it can show a
+    /// highlight while left/right seeks through the track.
+    @FocusState private var isScrubberFocused: Bool
+    /// How far each left/right press seeks while the scrubber holds focus.
+    private static let remoteSeekStep: Double = 10
+    #endif
 
     var body: some View {
         #if os(tvOS)
@@ -60,6 +67,12 @@ struct PlayerView: View {
                 .ignoresSafeArea()
         )
         .remotePlayPause()
+        // The cover raises the queue and lyrics sheets too. These live on the
+        // tvOS branch as well as the non-tvOS one below: attached only there,
+        // the TV's lyrics and queue buttons set their flags with nothing
+        // watching them, so a press appears to do nothing.
+        .sheet(isPresented: $showingQueue) { QueueView() }
+        .sheet(isPresented: $isPresentingLyrics) { LyricsView() }
         #else
         VStack(spacing: 24) {
             handle
@@ -114,14 +127,20 @@ struct PlayerView: View {
                 FavouriteButton(item: item, size: .title3)
             }
         }
+        // One focus row: up/down leaves it through its full-width frame, so
+        // the remote reaches the scrubber below even though no control sits
+        // directly beneath the edge-pinned Dismiss and Favourite buttons.
+        .remoteFocusSection()
     }
 
     private var scrubber: some View {
         VStack(spacing: 4) {
             #if os(tvOS)
-            // tvOS has no Slider; seeking happens on the Siri Remote and in
-            // the system Now Playing overlay. Show progress read-only here.
+            // tvOS has no Slider. The bar is a focusable row of its own:
+            // left/right on the remote seeks while it holds focus, and the
+            // system Now Playing overlay still offers its own scrubbing.
             ProgressView(value: clock.currentTime, total: max(clock.duration, 0.1))
+                .frame(maxWidth: .infinity)
             #else
             Slider(
                 value: Binding(
@@ -149,6 +168,23 @@ struct PlayerView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal)
+        #if os(tvOS)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.quaternary)
+                .opacity(isScrubberFocused ? 1 : 0)
+        )
+        .focusable()
+        .focused($isScrubberFocused)
+        .onMoveCommand { direction in
+            switch direction {
+            case .left: player.seek(to: clock.currentTime - Self.remoteSeekStep)
+            case .right: player.seek(to: clock.currentTime + Self.remoteSeekStep)
+            default: break
+            }
+        }
+        #endif
+        .remoteFocusSection()
     }
 
     private var transport: some View {
@@ -173,6 +209,7 @@ struct PlayerView: View {
             .buttonStyle(.plain)
             .disabled(!player.canGoNext)
         }
+        .remoteFocusSection()
     }
 
     @ViewBuilder private var secondaryControls: some View {
@@ -237,5 +274,6 @@ struct PlayerView: View {
             .buttonStyle(.plain)
         }
         .font(.title3)
+        .remoteFocusSection()
     }
 }
