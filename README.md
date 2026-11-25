@@ -9,6 +9,7 @@ A native **SwiftUI** music client for [Jellyfin](https://jellyfin.org), running 
 the app updates itself via [Sparkle](https://sparkle-project.org).
 
 **iOS:** Get it on the App Store. I also aspire to have it on AltStore.
+
 **tvOS:** Get it on the App Store.
 
 <a href="https://apps.apple.com/us/app/jelly-jams-music/id6804514014" target="_blank">
