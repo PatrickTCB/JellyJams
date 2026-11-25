@@ -70,7 +70,9 @@ struct TrackRow: View {
 
     private var isCurrent: Bool { player.currentItem?.id == track.id }
     private var isFavourite: Bool { favourites.isFavourite(track) }
+    #if !os(tvOS)
     private var isDownloaded: Bool { downloads.isDownloaded(track) }
+    #endif
 
     var body: some View {
         playTarget
@@ -161,6 +163,9 @@ struct TrackRow: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+            #if !os(tvOS)
+            // No download badges on tvOS: the system can purge anything
+            // downloaded without warning, so the feature is hidden there.
             if downloads.isBusy(track) {
                 ProgressView()
                     .controlSize(.small)
@@ -169,6 +174,7 @@ struct TrackRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            #endif
             Text(Format.duration(track.runtimeSeconds))
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -242,7 +248,9 @@ struct TrackRow: View {
     /// Whether every track the menu acts on is favourited — the menu then
     /// removes the favourite from all; otherwise it adds the missing ones.
     private var allFavourite: Bool { contextTracks.allSatisfy(favourites.isFavourite) }
+    #if !os(tvOS)
     private var allDownloaded: Bool { contextTracks.allSatisfy(downloads.isDownloaded) }
+    #endif
 
     @ViewBuilder private var contextMenu: some View {
         Button { onPlay() } label: { Label("Play", systemImage: "play.fill") }
@@ -312,6 +320,7 @@ struct TrackRow: View {
                   systemImage: allFavourite ? "heart.slash" : "heart")
         }
         .disabled(contextTracks.contains { favourites.isBusy($0) })
+        #if !os(tvOS)
         Divider()
         Button {
             if allDownloaded {
@@ -328,6 +337,7 @@ struct TrackRow: View {
             )
         }
         .disabled(contextTracks.contains { downloads.isBusy($0) })
+        #endif
     }
 
     /// Favourites every track the menu acts on: removes the favourite from

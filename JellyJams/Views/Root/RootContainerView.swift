@@ -8,7 +8,9 @@ struct RootContainerView: View {
     @Environment(SessionStore.self) private var session
     @Environment(PlayerController.self) private var player
     @Environment(FavouriteStore.self) private var favourites
+    #if !os(tvOS)
     @Environment(DownloadStore.self) private var downloads
+    #endif
     @Environment(PlaylistStore.self) private var playlistStore
     @Environment(BanStore.self) private var bans
     @Environment(\.scenePhase) private var scenePhase
@@ -70,6 +72,9 @@ struct RootContainerView: View {
         } message: {
             Text(favourites.errorMessage ?? "")
         }
+        #if !os(tvOS)
+        // No download errors on tvOS: downloads are hidden there, the system
+        // being free to purge anything saved without warning.
         .alert(
             "Download Problem",
             isPresented: Binding(
@@ -81,6 +86,7 @@ struct RootContainerView: View {
         } message: {
             Text(downloads.errorMessage ?? "")
         }
+        #endif
         // Playlist writes are raised from context menus that are on their way
         // out by the time the request fails, so the alert is hosted here on a
         // view that stays put rather than on the affordance itself.

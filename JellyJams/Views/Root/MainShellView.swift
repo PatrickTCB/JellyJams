@@ -17,7 +17,9 @@ struct MainShellView: View {
     @Environment(SessionStore.self) private var session
     @Environment(PlayerController.self) private var player
     @Environment(PlayerPresentation.self) private var playerPresentation
+    #if !os(tvOS)
     @Environment(DownloadStore.self) private var downloads
+    #endif
     @Environment(PreferencesStore.self) private var preferences
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -46,9 +48,15 @@ struct MainShellView: View {
             // for the settings sheet's own reason: a sheet owned by a
             // toolbar item dies with the tab bar teardown on iOS.
             .sheet(isPresented: $isPresentingTextToTunes) { TextToTunesSheet() }
+            #if !os(tvOS)
+            // Losing the server moves the listener to their downloaded music.
+            // tvOS has no Downloads section — the system can purge anything
+            // downloaded without warning — so there it leaves them where they
+            // are instead.
             .onChange(of: session.serverReachable, initial: true) { _, reachable in
                 if !reachable { selection = .downloads }
             }
+            #endif
             // Losing the registration removes Mixtapes from under the
             // selection; left alone the shell would be showing a destination
             // that no longer exists.
@@ -176,6 +184,10 @@ struct MainShellView: View {
             Tab(LibrarySection.favorites.title, systemImage: LibrarySection.favorites.systemImage, value: LibrarySection.favorites) {
                 sectionTab(.favorites)
             }
+            #if !os(tvOS)
+            // No Downloads section on tvOS: the system can delete anything the
+            // user downloads without warning and without recourse, so the
+            // feature is not offered there at all.
             Tab(value: LibrarySection.downloads) {
                 LibraryNavigationStack {
                     DownloadsView()
@@ -183,7 +195,6 @@ struct MainShellView: View {
             } label: {
                 downloadsLabel
             }
-            #if !os(tvOS)
             .badge(downloads.remainingDownloadCount)
             #endif
             Tab(LibrarySection.search.title, systemImage: LibrarySection.search.systemImage, value: LibrarySection.search) {
@@ -244,6 +255,7 @@ struct MainShellView: View {
         }
     }
 
+    #if !os(tvOS)
     /// The Downloads tab icon: a live progress ring while batches run, the
     /// usual down-arrow otherwise.
     private var downloadsLabel: some View {
@@ -257,4 +269,5 @@ struct MainShellView: View {
             }
         }
     }
+    #endif
 }

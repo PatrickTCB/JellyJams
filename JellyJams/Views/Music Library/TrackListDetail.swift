@@ -422,34 +422,18 @@ struct TrackListDetail: View {
             // The top bar's actions live here on tvOS: toolbar items sit in a
             // focus environment the remote cannot reach from the list, so
             // they join the header's controls, where left/right finds them —
-            // the same arrangement the artist page's header uses.
+            // the same arrangement the artist page's header uses. No download
+            // toggle: tvOS can purge downloaded files without warning, so the
+            // feature is hidden there — and with no Downloads section, no
+            // downloaded collection ever opens to need its refresh either.
             FavouriteButton(item: headerItem)
-            DownloadButton(item: headerItem)
-            if !downloaded {
-                Button {
-                    Task { await reload() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .help("Refresh")
+            Button {
+                Task { await reload() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
             }
-            if downloaded && headerItem.itemType == .playlist {
-                Button {
-                    downloads.refreshPlaylist(headerItem.id ?? "")
-                } label: {
-                    if downloads.isBusy(headerItem) {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!session.serverReachable || downloads.isBusy(headerItem))
-                .help(session.serverReachable
-                    ? "Check this playlist for new songs"
-                    : "Connect to your server to check this playlist for new songs")
-            }
+            .buttonStyle(.bordered)
+            .help("Refresh")
             #endif
         }
     }

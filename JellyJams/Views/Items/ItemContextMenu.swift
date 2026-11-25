@@ -136,6 +136,9 @@ struct ItemContextMenu: ViewModifier {
             }
         }
 
+        #if !os(tvOS)
+        // No download actions on tvOS: the system can purge anything
+        // downloaded without warning, so the feature is hidden there.
         Divider()
         Button {
             if downloads.isDownloaded(item) {
@@ -150,6 +153,7 @@ struct ItemContextMenu: ViewModifier {
             )
         }
         .disabled(downloads.isBusy(item))
+        #endif
 
         if isPlaylist {
             Divider()
