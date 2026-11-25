@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(tvOS)
+import UIKit
+#endif
 
 /// A song's lyrics, read along with it: one line per row, with the line being
 /// sung highlighted and kept in view.
@@ -48,13 +51,35 @@ struct LyricsView: View {
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #endif
+                #if os(tvOS)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                #else
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
+                #endif
         }
+        
+        #if os(tvOS)
+        .frame(minWidth:1280, idealWidth: 1920, minHeight: 720, idealHeight: 1080)
+        // The sheet's own backdrop is translucent on tvOS, letting the player
+        // show through the lines. An opaque surface following the TV's
+        // light/dark appearance stands in for it — tvOS has no
+        // UIColor.systemBackground, so the dynamic provider fills in, the same
+        // arrangement the full-screen player uses.
+        .background(
+            Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
+                .ignoresSafeArea()
+        )
+        #else
         .frame(minWidth: 360, minHeight: 420)
+        #endif
         .task(id: item?.id) {
             // Kept while the new track's load runs, the last track's lines
             // would be read against the new track's clock.
