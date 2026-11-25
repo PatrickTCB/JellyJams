@@ -1108,12 +1108,13 @@ final class PlayerController {
 
     // MARK: - Audio session
 
-    /// Serial queue for audio-session activation/deactivation.
+    /// Serial queue for audio-session configuration, activation/deactivation.
     ///
-    /// `AVAudioSession.setActive` can block while it coordinates with the audio
-    /// system, so it must not run on the main thread. A serial queue also keeps
-    /// a rapid play-then-stop ordered: the deactivation can't overtake the
-    /// activation that was submitted first.
+    /// `AVAudioSession.setCategory` and `setActive` can block while they
+    /// coordinate with the audio system, so they must not run on the main
+    /// thread. A serial queue also keeps the calls ordered: the category set at
+    /// init lands before the first activation, and a rapid play-then-stop can't
+    /// see the deactivation overtake the activation that was submitted first.
     private let audioSessionQueue = DispatchQueue(label: "net.aseriesoftubes.JellyJams.audioSession", qos: .userInitiated)
 
     /// Every path that starts the `AVPlayer` goes through here, so the audio
@@ -1131,16 +1132,23 @@ final class PlayerController {
     /// free. Activation is the part that silences whatever else is playing,
     /// which is why it is deferred to ``activateAudioSession()``.
     ///
+    /// Setting the category can block like activation does — the system flags
+    /// it as a hang risk on the main thread while the session is active — so it
+    /// rides ``audioSessionQueue`` too, which keeps it ordered before the first
+    /// activation.
+    ///
     /// On tvOS the non-mixable `.playback` category is also what qualifies the
     /// app as a Now Playing app: with the `audio` background mode declared, it
     /// lets playback continue under the screen saver and the idle-time Now
     /// Playing overlay, and populates Control Centre's Now Playing tile.
     private func prepareAudioSession() {
         #if os(iOS) || os(tvOS)
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-        } catch {
-            playbackLogger.error("Could not set audio session category: \(error.localizedDescription, privacy: .public)")
+        audioSessionQueue.async {
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            } catch {
+                playbackLogger.error("Could not set audio session category: \(error.localizedDescription, privacy: .public)")
+            }
         }
         #endif
     }
