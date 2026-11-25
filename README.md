@@ -3,12 +3,13 @@
 ![Logo for Jelly Jams App. A casette tape that says Jelly Jams in a hand written stye](JellyJams/Resources/Assets.xcassets/macOS.appiconset/JellyJam-iOS-Default-128x128@2x.png)
 
 A native **SwiftUI** music client for [Jellyfin](https://jellyfin.org), running on
-**macOS**, **iPadOS**, and **iOS** from a single multiplatform target.
+**macOS**, **iPadOS**, **iOS**, and **tvOS** from a single multiplatform target.
 
 **macOS:** download the latest [release](https://github.com/PatrickTCB/JellyJams/releases) —
 the app updates itself via [Sparkle](https://sparkle-project.org).
 
 **iOS:** Get it on the App Store. I also aspire to have it on AltStore.
+**tvOS:** Get it on the App Store.
 
 <a href="https://apps.apple.com/us/app/jelly-jams-music/id6804514014" target="_blank">
     <img src="./AppStore.png"
@@ -80,7 +81,7 @@ meant to make browsing your library with the keyboard a breeze.
 * **[XcodeGen](https://github.com/yonaskolb/XcodeGen)** — `brew install xcodegen`
 * A **Jellyfin server**. The pinned SDK is generated from the **Jellyfin 12** API, so a
   Jellyfin 12 server is expected.
-* Deployment targets are **macOS 27** and **iOS/iPadOS 27**
+* Deployment targets are **macOS 27**, **iOS/iPadOS 27**, and **tvOS 27**
 
 ## Building
 
