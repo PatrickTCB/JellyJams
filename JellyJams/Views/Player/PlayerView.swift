@@ -13,6 +13,7 @@ struct PlayerView: View {
     @Environment(PlaybackClock.self) private var clock
     @Environment(DownloadStore.self) private var downloads
     @Environment(PreferencesStore.self) private var preferences
+    @Environment(QueueExtender.self) private var queueExtender
     @Environment(\.dismiss) private var dismiss
 
     @State private var isScrubbing = false
@@ -284,7 +285,7 @@ struct PlayerView: View {
             // for. Plain like the queue's button, which also raises a sheet —
             // the tint in this row marks the modes that are on.
             Button { isPresentingLyrics = true } label: {
-                Image(systemName: "music.microphone")
+                Image(systemName: "quote.bubble")
             }
             .buttonStyle(.plain)
             .disabled(!(player.currentItem?.supportsLyrics ?? false))
@@ -304,12 +305,17 @@ struct PlayerView: View {
             // The same preference in the backend settings sheet's toggle edits —
             // Infinite Queue is one switch with two handles. Lit while on;
             // when the backend cannot be reached it simply does nothing rather
-            // than refusing the tap.
-            Button { preferences.infiniteQueueEnabled.toggle() } label: {
-                Image(systemName: "infinity")
-                    .foregroundStyle(preferences.infiniteQueueEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            // than refusing the tap. With no backend configured to extend
+            // against there is nothing to switch at all, so the button stands
+            // down (``QueueExtender/canExtend``) — the same standing-down the
+            // Ban menu observes.
+            if queueExtender.canExtend {
+                Button { preferences.infiniteQueueEnabled.toggle() } label: {
+                    Image(systemName: "infinity")
+                        .foregroundStyle(preferences.infiniteQueueEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             Button { showingQueue = true } label: {
                 Image(systemName: "list.bullet")

@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// What Infinite Queue asks the backend for when the queue runs short.
 ///
@@ -90,6 +91,7 @@ enum QueueExtensionPlan: Equatable, Sendable {
 /// Configured from ``AppServices`` alongside ``BanStore``, from the same
 /// session and settings.
 @MainActor
+@Observable
 final class QueueExtender {
     /// How many of the queue's ids seed one alchemy request. The queue of a
     /// long-running Infinite Queue listen grows without bound, and every id in
@@ -97,17 +99,20 @@ final class QueueExtender {
     /// what is coming up — is the part that describes the listen right now.
     static let sourceSongLimit = 50
 
-    private var userID: String?
+    /// Whether the backend can extend a queue at all right now. The player's
+    /// Infinite Queue button asks this before offering itself, so nobody can
+    /// reach a switch that has nowhere to go — the same standing-down the
+    /// "Ban" menus observe through ``BanStore/canBan``.
+    private(set) var canExtend = false
+
+    @ObservationIgnored private var userID: String?
     /// The saved backend address, normalised — nil while there is no address,
     /// it will not parse, or the account has never registered.
-    private var backendURL: URL?
-    private var deviceInfo: DeviceInfo?
+    @ObservationIgnored private var backendURL: URL?
+    @ObservationIgnored private var deviceInfo: DeviceInfo?
     /// Passed through to every client the extender builds. Production leaves
     /// it nil; tests install their stub loader with it.
-    private var sessionConfiguration: URLSessionConfiguration?
-
-    /// Whether the backend can extend a queue at all right now.
-    var canExtend: Bool { userID != nil && backendURL != nil }
+    @ObservationIgnored private var sessionConfiguration: URLSessionConfiguration?
 
     func configure(
         userID: String?,
@@ -122,6 +127,7 @@ final class QueueExtender {
             : nil
         self.deviceInfo = deviceInfo
         self.sessionConfiguration = sessionConfiguration
+        canExtend = userID != nil && backendURL != nil
     }
 
     /// The tracks one extension adds, in the order they should play.

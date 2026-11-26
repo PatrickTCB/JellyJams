@@ -309,7 +309,7 @@ struct TrackRow: View {
                 }
             }
             Button { presentLyrics() } label: {
-                Label("View Lyrics", systemImage: "music.microphone")
+                Label("View Lyrics", systemImage: "quote.bubble")
             }
             .disabled(!track.supportsLyrics)
         }

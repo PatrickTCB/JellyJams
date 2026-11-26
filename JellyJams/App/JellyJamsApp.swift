@@ -74,6 +74,7 @@ struct JellyJamsApp: App {
                 .environment(services.libraryCache)
                 .environment(services.favourites)
                 .environment(services.bans)
+                .environment(services.queueExtender)
                 .environment(services.settingsPresentation)
                 .environment(services.preferences)
                 .environment(services.downloads)

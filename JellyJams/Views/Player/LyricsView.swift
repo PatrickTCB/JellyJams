@@ -108,7 +108,7 @@ struct LyricsView: View {
                 }
             }
         } else if timeline.isEmpty {
-            ContentUnavailableView("No Lyrics", systemImage: "music.microphone")
+            ContentUnavailableView("No Lyrics", systemImage: "quote.bubble")
         }
     }
 
