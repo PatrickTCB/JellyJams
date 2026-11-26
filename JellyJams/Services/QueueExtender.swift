@@ -84,10 +84,10 @@ enum QueueExtensionPlan: Equatable, Sendable {
 /// short: the backend's next album for an album listen, or its alchemy picks
 /// for any other, resolved into whole items ready to queue.
 ///
-/// What the backend can extend for follows the same rule bans do — a signed-in
-/// account, a saved address that parses, and a registration — because both
-/// endpoints key off the `userID` that a completed Quick Connect flow put
-/// on the backend's books.
+/// What the backend can extend for is the shared ``BackendAccount`` rule —
+/// a signed-in account, a registration, and a saved address that parses —
+/// because both endpoints key off the `userID` that a completed Quick
+/// Connect flow put on the backend's books. Bans read the same rule.
 /// Configured from ``AppServices`` alongside ``BanStore``, from the same
 /// session and settings.
 @MainActor
@@ -99,16 +99,16 @@ final class QueueExtender {
     /// what is coming up — is the part that describes the listen right now.
     static let sourceSongLimit = 50
 
-    /// Whether the backend can extend a queue at all right now. The player's
-    /// Infinite Queue button asks this before offering itself, so nobody can
-    /// reach a switch that has nowhere to go — the same standing-down the
-    /// "Ban" menus observe through ``BanStore/canBan``.
+    /// Whether the backend can extend a queue at all right now — the shared
+    /// ``BackendAccount`` rule (signed in, registered, an address that parses).
+    /// The player's Infinite Queue button asks this before offering itself, so
+    /// nobody can reach a switch that has nowhere to go — the same
+    /// standing-down the "Ban" menus observe through ``BanStore/canBan``.
     private(set) var canExtend = false
 
-    @ObservationIgnored private var userID: String?
-    /// The saved backend address, normalised — nil while there is no address,
-    /// it will not parse, or the account has never registered.
-    @ObservationIgnored private var backendURL: URL?
+    /// The account every fetch speaks as, resolved through the one shared
+    /// rule — nil while there is no backend account to extend a queue with.
+    @ObservationIgnored private var account: BackendAccount?
     @ObservationIgnored private var deviceInfo: DeviceInfo?
     /// Passed through to every client the extender builds. Production leaves
     /// it nil; tests install their stub loader with it.
@@ -121,13 +121,10 @@ final class QueueExtender {
         deviceInfo: DeviceInfo,
         sessionConfiguration: URLSessionConfiguration? = nil
     ) {
-        self.userID = userID
-        self.backendURL = registered
-            ? (try? JellyJamsBackend.normalizeAddress(address))
-            : nil
+        account = BackendAccount(userID: userID, address: address, registered: registered)
         self.deviceInfo = deviceInfo
         self.sessionConfiguration = sessionConfiguration
-        canExtend = userID != nil && backendURL != nil
+        canExtend = account != nil
     }
 
     /// The tracks one extension adds, in the order they should play.
@@ -142,16 +139,16 @@ final class QueueExtender {
         existingQueueIDs: [String],
         client: JellyfinService
     ) async throws -> [BaseItemDto] {
-        guard let backend = makeBackend(), let userID else {
+        guard let backend = makeBackend(), let account else {
             throw BackendError.notSignedIn
         }
         let answer: BackendExtendedQueue
         switch plan {
         case .album(let albumID):
-            answer = try await backend.extendQueueByAlbum(userID: userID, currentAlbumID: albumID)
+            answer = try await backend.extendQueueByAlbum(userID: account.userID, currentAlbumID: albumID)
         case .general:
             let sources = Array(existingQueueIDs.suffix(Self.sourceSongLimit))
-            answer = try await backend.extendQueue(userID: userID, existingQueue: sources)
+            answer = try await backend.extendQueue(userID: account.userID, existingQueue: sources)
         }
         guard !answer.newTrackIDs.isEmpty else { return [] }
         return try await client.tracks(byIds: answer.newTrackIDs)
@@ -160,9 +157,9 @@ final class QueueExtender {
     /// The client for the address the extender points at, built per fetch,
     /// the way ``BanStore`` builds one per send.
     private func makeBackend() -> JellyJamsBackend? {
-        guard let backendURL, let deviceInfo else { return nil }
+        guard let account, let deviceInfo else { return nil }
         return JellyJamsBackend(
-            baseURL: backendURL,
+            baseURL: account.baseURL,
             deviceInfo: deviceInfo,
             sessionConfiguration: sessionConfiguration
         )

@@ -126,15 +126,17 @@ struct BannedItem: Identifiable, Equatable, Sendable {
 /// stored bans against the ids every candidate song carries, so banning an
 /// artist removes that artist's whole output from the playlists it generates,
 /// and the app resolves nothing to send it. What the backend *can* take a ban
-/// from follows the settings rather than the library: a signed-in account, a
-/// saved address, and a registration — an app that never registered has no
-/// backend account to ban with.
+/// from is the shared ``BackendAccount`` rule — a signed-in account, a
+/// registration, and a saved address that parses — rather than anything in
+/// the library: an app that never registered has no backend account to ban
+/// with. Infinite Queue reads the same rule.
 @MainActor
 @Observable
 final class BanStore {
-    /// Whether the "Ban" menus have everything a `POST /ban` needs. Menus
-    /// ask this before offering themselves, so nobody can reach an action
-    /// that has nowhere to go.
+    /// Whether the "Ban" menus have everything a `POST /ban` needs — the
+    /// shared ``BackendAccount`` rule (signed in, registered, an address that
+    /// parses). Menus ask this before offering themselves, so nobody can
+    /// reach an action that has nowhere to go.
     private(set) var canBan = false
     /// Errors raised by ban actions in context menus. The menu is usually on
     /// its way out by the time the request fails, so these are hosted by the
@@ -154,10 +156,14 @@ final class BanStore {
     /// context-menu sends whose failures the root alert hosts.
     private(set) var listErrorMessage: String?
 
+    /// The raw signed-in user, kept independently of the registration so the
+    /// generation guard below can spot an account change even while the
+    /// backend account is unresolved.
     @ObservationIgnored private var userID: String?
-    /// The saved backend address, normalised — nil while there is no
-    /// address, it will not parse, or the account has never registered.
-    @ObservationIgnored private var backendURL: URL?
+    /// The account every send speaks as, resolved through the shared
+    /// ``BackendAccount`` rule — nil while there is no backend account to
+    /// ban with.
+    @ObservationIgnored private var account: BackendAccount?
     @ObservationIgnored private var deviceInfo: DeviceInfo?
     /// Passed through to every client the store builds. Production leaves
     /// it nil; tests install their stub loader with it.
@@ -200,17 +206,15 @@ final class BanStore {
         // is why this watches the registration rather than the parsed URL.
         // Retiring the generation strands any read the old state had in
         // flight.
-        if userID != self.userID || (!registered && backendURL != nil) {
+        if userID != self.userID || (!registered && self.account != nil) {
             loadGeneration = UUID()
             clearLists()
         }
         self.userID = userID
-        self.backendURL = registered
-            ? (try? JellyJamsBackend.normalizeAddress(address))
-            : nil
+        account = BackendAccount(userID: userID, address: address, registered: registered)
         self.deviceInfo = deviceInfo
         self.sessionConfiguration = sessionConfiguration
-        canBan = userID != nil && backendURL != nil
+        canBan = account != nil
     }
 
     /// Bans each id with `POST /ban`, one request per item — the endpoint
@@ -316,9 +320,9 @@ final class BanStore {
 
     /// The client for the address the store points at, built per send.
     private func makeBackend() -> JellyJamsBackend? {
-        guard let backendURL, let deviceInfo else { return nil }
+        guard let account, let deviceInfo else { return nil }
         return JellyJamsBackend(
-            baseURL: backendURL,
+            baseURL: account.baseURL,
             deviceInfo: deviceInfo,
             sessionConfiguration: sessionConfiguration
         )
