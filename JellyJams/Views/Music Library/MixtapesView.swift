@@ -46,11 +46,14 @@ struct MixtapesView: View {
             newMixtapeButton
         }
         .refreshToolbarItem { await model.reload() }
+        #if !os(tvOS)
         .toolbar {
             // The backend's own controls, beside the playlists they manage:
             // what tapes are set up (a read), and a new one (a write) —
             // the plus last, as on Playlists, with the tape list to its
             // left.
+            // So far, I don't have a good UI idea for making or managing
+            // mixtapes on tvOS. Therefore we disable the option for now.
             ToolbarItem {
                 configuredTapesButton
             }
@@ -58,6 +61,7 @@ struct MixtapesView: View {
                 newMixtapeButton
             }
         }
+        #endif
         .sheet(isPresented: $isComposingTape) { MixtapeComposer() }
         .sheet(isPresented: $isShowingConfiguredTapes) { ConfiguredTapes() }
         .task(id: query) { await model.load(query, from: session.library) }
