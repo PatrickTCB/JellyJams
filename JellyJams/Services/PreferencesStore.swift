@@ -256,9 +256,13 @@ final class PreferencesStore {
         return suffix.isEmpty ? nil : suffix
     }
 
-    /// Whether the app has a registration to work from — what decides if the
-    /// Mixtapes section appears at all.
-    var isMixtapesActive: Bool { suffixToMatch != nil }
+    /// Whether a Jelly Jams Backend connection exists — a registration is on
+    /// the books. This is the one state every backend-dependent behaviour
+    /// gates on: the Mixtapes section, the player's Infinite Queue button,
+    /// and the account-keyed services alike. The shell only renders while
+    /// signed in and a saved address is always normalised, so the registration
+    /// alone is the question these controls ask.
+    var isBackendConfigured: Bool { suffixToMatch != nil }
 
     /// The playlist-name split a list fetches with, or nil when it wants every
     /// playlist there is.

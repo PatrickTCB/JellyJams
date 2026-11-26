@@ -13,7 +13,6 @@ struct PlayerView: View {
     @Environment(PlaybackClock.self) private var clock
     @Environment(DownloadStore.self) private var downloads
     @Environment(PreferencesStore.self) private var preferences
-    @Environment(QueueExtender.self) private var queueExtender
     @Environment(\.dismiss) private var dismiss
 
     @State private var isScrubbing = false
@@ -305,11 +304,11 @@ struct PlayerView: View {
             // The same preference in the backend settings sheet's toggle edits —
             // Infinite Queue is one switch with two handles. Lit while on;
             // when the backend cannot be reached it simply does nothing rather
-            // than refusing the tap. With no backend configured to extend
-            // against there is nothing to switch at all, so the button stands
-            // down (``QueueExtender/canExtend``) — the same standing-down the
-            // Ban menu observes.
-            if queueExtender.canExtend {
+            // than refusing the tap. With no backend configured there is
+            // nothing to switch at all, so the button stands down on the one
+            // common state every backend behaviour shares
+            // (``PreferencesStore/isBackendConfigured``).
+            if preferences.isBackendConfigured {
                 Button { preferences.infiniteQueueEnabled.toggle() } label: {
                     Image(systemName: "infinity")
                         .foregroundStyle(preferences.infiniteQueueEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))

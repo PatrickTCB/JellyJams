@@ -276,7 +276,7 @@ struct JellyJamsBackendSettingsView: View {
     /// be there.
     private var canSignOut: Bool {
         let address = typedAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !isBusy && (preferences.isMixtapesActive || !address.isEmpty)
+        return !isBusy && (preferences.isBackendConfigured || !address.isEmpty)
     }
 
     /// A line for where the sign-in, verification or sign-out got to: the
@@ -327,7 +327,7 @@ struct JellyJamsBackendSettingsView: View {
 
     private var currentSaveStatus: SaveStatus? {
         if let saveStatus { return saveStatus }
-        if preferences.isMixtapesActive {
+        if preferences.isBackendConfigured {
             return .registered(suffix: preferences.mixtapeSuffix)
         }
         return nil
@@ -715,7 +715,7 @@ struct JellyJamsBackendSettingsView: View {
             backend: backendClient(),
             addressText: preferences.jellyJamsBackendAddress,
             userID: session.currentUser?.id,
-            registered: preferences.isMixtapesActive,
+            registered: preferences.isBackendConfigured,
             preferences: preferences
         )
     }

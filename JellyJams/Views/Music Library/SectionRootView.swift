@@ -48,7 +48,7 @@ struct LibraryHubView: View {
 
     var body: some View {
         List {
-            ForEach(LibrarySection.libraryGroup(showingMixtapes: preferences.isMixtapesActive)) { section in
+            ForEach(LibrarySection.libraryGroup(showingMixtapes: preferences.isBackendConfigured)) { section in
                 NavigationLink(value: section) {
                     Label(section.title, systemImage: section.systemImage)
                 }

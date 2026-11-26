@@ -123,7 +123,7 @@ struct SettingsView: View {
     /// One glance at how far the backend relationship got: an address alone
     /// is ambition, registration is the fact.
     private var backendSettingsSummary: String {
-        preferences.isMixtapesActive ? "Registered" : "Not registered"
+        preferences.isBackendConfigured ? "Registered" : "Not registered"
     }
 
     private var defaultPlaybackSummary: String {

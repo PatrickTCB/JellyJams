@@ -65,7 +65,7 @@ final class PreferencesStoreTests: XCTestCase {
         let store = PreferencesStore(defaults: defaults)
         XCTAssertEqual(store.jellyJamsBackendAddress, "")
         XCTAssertEqual(store.mixtapeSuffix, "")
-        XCTAssertFalse(store.isMixtapesActive)
+        XCTAssertFalse(store.isBackendConfigured)
     }
 
     /// The settings field edits the address directly, so a half-typed host
@@ -91,7 +91,7 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.jellyJamsBackendAddress, "https://backend.example.net")
         XCTAssertEqual(reloaded.mixtapeSuffix, "_jams")
         XCTAssertEqual(reloaded.serverPlaylist, "Server Mix")
-        XCTAssertTrue(reloaded.isMixtapesActive)
+        XCTAssertTrue(reloaded.isBackendConfigured)
         XCTAssertEqual(reloaded.playlistNameFilter(for: .mixtapePlaylists), .endsWith("_jams"))
         XCTAssertEqual(reloaded.playlistNameFilter(for: .playlists), .notEndsWith("_jams"))
     }
@@ -112,7 +112,7 @@ final class PreferencesStoreTests: XCTestCase {
 
         store.forgetBackend()
 
-        XCTAssertFalse(store.isMixtapesActive)
+        XCTAssertFalse(store.isBackendConfigured)
         XCTAssertNil(store.playlistNameFilter(for: .mixtapePlaylists))
         XCTAssertNil(store.playlistNameFilter(for: .playlists))
 
@@ -121,7 +121,7 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.mixtapeSuffix, "")
         XCTAssertEqual(reloaded.serverPlaylist, "")
         XCTAssertFalse(reloaded.serverPlaylistJoined)
-        XCTAssertFalse(reloaded.isMixtapesActive)
+        XCTAssertFalse(reloaded.isBackendConfigured)
         XCTAssertEqual(reloaded.sameAlbumLimit, 3, "The limits return to the backend's defaults")
         XCTAssertEqual(reloaded.sameArtistLimit, 5)
         XCTAssertFalse(reloaded.infiniteQueueEnabled)
@@ -152,7 +152,7 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.showsCompleteAlbumsOnly)
         XCTAssertNil(reloaded.defaultPlayback)
         XCTAssertEqual(reloaded.jellyJamsBackendAddress, "")
-        XCTAssertFalse(reloaded.isMixtapesActive)
+        XCTAssertFalse(reloaded.isBackendConfigured)
         XCTAssertFalse(reloaded.infiniteQueueEnabled)
     }
 
@@ -164,7 +164,7 @@ final class PreferencesStoreTests: XCTestCase {
             let store = PreferencesStore(defaults: defaults)
             store.recordRegistration(address: "https://backend.example.net", suffix: blank, playlist: "Server Mix")
 
-            XCTAssertFalse(store.isMixtapesActive, "\(blank.debugDescription)")
+            XCTAssertFalse(store.isBackendConfigured, "\(blank.debugDescription)")
             XCTAssertNil(store.playlistNameFilter(for: .mixtapePlaylists))
             XCTAssertNil(store.playlistNameFilter(for: .playlists))
         }

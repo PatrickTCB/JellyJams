@@ -310,27 +310,6 @@ struct BackendDestination: Sendable {
     }
 }
 
-/// The backend account a service may act for — the one rule every
-/// account-keyed feature shares: a signed-in user, a registration that put
-/// the account on the backend's books, and a saved address that parses.
-/// Resolved here once so bans (``BanStore/canBan``), Infinite Queue
-/// (``QueueExtender/canExtend``) and the player's Infinite Queue button all
-/// stand or fall together rather than each re-deciding it. Nil when any of
-/// the three is missing; an address that is merely unreachable still
-/// resolves — reachability is a request's problem, not the account's.
-struct BackendAccount: Sendable {
-    let userID: String
-    let baseURL: URL
-
-    init?(userID: String?, address: String, registered: Bool) {
-        guard let userID, registered,
-              let baseURL = try? JellyJamsBackend.normalizeAddress(address)
-        else { return nil }
-        self.userID = userID
-        self.baseURL = baseURL
-    }
-}
-
 enum BackendError: LocalizedError, Sendable, Equatable {
     case invalidServerURL
     case notSignedIn

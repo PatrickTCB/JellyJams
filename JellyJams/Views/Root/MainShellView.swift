@@ -31,7 +31,7 @@ struct MainShellView: View {
     /// The library sections the sidebar offers, Mixtapes among them only while
     /// the app is registered with a backend.
     private var librarySections: [LibrarySection] {
-        LibrarySection.libraryGroup(showingMixtapes: preferences.isMixtapesActive)
+        LibrarySection.libraryGroup(showingMixtapes: preferences.isBackendConfigured)
     }
 
     var body: some View {
@@ -60,7 +60,7 @@ struct MainShellView: View {
             // Losing the registration removes Mixtapes from under the
             // selection; left alone the shell would be showing a destination
             // that no longer exists.
-            .onChange(of: preferences.isMixtapesActive) { _, active in
+            .onChange(of: preferences.isBackendConfigured) { _, active in
                 if !active, selection == .mixtapes { selection = .albums }
             }
             #if os(tvOS)
@@ -127,7 +127,7 @@ struct MainShellView: View {
                             // it is offered only while one is standing — the same
                             // flag that hides the Mixtapes tab and raises the
                             // sheet.
-                            if preferences.isMixtapesActive {
+                            if preferences.isBackendConfigured {
                                 ToolbarItem(placement: .primaryAction) { textToTunesButton }
                             }
                             ToolbarItem(placement: .primaryAction) { AccountMenu() }
@@ -220,7 +220,7 @@ struct MainShellView: View {
                     // offered there alone — declared first, which is the slot
                     // to the left of the account menu — and only while a
                     // backend is registered to serve it.
-                    if section == .home, preferences.isMixtapesActive {
+                    if section == .home, preferences.isBackendConfigured {
                         ToolbarItem(placement: .primaryAction) { textToTunesButton }
                     }
                     ToolbarItem(placement: .primaryAction) { AccountMenu() }
@@ -238,7 +238,7 @@ struct MainShellView: View {
 
     #if os(tvOS)
     @ViewBuilder private func shellBarActions(for section: LibrarySection) -> some View {
-        if section == .home, preferences.isMixtapesActive {
+        if section == .home, preferences.isBackendConfigured {
             textToTunesButton
         }
         AccountMenu()

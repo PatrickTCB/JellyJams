@@ -78,7 +78,7 @@ final class AppServices {
         // arrive as the one change they are.
         Task { [weak self, session, preferences] in
             let backendSettings = Observations {
-                (session.currentUser?.id, preferences.jellyJamsBackendAddress, preferences.isMixtapesActive)
+                (session.currentUser?.id, preferences.jellyJamsBackendAddress, preferences.isBackendConfigured)
             }
             for await _ in backendSettings {
                 self?.configureBackend()
@@ -97,12 +97,12 @@ final class AppServices {
 
     /// Points the backend clients at the backend as the session and settings
     /// now describe it. `registered` is the rule
-    /// ``PreferencesStore/isMixtapesActive`` reads: a registration recorded a
+    /// ``PreferencesStore/isBackendConfigured`` reads: a registration recorded a
     /// playlist-name ending.
     private func configureBackend() {
         let userID = session.currentUser?.id
         let address = preferences.jellyJamsBackendAddress
-        let registered = preferences.isMixtapesActive
+        let registered = preferences.isBackendConfigured
         bans.configure(
             userID: userID,
             address: address,
