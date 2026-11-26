@@ -63,6 +63,7 @@ struct LyricsView: View {
                         Button("Done") { dismiss() }
                     }
                 }
+                .padding()
                 #endif
         }
         
