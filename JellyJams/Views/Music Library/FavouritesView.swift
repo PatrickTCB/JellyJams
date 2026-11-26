@@ -24,6 +24,17 @@ struct FavouritesView: View {
         TrackEntry.rows(songs.items).filter { songSelection.contains($0.id) }.map(\.item)
     }
 
+    /// On tvOS the single press belongs to playback: there is no selection
+    /// gesture to give it to — no edit mode, no drag, no keyboard — so rows
+    /// play on select, as ``TrackListDetail``'s do.
+    private var rowTapBehavior: TrackRow.TapBehavior {
+        #if os(tvOS)
+        .play
+        #else
+        .select
+        #endif
+    }
+
     /// The model backing the selected tab. Each tab keeps its own sort and
     /// loaded pages, so switching back and forth doesn't refetch.
     private var current: PagedItems {
@@ -92,38 +103,55 @@ struct FavouritesView: View {
 
     @ViewBuilder
     private var songsList: some View {
+        songsContainer
+            .overlay {
+                if let error = songs.errorMessage, songs.isEmpty {
+                    LoadFailureOverlay(title: "Couldn’t Load Favourites", message: error) {
+                        await songs.reload()
+                        return songs.errorMessage == nil
+                    }
+                } else if songs.hasLoadedOnce, songs.isEmpty, !songs.isLoading {
+                    ContentUnavailableView("No favourite songs", systemImage: "heart")
+                }
+            }
+    }
+
+    /// The bar and the song rows in their scroll container.
+    ///
+    /// tvOS scrolls a plain stack, like the grids: a `List` row there is one
+    /// focus target as a whole, which swallows the bar's buttons into a single
+    /// row-sized highlight the remote cannot move inside — and a focus section
+    /// on the row's content does not override the row itself. In a stack each
+    /// bar button and each row is its own focus target. The other platforms
+    /// keep the List and its selection machinery.
+    @ViewBuilder private var songsContainer: some View {
         // Resolved once; naming the computed properties inside the `ForEach`
         // would re-derive them per row.
         let entries = TrackEntry.rows(songs.items)
         let items = songs.items
         let selected = selectedSongs
+        #if os(tvOS)
+        ScrollView {
+            TVScrollingBarSlot()
+            Section {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    songRows(entries: entries, items: items, selected: selected)
+                    songsFooter
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+            } header: {
+                songsCountHeader
+            }
+        }
+        #else
         List(selection: $songSelection) {
             TVScrollingBarSlot()
             Section {
-                ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                    TrackRow(track: entry.item, showArtwork: true, selectedTracks: songSelection.contains(entry.id) ? selected : []) {
-                        player.play(items, startAt: index)
-                    }
-                    .task(id: songs.settledLoads) { await songs.loadMoreIfNeeded(entry.item) }
-                }
-                if songs.isLoading {
-                    HStack { Spacer(); ProgressView(); Spacer() }
-                        #if !os(tvOS)
-                        .listRowSeparator(.hidden)
-                        #endif
-                } else if let error = songs.errorMessage, !songs.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Couldn’t load more favourites", systemImage: "wifi.exclamationmark")
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button("Retry") { Task { await songs.loadNextPage() } }
-                    }
-                }
+                songRows(entries: entries, items: items, selected: selected)
+                songsFooter
             } header: {
-                Text("\(songs.total) songs")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                songsCountHeader
             }
         }
         .listStyle(.plain)
@@ -132,16 +160,45 @@ struct FavouritesView: View {
             songSelection = []
             return .handled
         }
+        // Keyboard platforms need the list itself focusable for the selection
+        // keys.
         .focusable()
-        .overlay {
-            if let error = songs.errorMessage, songs.isEmpty {
-                LoadFailureOverlay(title: "Couldn’t Load Favourites", message: error) {
-                    await songs.reload()
-                    return songs.errorMessage == nil
-                }
-            } else if songs.hasLoadedOnce, songs.isEmpty, !songs.isLoading {
-                ContentUnavailableView("No favourite songs", systemImage: "heart")
+        #endif
+    }
+
+    /// The song rows, shared by both containers.
+    @ViewBuilder
+    private func songRows(entries: [TrackEntry], items: [BaseItemDto], selected: [BaseItemDto]) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            TrackRow(track: entry.item, showArtwork: true, tapBehavior: rowTapBehavior, selectedTracks: songSelection.contains(entry.id) ? selected : []) {
+                player.play(items, startAt: index)
+            }
+            .remotePlayAction { player.play(items, startAt: index) }
+            .task(id: songs.settledLoads) { await songs.loadMoreIfNeeded(entry.item) }
+        }
+    }
+
+    /// The loading spinner / load-more failure shown after the last row.
+    @ViewBuilder private var songsFooter: some View {
+        if songs.isLoading {
+            HStack { Spacer(); ProgressView(); Spacer() }
+                #if !os(tvOS)
+                .listRowSeparator(.hidden)
+                #endif
+        } else if let error = songs.errorMessage, !songs.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Couldn’t load more favourites", systemImage: "wifi.exclamationmark")
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Retry") { Task { await songs.loadNextPage() } }
             }
         }
+    }
+
+    private var songsCountHeader: some View {
+        Text("\(songs.total) songs")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
     }
 }

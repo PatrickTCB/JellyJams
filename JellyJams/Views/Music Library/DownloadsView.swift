@@ -287,7 +287,12 @@ struct DownloadsView: View {
             songSelection = []
             return .handled
         }
+        #if !os(tvOS)
+        // Keyboard platforms need the list itself focusable for the selection
+        // keys; on tvOS it would make the whole list one focus target, and the
+        // remote could reach neither the rows nor the scrolling bar's buttons.
         .focusable()
+        #endif
         .overlay {
             if songs.isEmpty && downloads.batches.isEmpty {
                 ContentUnavailableView("No downloaded songs", systemImage: "music.note")
