@@ -41,10 +41,13 @@ struct MixtapesView: View {
             title: mixtapeName
         )
         .navigationTitle(LibrarySection.mixtapes.title)
-        .tvScrollingBar(title: LibrarySection.mixtapes.title) {
-            configuredTapesButton
-            newMixtapeButton
-        }
+        // Once I get the UI rewrite done for mixtape management, I
+        // need to enable them here. Because of how navigation by tv
+        // remote works, these need their own toolbar
+        //.tvScrollingBar(title: LibrarySection.mixtapes.title) {
+        //    configuredTapesButton
+        //    newMixtapeButton
+        //}
         .refreshToolbarItem { await model.reload() }
         #if !os(tvOS)
         .toolbar {
