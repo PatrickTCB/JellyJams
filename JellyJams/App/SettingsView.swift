@@ -6,7 +6,11 @@ import SwiftUI
 /// On macOS this is the content of the `Settings` scene — the standard
 /// settings window, opened from the app menu with ⌘, or from ``AccountMenu``.
 /// iOS and tvOS have no settings scene, so ``MainShellView`` presents the same
-/// form as a sheet and this view supplies its own navigation chrome.
+/// form as a sheet and this view supplies its own navigation chrome. On tvOS
+/// that chrome scrolls with the content instead of pinning a glass bar over it,
+/// and the sheet is sized to stay within the screen so every row can be scrolled
+/// to. The first and last rows are focusable so the focus-driven scroll can reach
+/// both ends.
 struct SettingsView: View {
     @Environment(SessionStore.self) private var session
     @Environment(PreferencesStore.self) private var preferences
@@ -26,19 +30,41 @@ struct SettingsView: View {
         #if !os(macOS)
         NavigationStack {
             form
+                #if os(tvOS)
+                // tvOS has no scroll-away navigation bar, and a pinned glass bar
+                // lets rows scroll up behind it — the focus-scroll safe-area
+                // feedback the library sections sidestep with ``TVScrollingBar``.
+                // Hide the bar and let the title ride the scrolling content
+                // instead; the remote's Menu button still dismisses.
+                .toolbarVisibility(.hidden, for: .navigationBar)
+                // Inset the form from the sheet's edge so the rows' rounded
+                // leading/trailing corners aren't clipped by the card. Horizontal
+                // only, and inside the stack: padding outside the frame would
+                // resize the sheet, and vertical padding would push the scroll
+                // viewport past the bottom edge again.
+                .padding(.horizontal, 40)
+                // The focus lift draws a highlighted row larger than its frame.
+                // The form clips its content to its own bounds, so that lift was
+                // cut off at the (inset) edge no matter how much padding was added.
+                // Letting the scroll content draw past those bounds gives the lift
+                // room to render fully inside the padding above.
+                .scrollClipDisabled(true)
+                #else
                 .navigationTitle("Settings")
-                #if !os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
-                #endif
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
+                #endif
         }
         #if os(tvOS)
-        .frame(minWidth:1280, idealWidth: 1920, minHeight: 720, idealHeight: 1080)
-        .padding()
+        // Keep the sheet shorter than the 1080pt screen. An ideal height at the
+        // full screen height (the old 1080 plus padding) pushes the form's scroll
+        // viewport past the bottom edge, so the last rows fade out behind it and
+        // can never be scrolled to. 1000 leaves room for the sheet's own margins.
+        .frame(minWidth: 1280, idealWidth: 1920, minHeight: 720, idealHeight: 1000)
         #endif
         .remotePlayPause()
         #else
@@ -60,6 +86,21 @@ struct SettingsView: View {
 
     private var form: some View {
         Form {
+            #if os(tvOS)
+            // The title scrolls with the content (the navigation bar is hidden
+            // on tvOS). It is a section header — never a focus target — while
+            // Done is a real row beneath it: tvOS scrolls by moving focus, so the
+            // top of the form needs a focusable row to scroll back up to, and to
+            // dismiss from. A header alone is unreachable once focus moves down.
+            Section {
+                Button("Done") { dismiss() }
+            } header: {
+                Text("Settings")
+                    .font(.largeTitle.bold())
+                    .textCase(nil)
+            }
+            #endif
+
             Section("Account") {
                 if let user = session.currentUser {
                     LabeledContent("Signed in as", value: user.name)
@@ -109,7 +150,15 @@ struct SettingsView: View {
             }
 
             Section("About") {
+                #if os(tvOS)
+                // A focusable row so the focus-driven scroll can reach the very
+                // bottom of the form; selecting it does nothing.
+                Button {} label: {
+                    LabeledContent("Jelly Jams", value: appVersion)
+                }
+                #else
                 LabeledContent("Jelly Jams", value: appVersion)
+                #endif
             }
         }
         .sheet(isPresented: $isChoosingDefaultPlayback) {
