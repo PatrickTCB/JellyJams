@@ -53,7 +53,11 @@ struct MixtapeComposer: View {
                 }
             }
         }
+        #if os(tvOS)
+        .frame(minWidth:1280, idealWidth: 1920, minHeight: 720, idealHeight: 1080)
+        #else
         .frame(minWidth: 380, minHeight: 480)
+        #endif
         .overlay {
             // One send at a time: the button that started it shows the wait.
             if isCreating {

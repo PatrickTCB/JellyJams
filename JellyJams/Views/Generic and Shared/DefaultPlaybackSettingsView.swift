@@ -48,7 +48,11 @@ struct DefaultPlaybackSettingsView: View {
             .task(id: query) { await runSearch() }
             .overlay { overlay }
         }
+        #if os(tvOS)
+        .frame(minWidth:1280, idealWidth: 1920, minHeight: 720, idealHeight: 1080)
+        #else
         .frame(minWidth: 380, minHeight: 420)
+        #endif
         .remotePlayPause()
     }
 
